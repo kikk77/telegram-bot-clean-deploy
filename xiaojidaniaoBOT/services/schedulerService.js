@@ -60,6 +60,8 @@ async function executeScheduledTask(task) {
             dbOperations.logInteraction(
                 0, // 系统用户
                 'system',
+                'System',
+                'Bot',
                 null,
                 template.id,
                 'scheduled',

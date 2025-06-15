@@ -325,7 +325,7 @@ function processApiRequest(pathname, method, data) {
                             { text: '联系客服', url: 'https://t.me/xiaoji_daniao_bot' }
                         ]]
                     };
-                }
+                    }
                 
                 await bot.sendMessage(data.chatId, message, options);
             } catch (error) {
@@ -354,6 +354,42 @@ function processApiRequest(pathname, method, data) {
                 totalClicks: totalClicks,
                 ...stats
             }
+        };
+    }
+
+    // 商家预约统计API
+    if (pathname === '/api/merchant-bookings' && method === 'GET') {
+        const bookingStats = dbOperations.getMerchantBookingStats();
+        return {
+            success: true,
+            data: bookingStats
+        };
+    }
+
+    // 消息统计API
+    if (pathname === '/api/message-stats' && method === 'GET') {
+        const messageStats = dbOperations.getMessageStats();
+        return {
+            success: true,
+            data: messageStats
+        };
+    }
+
+    // 最近预约记录API
+    if (pathname === '/api/recent-bookings' && method === 'GET') {
+        const recentBookings = dbOperations.getRecentBookings(20);
+        return {
+            success: true,
+            data: recentBookings
+        };
+    }
+
+    // 按钮点击统计API
+    if (pathname === '/api/button-stats' && method === 'GET') {
+        const buttonStats = dbOperations.getButtonClickStats();
+        return {
+            success: true,
+            data: buttonStats
         };
     }
 

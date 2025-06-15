@@ -167,6 +167,8 @@ function initDatabase() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             username TEXT,
+            first_name TEXT,
+            last_name TEXT,
             button_id INTEGER,
             template_id INTEGER,
             action_type TEXT DEFAULT 'click',
@@ -174,6 +176,70 @@ function initDatabase() {
             timestamp INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (button_id) REFERENCES buttons (id),
             FOREIGN KEY (template_id) REFERENCES message_templates (id)
+        )
+    `);
+
+    // 添加新字段到现有的interactions表
+    try {
+        db.exec(`ALTER TABLE interactions ADD COLUMN first_name TEXT`);
+    } catch (e) { /* 列已存在 */ }
+    
+    try {
+        db.exec(`ALTER TABLE interactions ADD COLUMN last_name TEXT`);
+    } catch (e) { /* 列已存在 */ }
+
+    // 预约状态跟踪表
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS booking_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            merchant_id INTEGER NOT NULL,
+            course_type TEXT NOT NULL,
+            status TEXT DEFAULT 'notified',
+            user_course_status TEXT DEFAULT 'pending',
+            merchant_course_status TEXT DEFAULT 'pending',
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+        )
+    `);
+
+    // 添加新字段到现有的booking_sessions表
+    try {
+        db.exec(`ALTER TABLE booking_sessions ADD COLUMN user_course_status TEXT DEFAULT 'pending'`);
+    } catch (e) { /* 列已存在 */ }
+    
+    try {
+        db.exec(`ALTER TABLE booking_sessions ADD COLUMN merchant_course_status TEXT DEFAULT 'pending'`);
+    } catch (e) { /* 列已存在 */ }
+
+    // 评价表
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS evaluations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            booking_session_id INTEGER NOT NULL,
+            evaluator_type TEXT NOT NULL,
+            evaluator_id INTEGER NOT NULL,
+            target_id INTEGER NOT NULL,
+            overall_score INTEGER,
+            detailed_scores TEXT,
+            comments TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY (booking_session_id) REFERENCES booking_sessions (id)
+        )
+    `);
+
+    // 用户评价状态跟踪表
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS evaluation_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            evaluation_id INTEGER NOT NULL,
+            current_step TEXT DEFAULT 'start',
+            temp_data TEXT,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY (evaluation_id) REFERENCES evaluations (id)
         )
     `);
 

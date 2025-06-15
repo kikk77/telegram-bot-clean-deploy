@@ -158,6 +158,10 @@
                     <div>商家数量</div>
                 </div>
                 <div class="stat-card">
+                    <div class="stat-number" id="totalBookings">0</div>
+                    <div>总预约数</div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-number" id="totalTemplates">0</div>
                     <div>消息模板</div>
                 </div>
@@ -182,6 +186,46 @@
                     <p>✅ 数据库连接正常</p>
                     <p>✅ 定时任务调度器运行中</p>
                     <p>✅ 触发词监听已启用</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>👥 商家预约统计</h3>
+                <div id="merchantBookingStats">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>加载中...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>📊 消息互动统计</h3>
+                <div id="messageStats">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>加载中...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>🕒 最近预约记录</h3>
+                <div id="recentBookings">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>加载中...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>🔘 按钮点击统计</h3>
+                <div id="buttonStats">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>加载中...</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -592,7 +636,7 @@
                         <div class="form-group" style="margin-top: 10px;">
                             <label>图片URL（可选）</label>
                             <input type="url" id="testImageUrl" placeholder="https://example.com/image.jpg">
-                        </div>
+                    </div>
                         <div class="form-group">
                             <label>按钮配置（可选）</label>
                             <div id="testButtonRows"></div>
@@ -690,6 +734,10 @@
             // 加载对应数据
             if (tabName === 'dashboard') {
                 loadStats();
+                loadMerchantBookingStats();
+                loadMessageStats();
+                loadRecentBookings();
+                loadButtonStats();
             }
         }
 
@@ -923,6 +971,7 @@
             try {
                 const stats = await apiRequest('/api/stats');
                 document.getElementById('totalMerchants').textContent = stats.totalMerchants || 0;
+                document.getElementById('totalBookings').textContent = stats.totalBookings || 0;
                 document.getElementById('totalTemplates').textContent = stats.totalTemplates || 0;
                 document.getElementById('totalTriggers').textContent = stats.totalTriggers || 0;
                 
@@ -948,6 +997,175 @@
                 document.getElementById('totalClicks').textContent = stats.totalClicks || 0;
             } catch (error) {
                 console.error('加载统计数据失败:', error);
+            }
+        }
+
+        // 加载商家预约统计
+        async function loadMerchantBookingStats() {
+            try {
+                const stats = await apiRequest('/api/merchant-bookings');
+                const container = document.getElementById('merchantBookingStats');
+                
+                if (stats.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #666;">暂无预约记录</p>';
+                    return;
+                }
+
+                // 计算总预约数
+                const totalBookings = stats.reduce((sum, merchant) => sum + merchant.booking_count, 0);
+                document.getElementById('totalBookings').textContent = totalBookings;
+
+                container.innerHTML = stats.map(merchant => {
+                    const bookingDetails = merchant.booking_details ? 
+                        merchant.booking_details.split('; ').filter(detail => detail.trim()).map(detail => {
+                            const [username, courseType, time] = detail.split('|');
+                            return `<div style="font-size: 12px; color: #666; margin: 2px 0;">
+                                ${username} - ${courseType} - ${time}
+                            </div>`;
+                        }).join('') : '';
+
+                    return `
+                        <div class="list-item">
+                            <div class="list-item-content">
+                                <strong>👨‍🏫 ${merchant.teacher_name || '未知老师'}</strong>
+                                <div style="color: #666; font-size: 14px; margin-top: 5px;">
+                                    📍 地区: ${merchant.region_name || '未设置'}
+                                </div>
+                                <div style="margin-top: 8px;">
+                                    <span class="badge success">预约次数: ${merchant.booking_count}</span>
+                                </div>
+                                ${bookingDetails ? `<div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px;">
+                                    <strong style="font-size: 12px;">预约详情:</strong>
+                                    ${bookingDetails}
+                                </div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('加载商家预约统计失败:', error);
+                document.getElementById('merchantBookingStats').innerHTML = '<p style="color: red;">加载失败</p>';
+            }
+        }
+
+        // 加载消息统计
+        async function loadMessageStats() {
+            try {
+                const stats = await apiRequest('/api/message-stats');
+                const container = document.getElementById('messageStats');
+                
+                if (stats.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #666;">暂无消息互动记录</p>';
+                    return;
+                }
+
+                container.innerHTML = stats.map(stat => {
+                    const actionTypeText = {
+                        'click': '按钮点击',
+                        'template_click': '模板点击',
+                        'view': '消息浏览'
+                    }[stat.action_type] || stat.action_type;
+
+                    return `
+                        <div class="list-item">
+                            <div class="list-item-content">
+                                <strong>📊 ${actionTypeText}</strong>
+                                <div style="color: #666; font-size: 14px; margin-top: 5px;">
+                                    💬 群组ID: ${stat.chat_id}
+                                </div>
+                                <div style="color: #666; font-size: 14px;">
+                                    👥 独立用户: ${stat.unique_users} 人
+                                </div>
+                                <div style="color: #666; font-size: 14px;">
+                                    🕒 最后互动: ${stat.last_interaction || '未知'}
+                                </div>
+                                <div style="margin-top: 8px;">
+                                    <span class="badge info">总次数: ${stat.count}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('加载消息统计失败:', error);
+                document.getElementById('messageStats').innerHTML = '<p style="color: red;">加载失败</p>';
+            }
+        }
+
+        // 加载最近预约记录
+        async function loadRecentBookings() {
+            try {
+                const bookings = await apiRequest('/api/recent-bookings');
+                const container = document.getElementById('recentBookings');
+                
+                if (bookings.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #666;">暂无最近预约记录</p>';
+                    return;
+                }
+
+                container.innerHTML = bookings.map(booking => {
+                    // 构建用户显示名称
+                    const fullName = `${booking.first_name || ''} ${booking.last_name || ''}`.trim() || '未设置名称';
+                    const username = booking.username ? `@${booking.username}` : '未设置用户名';
+                    const displayName = `${fullName}（${username}）`;
+                    
+                    return `
+                        <div class="list-item">
+                            <div class="list-item-content">
+                                <strong>👤 ${displayName}</strong>
+                                <div style="color: #666; font-size: 14px; margin-top: 5px;">
+                                    👨‍🏫 预约老师: ${booking.teacher_name || '未知'}
+                                </div>
+                                <div style="color: #666; font-size: 14px;">
+                                    📍 地区: ${booking.region_name || '未设置'}
+                                </div>
+                                <div style="color: #666; font-size: 14px;">
+                                    🕒 预约时间: ${booking.booking_time}
+                                </div>
+                                <div style="margin-top: 8px;">
+                                    <span class="badge info">${booking.course_type}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('加载最近预约记录失败:', error);
+                document.getElementById('recentBookings').innerHTML = '<p style="color: red;">加载失败</p>';
+            }
+        }
+
+        // 加载按钮点击统计
+        async function loadButtonStats() {
+            try {
+                const stats = await apiRequest('/api/button-stats');
+                const container = document.getElementById('buttonStats');
+                
+                if (stats.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #666;">暂无按钮点击记录</p>';
+                    return;
+                }
+
+                container.innerHTML = stats.map(button => `
+                    <div class="list-item">
+                        <div class="list-item-content">
+                            <strong>🔘 ${button.title}</strong>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">
+                                👨‍🏫 关联商家: ${button.merchant_name || '无'}
+                            </div>
+                            <div style="color: #666; font-size: 14px;">
+                                🕒 最后点击: ${button.last_click || '从未点击'}
+                            </div>
+                            <div style="margin-top: 8px;">
+                                <span class="badge success">点击次数: ${button.click_count}</span>
+                                <span class="badge info">互动记录: ${button.interaction_count}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('加载按钮统计失败:', error);
+                document.getElementById('buttonStats').innerHTML = '<p style="color: red;">加载失败</p>';
             }
         }
 
@@ -1749,7 +1967,7 @@
                     
                 } else if (moduleType === 'custom') {
                     // 自定义消息模式
-                    const message = document.getElementById('testMessage').value;
+                const message = document.getElementById('testMessage').value;
                     if (!message.trim()) {
                         showAlert('请输入消息内容', 'error');
                         return;

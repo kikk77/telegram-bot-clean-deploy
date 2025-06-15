@@ -1,3 +1,6 @@
+// 加载环境变量
+require('dotenv').config();
+
 // 环境变量检查
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const PORT = process.env.PORT || 3000;

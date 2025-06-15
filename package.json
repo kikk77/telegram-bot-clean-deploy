@@ -1,0 +1,20 @@
+{
+  "name": "telegram-marketing-bot",
+  "version": "1.0.0",
+  "description": "极简Telegram群组营销机器人 - 群友点击按钮联系商家",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "better-sqlite3": "^9.2.2"
+  },
+  "keywords": ["telegram", "bot", "marketing", "sqlite"],
+  "author": "",
+  "license": "MIT"
+} 

@@ -20,27 +20,172 @@ try {
     };
 }
 
-// 内存缓存
+// 全局变量
 let merchants = [];
 let buttons = [];
 let messageTemplates = [];
 let triggerWords = [];
 let scheduledTasks = [];
-let triggerCooldowns = new Map(); // 防刷屏机制
-let bindCodes = []; // 绑定码缓存
-let regions = []; // 地区缓存
-let userBindStates = new Map(); // 用户绑定状态缓存
-let bookingCooldowns = new Map(); // 预约防重复点击机制 - 格式: "userId_merchantId" -> timestamp
+let bindCodes = [];
+let regions = [];
+let userBindStates = new Map(); // 用户绑定状态
+let bookingCooldowns = new Map(); // 预约冷却时间
+let userMessageHistory = new Map(); // 用户消息历史记录
 
-// 绑定流程状态机
+// 用户状态枚举
 const BindSteps = {
-    NONE: 0,
-    WELCOME: 1,
-    INPUT_NAME: 2,
-    SELECT_REGION: 3,
-    INPUT_CONTACT: 4,
-    COMPLETED: 5
+    NONE: 'none',
+    WELCOME: 'welcome',
+    INPUT_NAME: 'input_name',
+    SELECT_REGION: 'select_region',
+    INPUT_CONTACT: 'input_contact',
+    COMPLETED: 'completed'
 };
+
+// 消息历史管理
+function addMessageToHistory(userId, messageId, messageType, data = {}) {
+    if (!userMessageHistory.has(userId)) {
+        userMessageHistory.set(userId, []);
+    }
+    
+    const history = userMessageHistory.get(userId);
+    history.push({
+        messageId,
+        messageType,
+        data,
+        timestamp: Date.now()
+    });
+    
+    // 保持最近20条消息记录
+    if (history.length > 20) {
+        history.shift();
+    }
+}
+
+function getLastMessage(userId) {
+    const history = userMessageHistory.get(userId);
+    return history && history.length > 0 ? history[history.length - 1] : null;
+}
+
+function getPreviousMessage(userId) {
+    const history = userMessageHistory.get(userId);
+    return history && history.length > 1 ? history[history.length - 2] : null;
+}
+
+// 清空用户对话历史
+async function clearUserConversation(userId) {
+    try {
+        const history = userMessageHistory.get(userId);
+        if (history && history.length > 0) {
+            // 删除所有历史消息
+            for (const message of history) {
+                try {
+                    await bot.deleteMessage(userId, message.messageId);
+                } catch (error) {
+                    console.log(`无法删除消息 ${message.messageId}: ${error.message}`);
+                }
+            }
+            // 清空历史记录
+            userMessageHistory.set(userId, []);
+        }
+    } catch (error) {
+        console.error('清空用户对话历史失败:', error);
+    }
+}
+
+// 删除上一条消息并发送新消息
+async function sendMessageWithDelete(chatId, text, options = {}, messageType = 'general', data = {}) {
+    try {
+        // 获取用户的最后一条消息
+        const lastMessage = getLastMessage(chatId);
+        
+        // 发送新消息
+        const sentMessage = await bot.sendMessage(chatId, text, options);
+        
+        // 记录新消息
+        addMessageToHistory(chatId, sentMessage.message_id, messageType, data);
+        
+        // 删除上一条消息（延迟200ms确保新消息已发送）
+        if (lastMessage && lastMessage.messageId) {
+            setTimeout(() => {
+                bot.deleteMessage(chatId, lastMessage.messageId).catch(error => {
+                    console.log(`无法删除消息 ${lastMessage.messageId}: ${error.message}`);
+                });
+            }, 200);
+        }
+        
+        return sentMessage;
+        
+    } catch (error) {
+        console.error('发送消息失败:', error);
+        throw error;
+    }
+}
+
+// 发送消息但不删除历史（用于需要保留的重要信息）
+async function sendMessageWithoutDelete(chatId, text, options = {}, messageType = 'general', data = {}) {
+    try {
+        // 发送新消息
+        const sentMessage = await bot.sendMessage(chatId, text, options);
+        
+        // 记录新消息
+        addMessageToHistory(chatId, sentMessage.message_id, messageType, data);
+        
+        return sentMessage;
+        
+    } catch (error) {
+        console.error('发送消息失败:', error);
+        throw error;
+    }
+}
+
+// 处理返回按钮
+async function handleBackButton(userId, messageType, data = {}) {
+    try {
+        switch (messageType) {
+            case 'course_completion_check':
+                // 返回到联系老师页面
+                const bookingSession = dbOperations.getBookingSession(data.bookingSessionId);
+                if (bookingSession) {
+                    const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+                    if (merchant) {
+                        let contactLink = merchant.contact;
+                        if (contactLink && contactLink.startsWith('@')) {
+                            contactLink = `[${contactLink}](https://t.me/${contactLink.substring(1)})`;
+                        }
+                        
+                        const message = `🐤小鸡出征！
+已将出击信息发送给${contactLink}老师。请点击联系方式开始私聊老师进行预约。`;
+                        
+                        await sendMessageWithDelete(userId, message, { parse_mode: 'Markdown' }, 'contact_teacher', data);
+                    }
+                }
+                break;
+                
+            case 'user_evaluation':
+                // 返回到课程完成确认
+                await sendCourseCompletionCheck(userId, data.merchantId, data.bookingSessionId, data.userFullName, data.username, data.teacherName);
+                break;
+                
+            case 'merchant_evaluation':
+                // 返回到课程完成确认
+                await sendCourseCompletionCheck(data.merchantId, userId, data.bookingSessionId, data.userFullName, data.username, data.teacherName);
+                break;
+                
+            case 'rebook_question':
+                // 返回到课程未完成消息
+                await sendMessageWithDelete(userId, '课程未完成，是否重新预约？', {}, 'course_incomplete');
+                break;
+                
+            default:
+                await sendMessageWithDelete(userId, '已返回上一步', {}, 'back_result');
+                break;
+        }
+        
+    } catch (error) {
+        console.error('处理返回按钮失败:', error);
+    }
+}
 
 // 加载缓存数据
 function loadCacheData() {
@@ -359,17 +504,15 @@ function initBotHandlers() {
     });
 
     // 处理按钮点击
-    bot.on('callback_query', (query) => {
+    bot.on('callback_query', async (query) => {
         const chatId = query.message.chat.id;
         const userId = query.from.id;
         const data = query.data;
         const queryId = query.id;
 
-        // 立即关闭查询
-        bot.answerCallbackQuery(queryId);
-
         // 处理按钮点击
         if (data.startsWith('attack_')) {
+            bot.answerCallbackQuery(queryId);
             const merchantId = data.replace('attack_', '');
             
             // 发送认证提示信息
@@ -466,11 +609,16 @@ function initBotHandlers() {
                 const finalMessage = `🐤小鸡出征！
          已将出击信息发送给${contactLink}老师。请点击联系方式开始私聊老师进行预约。`;
                 
-                bot.sendMessage(chatId, finalMessage, { parse_mode: 'Markdown' });
+                // 发送联系老师信息（不删除，保留此信息）
+                const contactOptions = {
+                    parse_mode: 'Markdown'
+                };
                 
-                // 延迟发送课程完成确认消息（跳过预约确认步骤）
-                setTimeout(() => {
-                    sendCourseCompletionCheck(userId, merchant.user_id, bookingSessionId, fullName, username, merchant.teacher_name);
+                await bot.sendMessage(chatId, finalMessage, contactOptions);
+                
+                // 延迟2秒发送约课成功确认消息
+                setTimeout(async () => {
+                    await sendBookingSuccessCheck(userId, bookingSessionId, merchant, bookType, fullName, username);
                 }, 2000);
                 
                 // 记录交互
@@ -482,6 +630,7 @@ function initBotHandlers() {
 
         // 处理绑定流程按钮
         if (data === 'start_bind') {
+            bot.answerCallbackQuery(queryId);
             const userState = userBindStates.get(userId);
             if (userState && userState.step === BindSteps.WELCOME) {
                 userState.step = BindSteps.INPUT_NAME;
@@ -501,6 +650,7 @@ function initBotHandlers() {
         }
         
         if (data.startsWith('select_region_')) {
+            bot.answerCallbackQuery(queryId);
             const regionId = parseInt(data.replace('select_region_', ''));
             const userState = userBindStates.get(userId);
             
@@ -524,6 +674,7 @@ function initBotHandlers() {
         }
         
         if (data === 'bind_prev_step') {
+            bot.answerCallbackQuery(queryId);
             const userState = userBindStates.get(userId);
             if (!userState) return;
             
@@ -628,8 +779,6 @@ function initBotHandlers() {
             return;
         }
         
-        // 预约确认流程已移除
-        
         // 处理课程完成流程
         else if (data.startsWith('course_')) {
             handleCourseFlow(userId, data, query);
@@ -639,6 +788,99 @@ function initBotHandlers() {
         // 处理重新预约流程
         else if (data.startsWith('rebook_')) {
             handleRebookFlow(userId, data, query);
+            return;
+        }
+        
+        // 处理返回按钮
+        else if (data.startsWith('back_')) {
+            bot.answerCallbackQuery(queryId);
+            
+            console.log(`处理返回按钮: ${data}`);
+            const backType = data.replace('back_', '');
+            const parts = backType.split('_');
+            const action = parts[0];
+            const sessionId = parts[parts.length - 1];
+            console.log(`返回按钮解析: action=${action}, parts=${JSON.stringify(parts)}, sessionId=${sessionId}`);
+            
+            switch (action) {
+                case 'contact':
+                    // 返回到预约选择页面
+                    await handleBackToBookingOptions(userId, sessionId);
+                    break;
+                    
+                case 'course':
+                    // 返回到联系老师页面
+                    await handleBackToContact(userId, sessionId);
+                    break;
+                    
+                case 'rebook':
+                    // 返回到课程完成确认
+                    await handleBackToCourseCompletion(userId, sessionId);
+                    break;
+                    
+                case 'user':
+                    if (parts[1] === 'evaluation') {
+                        // 返回到课程完成确认
+                        await handleBackToCourseCompletion(userId, sessionId);
+                    } else if (parts[1] === 'eval') {
+                        // 用户评价中的返回 - 返回到上一个评价步骤
+                        await handleUserEvaluationBack(userId, data, query);
+                    }
+                    break;
+                    
+                case 'merchant':
+                    if (parts[1] === 'evaluation') {
+                        if (parts[2] === 'modify') {
+                            // 商家评分修改页面返回到评分确认
+                            await handleBackToMerchantScoreConfirm(userId, sessionId);
+                        } else {
+                            // 返回到课程完成确认
+                            await handleBackToCourseCompletion(userId, sessionId);
+                        }
+                    } else if (parts[1] === 'score' && parts[2] === 'confirm') {
+                        // 商家评分确认页面返回到评分选择
+                        await handleBackToMerchantScoring(userId, sessionId);
+                    } else if (parts[1] === 'detail') {
+                        if (parts[2] === 'confirm') {
+                            // 商家详细评价确认页面返回
+                            await handleMerchantDetailEvaluationBack(userId, data, query);
+                        } else if (parts[2] === 'eval') {
+                            // 商家详细评价中的返回
+                            await handleMerchantDetailEvaluationBack(userId, data, query);
+                        }
+                    }
+                    break;
+                    
+                case 'detail':
+                    if (parts[1] === 'eval') {
+                        if (parts[2] === 'summary') {
+                            // 详细评价总结页面返回到上一步
+                            await handleDetailedEvaluationBack(userId, data, query);
+                        } else {
+                            // 详细评价中的返回
+                            await handleDetailedEvaluationBack(userId, data, query);
+                        }
+                    }
+                    break;
+                    
+                case 'broadcast':
+                    if (parts[1] === 'choice') {
+                        // 播报选择页面返回到评价总结
+                        await handleBackToBroadcastChoice(userId, sessionId);
+                    }
+                    break;
+                    
+                default:
+                    await sendMessageWithDelete(userId, '已返回上一步', {}, 'back_default');
+                    break;
+            }
+            return;
+        }
+        
+        // 处理约课成功确认
+        else if (data.startsWith('booking_success_') || data.startsWith('booking_failed_')) {
+            console.log(`路由到约课成功确认处理: ${data}`);
+            handleBookingSuccessFlow(userId, data, query);
             return;
         }
         
@@ -666,24 +908,46 @@ async function sendCourseCompletionCheck(userId, merchantId, bookingSessionId, u
         // 给用户发送
         const userMessage = `是否完成该老师（${teacherName}）的课程？`;
         const userKeyboard = {
-            inline_keyboard: [[
-                { text: '已完成', callback_data: `course_completed_${bookingSessionId}` },
-                { text: '未完成', callback_data: `course_incomplete_${bookingSessionId}` }
-            ]]
+            inline_keyboard: [
+                [
+                    { text: '已完成', callback_data: `course_completed_${bookingSessionId}` },
+                    { text: '未完成', callback_data: `course_incomplete_${bookingSessionId}` }
+                ]
+            ]
         };
         
-        bot.sendMessage(userId, userMessage, { reply_markup: userKeyboard });
+        // 使用不删除历史的方式发送课程完成确认消息，保留此信息
+        await sendMessageWithoutDelete(userId, userMessage, { 
+            reply_markup: userKeyboard 
+        }, 'course_completion_check', {
+            bookingSessionId,
+            merchantId,
+            userFullName,
+            username,
+            teacherName
+        });
         
         // 给商家发送
         const merchantMessage = `是否完成该用户（${userFullName}）的课程？`;
         const merchantKeyboard = {
-            inline_keyboard: [[
-                { text: '已完成', callback_data: `course_completed_${bookingSessionId}` },
-                { text: '未完成', callback_data: `course_incomplete_${bookingSessionId}` }
-            ]]
+            inline_keyboard: [
+                [
+                    { text: '已完成', callback_data: `course_completed_${bookingSessionId}` },
+                    { text: '未完成', callback_data: `course_incomplete_${bookingSessionId}` }
+                ]
+            ]
         };
         
-        bot.sendMessage(merchantId, merchantMessage, { reply_markup: merchantKeyboard });
+        // 使用不删除历史的方式发送课程完成确认消息，保留此信息
+        await sendMessageWithoutDelete(merchantId, merchantMessage, { 
+            reply_markup: merchantKeyboard 
+        }, 'course_completion_check', {
+            bookingSessionId,
+            userId,
+            userFullName,
+            username,
+            teacherName
+        });
         
     } catch (error) {
         console.error('发送课程完成确认消息失败:', error);
@@ -706,7 +970,8 @@ async function handleCourseFlow(userId, data, query) {
                     // 用户确认课程完成
                     dbOperations.updateUserCourseStatus(bookingSessionId, 'completed');
                     bot.answerCallbackQuery(query.id, { text: '课程完成确认' });
-                    bot.sendMessage(userId, '✅ 您已确认课程完成，即将进入评价环节');
+                    
+                    await sendMessageWithoutDelete(userId, '✅ 您已确认课程完成，即将进入评价环节', {}, 'course_completed');
                     
                     // 用户进入评价流程
                     setTimeout(() => {
@@ -717,7 +982,8 @@ async function handleCourseFlow(userId, data, query) {
                     // 商家确认课程完成
                     dbOperations.updateMerchantCourseStatus(bookingSessionId, 'completed');
                     bot.answerCallbackQuery(query.id, { text: '课程完成确认' });
-                    bot.sendMessage(userId, '✅ 您已确认课程完成，即将进入评价环节');
+                    
+                    await sendMessageWithoutDelete(userId, '✅ 您已确认课程完成，即将进入评价环节', {}, 'course_completed');
                     
                     // 商家进入评价流程
                     setTimeout(() => {
@@ -743,15 +1009,23 @@ async function handleCourseFlow(userId, data, query) {
                 if (isUser) {
                     dbOperations.updateUserCourseStatus(bookingSessionId, 'incomplete');
                     bot.answerCallbackQuery(query.id, { text: '课程未完成' });
-                    bot.sendMessage(userId, '课程未完成，是否重新预约？');
                     
-                    // 发送重新预约选项给用户
-                    sendRebookingQuestionToUser(userId, bookingSessionId);
+                    await sendMessageWithoutDelete(userId, '课程未完成，是否重新预约？', {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '是', callback_data: `rebook_yes_${bookingSessionId}` },
+                                    { text: '否', callback_data: `rebook_no_${bookingSessionId}` }
+                                ]
+                            ]
+                        }
+                    }, 'rebook_question', { bookingSessionId });
                     
                 } else if (isMerchant) {
                     dbOperations.updateMerchantCourseStatus(bookingSessionId, 'incomplete');
                     bot.answerCallbackQuery(query.id, { text: '课程未完成' });
-                    bot.sendMessage(userId, '您已标记课程未完成');
+                    
+                    await sendMessageWithoutDelete(userId, '您已标记课程未完成', {}, 'course_incomplete_merchant');
                 }
                 
                 console.log(`${isUser ? '用户' : '商家'} ${userId} 标记课程未完成，预约会话 ${bookingSessionId}`);
@@ -808,7 +1082,12 @@ async function handleRebookFlow(userId, data, query) {
     try {
         if (data.startsWith('rebook_no_')) {
             bot.answerCallbackQuery(query.id, { text: '已选择不重新预约' });
-            bot.sendMessage(userId, '欢迎下次预约课程📅 🐤小鸡与你同在。');
+            
+            // 清空本轮对话历史
+            await clearUserConversation(userId);
+            
+            // 发送最终消息（不使用消息管理系统，直接发送）
+            await bot.sendMessage(userId, '欢迎下次预约课程📅 🐤小鸡与你同在。');
             
             console.log(`用户 ${userId} 选择不重新预约`);
             
@@ -818,13 +1097,18 @@ async function handleRebookFlow(userId, data, query) {
             
             if (bookingSession) {
                 bot.answerCallbackQuery(query.id, { text: '正在重新预约' });
-                bot.sendMessage(userId, '正在为您重新安排预约...');
+                await sendMessageWithoutDelete(userId, '正在为您重新安排预约...', {}, 'rebook_processing');
                 
                 const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
                 if (!merchant) {
                     console.error(`找不到商家信息，merchant_id: ${bookingSession.merchant_id}`);
                     return;
                 }
+                
+                // 清除该用户对该商家的预约冷却时间，允许重新预约
+                const cooldownKey = `${userId}_${merchant.id}`;
+                bookingCooldowns.delete(cooldownKey);
+                console.log(`重新预约时已清除用户 ${userId} 对商家 ${merchant.id} 的预约冷却时间`);
                 
                 const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
                 const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
@@ -964,11 +1248,20 @@ async function startMerchantEvaluation(userId, bookingSessionId) {
                     { text: '8', callback_data: `eval_score_8_${evaluationId}` },
                     { text: '9', callback_data: `eval_score_9_${evaluationId}` },
                     { text: '10', callback_data: `eval_score_10_${evaluationId}` }
+                ],
+                [
+                    { text: '⬅️ 返回', callback_data: `back_merchant_evaluation_${bookingSessionId}` }
                 ]
             ]
         };
         
-        bot.sendMessage(userId, message, { reply_markup: keyboard });
+        await sendMessageWithDelete(userId, message, { 
+            reply_markup: keyboard 
+        }, 'merchant_evaluation', {
+            evaluationId,
+            bookingSessionId,
+            step: 'overall_score'
+        });
         
         // 更新评价会话状态
         dbOperations.updateEvaluationSession(sessionId, 'overall_score', {});
@@ -988,13 +1281,21 @@ async function handleMerchantScoring(userId, data, query) {
         // 发送确认消息
         const message = `是否确认提交该勇士素质为 ${score} 分？`;
         const keyboard = {
-            inline_keyboard: [[
-                { text: '确认✅', callback_data: `eval_confirm_${score}_${evaluationId}` },
-                { text: '修改✍️', callback_data: `eval_modify_${evaluationId}` }
-            ]]
+            inline_keyboard: [
+                [
+                    { text: '确认✅', callback_data: `eval_confirm_${score}_${evaluationId}` },
+                    { text: '修改✍️', callback_data: `eval_modify_${evaluationId}` }
+                ],
+                [
+                    { text: '⬅️ 返回', callback_data: `back_merchant_score_confirm_${evaluationId}` }
+                ]
+            ]
         };
         
-        bot.sendMessage(userId, message, { reply_markup: keyboard });
+        await sendMessageWithDelete(userId, message, { reply_markup: keyboard }, 'merchant_score_confirm', {
+            evaluationId,
+            score
+        });
         
     } catch (error) {
         console.error('处理商家评分失败:', error);
@@ -1029,11 +1330,20 @@ async function startUserEvaluation(userId, bookingSessionId) {
                     { text: '8', callback_data: `user_eval_appearance_8_${evaluationId}` },
                     { text: '9', callback_data: `user_eval_appearance_9_${evaluationId}` },
                     { text: '10', callback_data: `user_eval_appearance_10_${evaluationId}` }
+                ],
+                [
+                    { text: '⬅️ 返回', callback_data: `back_user_eval_${evaluationId}` }
                 ]
             ]
         };
         
-        bot.sendMessage(userId, message, { reply_markup: keyboard });
+        await sendMessageWithDelete(userId, message, { 
+            reply_markup: keyboard 
+        }, 'user_evaluation', {
+            evaluationId,
+            bookingSessionId,
+            step: 'appearance'
+        });
         
         // 更新评价会话状态
         dbOperations.updateEvaluationSession(sessionId, 'hardware_appearance', {});
@@ -1095,7 +1405,8 @@ async function handleUserScoring(userId, data, query) {
                 nextMessage = getSoftwareMessage(nextStep);
                 nextKeyboard = getScoreKeyboard(nextStep, evaluationId);
             } else {
-                // 所有评价完成，显示确认页面
+                // 所有评价完成，更新会话状态为总结页面，然后显示确认页面
+                dbOperations.updateEvaluationSession(evalSession.id, 'evaluation_summary', tempData);
                 showEvaluationSummary(userId, evaluationId, tempData);
                 return;
             }
@@ -1106,7 +1417,12 @@ async function handleUserScoring(userId, data, query) {
         
         // 发送下一个评价项目
         if (nextMessage && nextKeyboard) {
-            bot.sendMessage(userId, nextMessage, { reply_markup: nextKeyboard });
+            await sendMessageWithDelete(userId, nextMessage, { 
+                reply_markup: nextKeyboard 
+            }, 'user_evaluation', {
+                evaluationId,
+                step: nextStep
+            });
         }
         
     } catch (error) {
@@ -1160,7 +1476,7 @@ function getScoreKeyboard(step, evaluationId) {
                 { text: '10', callback_data: `user_eval_${step}_10_${evaluationId}` }
             ],
             [
-                { text: '⬅️ 返回', callback_data: `user_eval_back_${evaluationId}` }
+                { text: '⬅️ 返回', callback_data: `back_user_eval_${evaluationId}` }
             ]
         ]
     };
@@ -1186,13 +1502,23 @@ async function showEvaluationSummary(userId, evaluationId, scores) {
 主动：${scores.initiative || 0}`;
 
         const keyboard = {
-            inline_keyboard: [[
-                { text: '确认✅', callback_data: `user_eval_confirm_${evaluationId}` },
-                { text: '重评✍️', callback_data: `user_eval_restart_${evaluationId}` }
-            ]]
+            inline_keyboard: [
+                [
+                    { text: '确认✅', callback_data: `user_eval_confirm_${evaluationId}` },
+                    { text: '重评✍️', callback_data: `user_eval_restart_${evaluationId}` }
+                ],
+                [
+                    { text: '⬅️ 返回', callback_data: `back_user_eval_${evaluationId}` }
+                ]
+            ]
         };
         
-        bot.sendMessage(userId, summary, { reply_markup: keyboard });
+        await sendMessageWithDelete(userId, summary, { 
+            reply_markup: keyboard 
+        }, 'user_evaluation_summary', {
+            evaluationId,
+            scores
+        });
         
     } catch (error) {
         console.error('显示评价总结失败:', error);
@@ -1218,14 +1544,23 @@ async function handleUserEvaluationConfirm(userId, data, query) {
 是否在大群播报本次出击记录？`;
             
             const keyboard = {
-                inline_keyboard: [[
-                    { text: '实名播报', callback_data: `broadcast_real_${evaluationId}` },
-                    { text: '匿名播报', callback_data: `broadcast_anon_${evaluationId}` },
-                    { text: '不播报', callback_data: `broadcast_no_${evaluationId}` }
-                ]]
+                inline_keyboard: [
+                    [
+                        { text: '实名播报', callback_data: `broadcast_real_${evaluationId}` },
+                        { text: '匿名播报', callback_data: `broadcast_anon_${evaluationId}` },
+                        { text: '不播报', callback_data: `broadcast_no_${evaluationId}` }
+                    ],
+                    [
+                        { text: '⬅️ 返回', callback_data: `back_broadcast_choice_${evaluationId}` }
+                    ]
+                ]
             };
             
-            bot.sendMessage(userId, message, { reply_markup: keyboard });
+            await sendMessageWithDelete(userId, message, { 
+                reply_markup: keyboard 
+            }, 'user_evaluation_complete', {
+                evaluationId
+            });
         }
         
     } catch (error) {
@@ -1247,7 +1582,12 @@ async function handleUserEvaluationRestart(userId, data, query) {
             const message = `硬件评价\n\n颜值：`;
             const keyboard = getScoreKeyboard('appearance', evaluationId);
             
-            bot.sendMessage(userId, message, { reply_markup: keyboard });
+            await sendMessageWithDelete(userId, message, { 
+                reply_markup: keyboard 
+            }, 'user_evaluation', {
+                evaluationId,
+                step: 'appearance'
+            });
             
             // 更新评价会话状态
             dbOperations.updateEvaluationSession(sessionId, 'hardware_appearance', {});
@@ -1261,12 +1601,88 @@ async function handleUserEvaluationRestart(userId, data, query) {
 // 处理用户评价返回
 async function handleUserEvaluationBack(userId, data, query) {
     try {
-        // 这里可以实现返回上一步的逻辑
-        // 由于逻辑比较复杂，暂时提示用户
-        bot.sendMessage(userId, '返回功能正在完善中，请继续当前评价或重新开始。');
+        console.log(`handleUserEvaluationBack被调用: userId=${userId}, data=${data}`);
+        
+        // 提取evaluationId
+        const evaluationId = data.split('_').pop();
+        console.log(`提取的evaluationId: ${evaluationId}`);
+        
+        // 获取评价会话
+        const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+        if (!evalSession) {
+            console.log(`评价会话不存在: userId=${userId}, evaluationId=${evaluationId}`);
+            await sendMessageWithDelete(userId, '评价会话已失效，请重新开始评价。', {}, 'evaluation_expired');
+            return;
+        }
+        
+        // 根据当前步骤返回到上一步
+        const currentStep = evalSession.current_step;
+        console.log(`当前评价步骤: ${currentStep}`);
+        
+        // 如果当前在评价总结页面，返回到最后一个评价项目
+        if (currentStep === 'evaluation_summary') {
+            const tempData = JSON.parse(evalSession.temp_data || '{}');
+            const lastStep = 'initiative'; // 最后一个评价项目
+            const lastMessage = getSoftwareMessage(lastStep);
+            const lastKeyboard = getScoreKeyboard(lastStep, evaluationId);
+            
+            // 更新评价会话到最后一个评价步骤
+            dbOperations.updateEvaluationSession(evalSession.id, 'software_initiative', evalSession.temp_data);
+            
+            await sendMessageWithDelete(userId, lastMessage, { 
+                reply_markup: lastKeyboard 
+            }, 'user_evaluation', {
+                evaluationId,
+                step: lastStep
+            });
+            return;
+        }
+        
+        // 定义评价流程顺序
+        const hardwareSteps = ['hardware_appearance', 'hardware_tightness', 'hardware_feet', 'hardware_legs', 'hardware_waist', 'hardware_breasts'];
+        const softwareSteps = ['software_temperament', 'software_environment', 'software_sexiness', 'software_attitude', 'software_voice', 'software_initiative'];
+        const allSteps = [...hardwareSteps, ...softwareSteps];
+        
+        const currentIndex = allSteps.indexOf(currentStep);
+        
+        if (currentIndex > 0) {
+            // 返回到上一个评价步骤
+            const prevStep = allSteps[currentIndex - 1];
+            const stepName = prevStep.replace('hardware_', '').replace('software_', '');
+            
+            let prevMessage;
+            if (hardwareSteps.includes(prevStep)) {
+                prevMessage = getHardwareMessage(stepName);
+            } else {
+                prevMessage = getSoftwareMessage(stepName);
+            }
+            
+            const prevKeyboard = getScoreKeyboard(stepName, evaluationId);
+            
+            // 更新评价会话到上一步
+            dbOperations.updateEvaluationSession(evalSession.id, prevStep, evalSession.temp_data);
+            
+            await sendMessageWithDelete(userId, prevMessage, { 
+                reply_markup: prevKeyboard 
+            }, 'user_evaluation', {
+                evaluationId,
+                step: stepName
+            });
+            
+        } else {
+            // 如果是第一步，返回到课程完成确认
+            const evaluation = dbOperations.getEvaluation(evaluationId);
+            if (evaluation) {
+                const bookingSession = dbOperations.getBookingSession(evaluation.booking_session_id);
+                if (bookingSession) {
+                    await handleBackToCourseCompletion(userId, bookingSession.id);
+                }
+            }
+        }
         
     } catch (error) {
         console.error('处理用户评价返回失败:', error);
+        await sendMessageWithDelete(userId, '返回操作失败，请重新开始评价。', {}, 'back_error');
     }
 }
 
@@ -1284,13 +1700,23 @@ async function handleMerchantEvaluationConfirm(userId, data, query) {
             // 询问是否进行详细评价
             const message = `是否进行详细评价？`;
             const keyboard = {
-                inline_keyboard: [[
-                    { text: '确认✅', callback_data: `merchant_detail_eval_start_${evaluationId}` },
-                    { text: '不了👋', callback_data: `merchant_detail_eval_no_${evaluationId}` }
-                ]]
+                inline_keyboard: [
+                    [
+                        { text: '确认✅', callback_data: `merchant_detail_eval_start_${evaluationId}` },
+                        { text: '不了👋', callback_data: `merchant_detail_eval_no_${evaluationId}` }
+                    ],
+                    [
+                        { text: '⬅️ 返回', callback_data: `back_merchant_detail_confirm_${evaluationId}` }
+                    ]
+                ]
             };
             
-            bot.sendMessage(userId, message, { reply_markup: keyboard });
+            await sendMessageWithDelete(userId, message, { 
+                reply_markup: keyboard 
+            }, 'merchant_detail_confirm', {
+                evaluationId,
+                score
+            });
             
         } else if (data.startsWith('eval_modify_')) {
             const evaluationId = data.replace('eval_modify_', '');
@@ -1312,11 +1738,18 @@ async function handleMerchantEvaluationConfirm(userId, data, query) {
                         { text: '8', callback_data: `eval_score_8_${evaluationId}` },
                         { text: '9', callback_data: `eval_score_9_${evaluationId}` },
                         { text: '10', callback_data: `eval_score_10_${evaluationId}` }
+                    ],
+                    [
+                        { text: '⬅️ 返回', callback_data: `back_merchant_evaluation_modify_${evaluationId}` }
                     ]
                 ]
             };
             
-            bot.sendMessage(userId, message, { reply_markup: keyboard });
+            await sendMessageWithDelete(userId, message, { 
+                reply_markup: keyboard 
+            }, 'merchant_evaluation_modify', {
+                evaluationId
+            });
         }
         
     } catch (error) {
@@ -1333,7 +1766,7 @@ async function handleDetailedEvaluation(userId, data, query) {
             // 保存评价状态为完成
             dbOperations.updateEvaluation(evaluationId, null, null, null, 'completed');
             
-            bot.sendMessage(userId, '感谢您的支持。欢迎下次使用。');
+            await sendMessageWithDelete(userId, '感谢您的支持。欢迎下次使用。', {}, 'evaluation_complete');
             
         } else if (data.startsWith('detailed_eval_yes_')) {
             const evaluationId = data.replace('detailed_eval_yes_', '');
@@ -1358,11 +1791,19 @@ async function handleDetailedEvaluation(userId, data, query) {
                         { text: '8', callback_data: `detail_length_8_${evaluationId}` },
                         { text: '9', callback_data: `detail_length_9_${evaluationId}` },
                         { text: '10', callback_data: `detail_length_10_${evaluationId}` }
+                    ],
+                    [
+                        { text: '⬅️ 返回', callback_data: `back_detailed_evaluation_${evaluationId}` }
                     ]
                 ]
             };
             
-            bot.sendMessage(userId, message, { reply_markup: keyboard });
+            await sendMessageWithDelete(userId, message, { 
+                reply_markup: keyboard 
+            }, 'detailed_evaluation', {
+                evaluationId,
+                step: 'length'
+            });
             
             // 更新评价会话状态
             dbOperations.updateEvaluationSession(sessionId, 'detail_length', {});
@@ -1412,7 +1853,12 @@ async function handleDetailedEvaluationScoring(userId, data, query) {
             dbOperations.updateEvaluationSession(evalSession.id, `detail_${nextStep}`, tempData);
             
             // 发送下一个评价项目
-            bot.sendMessage(userId, nextMessage, { reply_markup: nextKeyboard });
+            await sendMessageWithDelete(userId, nextMessage, { 
+                reply_markup: nextKeyboard 
+            }, 'detailed_evaluation', {
+                evaluationId,
+                step: nextStep
+            });
             
         } else {
             // 所有详细评价完成，显示确认页面
@@ -1452,6 +1898,9 @@ function getDetailedEvaluationKeyboard(step, evaluationId) {
                 { text: '8', callback_data: `detail_${step}_8_${evaluationId}` },
                 { text: '9', callback_data: `detail_${step}_9_${evaluationId}` },
                 { text: '10', callback_data: `detail_${step}_10_${evaluationId}` }
+            ],
+            [
+                { text: '⬅️ 返回', callback_data: `back_detail_eval_${evaluationId}` }
             ]
         ]
     };
@@ -1474,11 +1923,19 @@ async function showDetailedEvaluationSummary(userId, evaluationId, scores) {
                 [
                     { text: '确认提交✅', callback_data: `detail_confirm_${evaluationId}` },
                     { text: '重新评价✍️', callback_data: `detail_restart_${evaluationId}` }
+                ],
+                [
+                    { text: '⬅️ 返回', callback_data: `back_detail_eval_summary_${evaluationId}` }
                 ]
             ]
         };
         
-        bot.sendMessage(userId, summary, { reply_markup: keyboard });
+        await sendMessageWithDelete(userId, summary, { 
+            reply_markup: keyboard 
+        }, 'detailed_evaluation_summary', {
+            evaluationId,
+            scores
+        });
         
     } catch (error) {
         console.error('显示详细评价总结失败:', error);
@@ -1499,7 +1956,7 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
                 dbOperations.updateEvaluation(evaluationId, null, detailScores, '详细评价已完成', 'completed');
                 
                 // 发送完成消息
-                bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n感谢您的耐心评价，这将帮助我们提供更好的服务。');
+                await sendMessageWithDelete(userId, '🎉 详细评价提交成功！\n\n感谢您的耐心评价，这将帮助我们提供更好的服务。', {}, 'detailed_evaluation_complete');
             }
             
         } else if (data.startsWith('detail_restart_')) {
@@ -1510,9 +1967,34 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
             
             // 开始详细评价流程 - 第一项：鸡鸡长度
             const message = `详细评价\n\n鸡鸡长度：`;
-            const keyboard = getDetailedEvaluationKeyboard('length', evaluationId);
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '1', callback_data: `detail_length_1_${evaluationId}` },
+                        { text: '2', callback_data: `detail_length_2_${evaluationId}` },
+                        { text: '3', callback_data: `detail_length_3_${evaluationId}` },
+                        { text: '4', callback_data: `detail_length_4_${evaluationId}` },
+                        { text: '5', callback_data: `detail_length_5_${evaluationId}` }
+                    ],
+                    [
+                        { text: '6', callback_data: `detail_length_6_${evaluationId}` },
+                        { text: '7', callback_data: `detail_length_7_${evaluationId}` },
+                        { text: '8', callback_data: `detail_length_8_${evaluationId}` },
+                        { text: '9', callback_data: `detail_length_9_${evaluationId}` },
+                        { text: '10', callback_data: `detail_length_10_${evaluationId}` }
+                    ],
+                    [
+                        { text: '⬅️ 返回', callback_data: `back_detailed_evaluation_${evaluationId}` }
+                    ]
+                ]
+            };
             
-            bot.sendMessage(userId, message, { reply_markup: keyboard });
+            await sendMessageWithDelete(userId, message, { 
+                reply_markup: keyboard 
+            }, 'detailed_evaluation', {
+                evaluationId,
+                step: 'length'
+            });
             
             // 更新评价会话状态
             dbOperations.updateEvaluationSession(sessionId, 'detail_length', {});
@@ -1527,17 +2009,17 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
 async function handleBroadcastChoice(userId, data, query) {
     try {
         if (data.startsWith('broadcast_no_')) {
-            bot.sendMessage(userId, '感谢您的评价！记录已保存。');
+            await sendMessageWithDelete(userId, '感谢您的评价！记录已保存。', {}, 'broadcast_complete');
             
         } else if (data.startsWith('broadcast_real_')) {
             const evaluationId = data.replace('broadcast_real_', '');
             // 这里可以实现实名播报逻辑
-            bot.sendMessage(userId, '实名播报功能正在开发中，感谢您的评价！');
+            await sendMessageWithDelete(userId, '实名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_real');
             
         } else if (data.startsWith('broadcast_anon_')) {
             const evaluationId = data.replace('broadcast_anon_', '');
             // 这里可以实现匿名播报逻辑
-            bot.sendMessage(userId, '匿名播报功能正在开发中，感谢您的评价！');
+            await sendMessageWithDelete(userId, '匿名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_anon');
         }
         
     } catch (error) {
@@ -1620,9 +2102,14 @@ async function handleMerchantDetailEvaluationScoring(userId, data, query) {
 请输入您的额外点评，或直接点击提交按钮完成评价。`;
             
             const keyboard = {
-                inline_keyboard: [[
-                    { text: '确认提交报告🎫', callback_data: `merchant_detail_eval_confirm_${evaluationId}` }
-                ]]
+                inline_keyboard: [
+                    [
+                        { text: '确认提交报告🎫', callback_data: `merchant_detail_eval_confirm_${evaluationId}` }
+                    ],
+                    [
+                        { text: '⬅️ 返回', callback_data: `back_merchant_detail_eval_${evaluationId}` }
+                    ]
+                ]
             };
             
             bot.sendMessage(userId, message, { reply_markup: keyboard });
@@ -1683,7 +2170,7 @@ function getMerchantDetailEvaluationKeyboard(step, evaluationId) {
                     { text: '10', callback_data: `merchant_detail_eval_${step}_10_${evaluationId}` }
                 ],
                 [
-                    { text: '⬅️ 返回', callback_data: `merchant_detail_eval_back_${evaluationId}` }
+                    { text: '⬅️ 返回', callback_data: `back_merchant_detail_eval_${evaluationId}` }
                 ]
             ]
         };
@@ -1705,7 +2192,7 @@ function getMerchantDetailEvaluationKeyboard(step, evaluationId) {
                     { text: '未出水💦', callback_data: `merchant_detail_eval_duration_no_${evaluationId}` }
                 ],
                 [
-                    { text: '⬅️ 返回', callback_data: `merchant_detail_eval_back_${evaluationId}` }
+                    { text: '⬅️ 返回', callback_data: `back_merchant_detail_eval_${evaluationId}` }
                 ]
             ]
         };
@@ -1736,12 +2223,453 @@ async function handleMerchantDetailEvaluationConfirm(userId, data, query) {
 // 处理商家详细评价返回
 async function handleMerchantDetailEvaluationBack(userId, data, query) {
     try {
-        // 这里可以实现返回上一步的逻辑
-        // 由于逻辑比较复杂，暂时提示用户
-        bot.sendMessage(userId, '返回功能正在完善中，请继续当前评价或重新开始。');
+        // 提取evaluationId
+        const evaluationId = data.split('_').pop();
+        
+        // 获取评价会话
+        const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+        if (!evalSession) {
+            await sendMessageWithDelete(userId, '评价会话已失效，请重新开始评价。', {}, 'evaluation_expired');
+            return;
+        }
+        
+        // 根据当前步骤返回到上一步
+        const currentStep = evalSession.current_step;
+        
+        // 如果当前在额外点评页面，返回到最后一个评价项目
+        if (currentStep === 'merchant_detail_comment') {
+            const lastStep = 'duration';
+            const lastMessage = getMerchantDetailEvaluationMessage(lastStep);
+            const lastKeyboard = getMerchantDetailEvaluationKeyboard(lastStep, evaluationId);
+            
+            // 更新评价会话到最后一个评价步骤
+            dbOperations.updateEvaluationSession(evalSession.id, `merchant_detail_${lastStep}`, evalSession.temp_data);
+            
+            await sendMessageWithDelete(userId, lastMessage, { 
+                reply_markup: lastKeyboard 
+            }, 'merchant_detail_evaluation', {
+                evaluationId,
+                step: lastStep
+            });
+            return;
+        }
+        
+        if (currentStep === 'merchant_detail_length') {
+            // 从商家详细评价第一步返回到确认页面
+            const evaluation = dbOperations.getEvaluation(evaluationId);
+            if (evaluation) {
+                const message = `是否进行详细评价？`;
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '确认✅', callback_data: `merchant_detail_eval_start_${evaluationId}` },
+                            { text: '不了👋', callback_data: `merchant_detail_eval_no_${evaluationId}` }
+                        ],
+                        [
+                            { text: '⬅️ 返回', callback_data: `back_merchant_detail_confirm_${evaluationId}` }
+                        ]
+                    ]
+                };
+                
+                await sendMessageWithDelete(userId, message, { 
+                    reply_markup: keyboard 
+                }, 'merchant_detail_confirm', {
+                    evaluationId,
+                    score: evaluation.overall_score
+                });
+            }
+        } else {
+            // 返回到上一个商家详细评价步骤
+            const detailSteps = ['length', 'hardness', 'duration'];
+            const currentStepName = currentStep.replace('merchant_detail_', '');
+            const currentIndex = detailSteps.indexOf(currentStepName);
+            
+            if (currentIndex > 0) {
+                const prevStep = detailSteps[currentIndex - 1];
+                const prevMessage = getMerchantDetailEvaluationMessage(prevStep);
+                const prevKeyboard = getMerchantDetailEvaluationKeyboard(prevStep, evaluationId);
+                
+                // 更新评价会话到上一步
+                dbOperations.updateEvaluationSession(evalSession.id, `merchant_detail_${prevStep}`, evalSession.temp_data);
+                
+                await sendMessageWithDelete(userId, prevMessage, { 
+                    reply_markup: prevKeyboard 
+                }, 'merchant_detail_evaluation', {
+                    evaluationId,
+                    step: prevStep
+                });
+            }
+        }
         
     } catch (error) {
         console.error('处理商家详细评价返回失败:', error);
+        await sendMessageWithDelete(userId, '返回操作失败，请重新开始评价。', {}, 'back_error');
+    }
+}
+
+// 处理返回到预约选择页面
+async function handleBackToBookingOptions(userId, sessionId) {
+    try {
+        const bookingSession = dbOperations.getBookingSession(sessionId);
+        if (bookingSession) {
+            const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+            if (merchant) {
+                // 清除该用户对该商家的预约冷却时间，允许重新预约
+                const cooldownKey = `${userId}_${merchant.id}`;
+                bookingCooldowns.delete(cooldownKey);
+                console.log(`已清除用户 ${userId} 对商家 ${merchant.id} 的预约冷却时间`);
+                
+                const attackMessage = `✅本榜单老师均已通过视频认证，请小鸡们放心预约。
+————————————————————————————
+🔔提示：
+1.定金大多数不会超过100哦～ 
+2.如果老师以前不需要定金，突然需要定金了，请跟管理员核实。`;
+                
+                const options = {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '预约p', callback_data: `book_p_${merchant.id}` }],
+                            [{ text: '预约pp', callback_data: `book_pp_${merchant.id}` }],
+                            [{ text: '其他时长', callback_data: `book_other_${merchant.id}` }]
+                        ]
+                    }
+                };
+                
+                await sendMessageWithDelete(userId, attackMessage, options, 'booking_options', {
+                    merchantId: merchant.id
+                });
+            }
+        }
+    } catch (error) {
+        console.error('返回预约选择页面失败:', error);
+    }
+}
+
+// 处理返回到联系老师页面
+async function handleBackToContact(userId, sessionId) {
+    try {
+        const bookingSession = dbOperations.getBookingSession(sessionId);
+        if (bookingSession) {
+            const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+            if (merchant) {
+                let contactLink = merchant.contact;
+                if (contactLink && contactLink.startsWith('@')) {
+                    contactLink = `[${contactLink}](https://t.me/${contactLink.substring(1)})`;
+                }
+                
+                const message = `🐤小鸡出征！
+         已将出击信息发送给${contactLink}老师。请点击联系方式开始私聊老师进行预约。`;
+                
+                // 使用不删除历史的发送方式，保留联系老师信息
+                await sendMessageWithoutDelete(userId, message, {
+                    parse_mode: 'Markdown'
+                }, 'contact_teacher', {
+                    bookingSessionId: sessionId,
+                    teacherName: merchant.teacher_name
+                });
+            }
+        }
+    } catch (error) {
+        console.error('返回联系老师页面失败:', error);
+    }
+}
+
+// 处理返回到课程完成确认
+async function handleBackToCourseCompletion(userId, sessionId) {
+    try {
+        const bookingSession = dbOperations.getBookingSession(sessionId);
+        if (bookingSession) {
+            const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+            if (merchant) {
+                const userFullName = '用户'; // 简化处理
+                const username = '';
+                const teacherName = merchant.teacher_name;
+                
+                await sendCourseCompletionCheck(userId, merchant.user_id, sessionId, userFullName, username, teacherName);
+            }
+        }
+    } catch (error) {
+        console.error('返回课程完成确认失败:', error);
+    }
+}
+
+// 处理返回到商家评分选择
+async function handleBackToMerchantScoring(userId, evaluationId) {
+    try {
+        const evaluation = dbOperations.getEvaluation(evaluationId);
+        if (evaluation) {
+            const bookingSession = dbOperations.getBookingSession(evaluation.booking_session_id);
+            if (bookingSession) {
+                // 重新显示商家评分页面
+                const message = `出击总体素质：`;
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '1', callback_data: `eval_score_1_${evaluationId}` },
+                            { text: '2', callback_data: `eval_score_2_${evaluationId}` },
+                            { text: '3', callback_data: `eval_score_3_${evaluationId}` },
+                            { text: '4', callback_data: `eval_score_4_${evaluationId}` },
+                            { text: '5', callback_data: `eval_score_5_${evaluationId}` }
+                        ],
+                        [
+                            { text: '6', callback_data: `eval_score_6_${evaluationId}` },
+                            { text: '7', callback_data: `eval_score_7_${evaluationId}` },
+                            { text: '8', callback_data: `eval_score_8_${evaluationId}` },
+                            { text: '9', callback_data: `eval_score_9_${evaluationId}` },
+                            { text: '10', callback_data: `eval_score_10_${evaluationId}` }
+                        ],
+                        [
+                            { text: '⬅️ 返回', callback_data: `back_merchant_evaluation_${bookingSession.id}` }
+                        ]
+                    ]
+                };
+                
+                await sendMessageWithDelete(userId, message, { 
+                    reply_markup: keyboard 
+                }, 'merchant_evaluation', {
+                    evaluationId,
+                    bookingSessionId: bookingSession.id,
+                    step: 'overall_score'
+                });
+            }
+        }
+    } catch (error) {
+        console.error('返回商家评分选择失败:', error);
+    }
+}
+
+// 处理返回到播报选择
+async function handleBackToBroadcastChoice(userId, evaluationId) {
+    try {
+        const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+        if (evalSession) {
+            const scores = JSON.parse(evalSession.temp_data || '{}');
+            
+            // 重新显示评价总结页面
+            await showEvaluationSummary(userId, evaluationId, scores);
+        }
+    } catch (error) {
+        console.error('返回播报选择失败:', error);
+    }
+}
+
+// 处理返回到商家评分确认
+async function handleBackToMerchantScoreConfirm(userId, evaluationId) {
+    try {
+        // 这里需要获取之前的评分，但由于我们没有保存临时评分，
+        // 我们直接返回到评分选择页面
+        await handleBackToMerchantScoring(userId, evaluationId);
+    } catch (error) {
+        console.error('返回商家评分确认失败:', error);
+    }
+}
+
+// 处理详细评价返回
+async function handleDetailedEvaluationBack(userId, data, query) {
+    try {
+        // 提取evaluationId
+        const evaluationId = data.split('_').pop();
+        
+        // 获取评价会话
+        const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+        if (!evalSession) {
+            await sendMessageWithDelete(userId, '评价会话已失效，请重新开始评价。', {}, 'evaluation_expired');
+            return;
+        }
+        
+        // 根据当前步骤返回到上一步
+        const currentStep = evalSession.current_step;
+        
+        if (currentStep === 'detail_length') {
+            // 从详细评价第一步返回到商家评价确认页面
+            const evaluation = dbOperations.getEvaluation(evaluationId);
+            if (evaluation) {
+                const message = `是否进行详细评价？`;
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '确认✅', callback_data: `merchant_detail_eval_start_${evaluationId}` },
+                            { text: '不了👋', callback_data: `merchant_detail_eval_no_${evaluationId}` }
+                        ],
+                        [
+                            { text: '⬅️ 返回', callback_data: `back_merchant_detail_confirm_${evaluationId}` }
+                        ]
+                    ]
+                };
+                
+                await sendMessageWithDelete(userId, message, { 
+                    reply_markup: keyboard 
+                }, 'merchant_detail_confirm', {
+                    evaluationId,
+                    score: evaluation.overall_score
+                });
+            }
+        } else {
+            // 返回到上一个详细评价步骤
+            const detailSteps = ['length', 'thickness', 'durability', 'technique'];
+            const currentStepName = currentStep.replace('detail_', '');
+            const currentIndex = detailSteps.indexOf(currentStepName);
+            
+            if (currentIndex > 0) {
+                const prevStep = detailSteps[currentIndex - 1];
+                const prevMessage = getDetailedEvaluationMessage(prevStep);
+                const prevKeyboard = getDetailedEvaluationKeyboard(prevStep, evaluationId);
+                
+                // 更新评价会话到上一步
+                dbOperations.updateEvaluationSession(evalSession.id, `detail_${prevStep}`, evalSession.temp_data);
+                
+                await sendMessageWithDelete(userId, prevMessage, { 
+                    reply_markup: prevKeyboard 
+                }, 'detailed_evaluation', {
+                    evaluationId,
+                    step: prevStep
+                });
+            }
+        }
+        
+    } catch (error) {
+        console.error('处理详细评价返回失败:', error);
+        await sendMessageWithDelete(userId, '返回操作失败，请重新开始评价。', {}, 'back_error');
+    }
+}
+
+// 发送约课成功确认消息
+async function sendBookingSuccessCheck(userId, bookingSessionId, merchant, bookType, fullName, username) {
+    try {
+        const message = `⚠️本条信息预约后再点击按钮⚠️
+本次是否与老师约课成功？`;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '成功✅', callback_data: `booking_success_${bookingSessionId}` },
+                    { text: '未约成❌', callback_data: `booking_failed_${bookingSessionId}` }
+                ]
+            ]
+        };
+        
+        // 使用不删除历史的方式发送约课成功确认消息
+        await sendMessageWithoutDelete(userId, message, { 
+            reply_markup: keyboard 
+        }, 'booking_success_check', {
+            bookingSessionId,
+            merchantId: merchant.id,
+            bookType,
+            fullName,
+            username,
+            teacherName: merchant.teacher_name
+        });
+        
+    } catch (error) {
+        console.error('发送约课成功确认消息失败:', error);
+    }
+}
+
+// 处理约课成功确认流程
+async function handleBookingSuccessFlow(userId, data, query) {
+    try {
+        if (data.startsWith('booking_success_')) {
+            const bookingSessionId = data.replace('booking_success_', '');
+            const bookingSession = dbOperations.getBookingSession(bookingSessionId);
+            
+            if (bookingSession) {
+                bot.answerCallbackQuery(query.id, { text: '约课成功确认' });
+                
+                // 创建后台订单数据
+                const orderId = await createOrderData(bookingSession, userId, query);
+                
+                await sendMessageWithoutDelete(userId, '✅ 约课成功！订单已创建，请等待课程完成确认。', {}, 'booking_success_confirmed');
+                
+                // 延迟发送课程完成确认消息
+                setTimeout(async () => {
+                    const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+                    const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
+                    const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+                    
+                    await sendCourseCompletionCheck(userId, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
+                }, 2000);
+                
+                console.log(`用户 ${userId} 确认约课成功，预约会话 ${bookingSessionId}，订单ID ${orderId}`);
+                
+            } else {
+                bot.answerCallbackQuery(query.id, { text: '预约信息不存在' });
+            }
+            
+        } else if (data.startsWith('booking_failed_')) {
+            const bookingSessionId = data.replace('booking_failed_', '');
+            
+            bot.answerCallbackQuery(query.id, { text: '约课未成功' });
+            
+            // 清空本轮对话历史
+            await clearUserConversation(userId);
+            
+            // 发送最终消息
+            await bot.sendMessage(userId, '欢迎下次预约课程📅 🐤小鸡与你同在。');
+            
+            console.log(`用户 ${userId} 确认约课未成功，预约会话 ${bookingSessionId}`);
+        }
+    } catch (error) {
+        console.error('处理约课成功确认流程失败:', error);
+        bot.answerCallbackQuery(query.id, { text: '处理失败，请重试' });
+    }
+}
+
+// 创建后台订单数据
+async function createOrderData(bookingSession, userId, query) {
+    try {
+        const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+        const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
+        const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+        
+        // 确定课程内容和价格
+        let courseContent = '';
+        let price = '';
+        
+        switch (bookingSession.course_type) {
+            case 'p':
+                courseContent = 'p';
+                price = merchant.p_price || '未设置';
+                break;
+            case 'pp':
+                courseContent = 'pp';
+                price = merchant.pp_price || '未设置';
+                break;
+            case 'other':
+                courseContent = '其他时长';
+                price = '其他';
+                break;
+        }
+        
+        // 创建订单数据
+        const orderData = {
+            booking_session_id: bookingSession.id,
+            user_id: userId,
+            user_name: userFullName,
+            user_username: username,
+            merchant_id: merchant.id,
+            teacher_name: merchant.teacher_name,
+            teacher_contact: merchant.contact,
+            course_content: courseContent,
+            price: price,
+            booking_time: new Date().toISOString(),
+            status: 'confirmed', // 约课成功
+            user_evaluation: null, // 将来填入用户评价
+            merchant_evaluation: null, // 将来填入商家评价
+            report_content: null, // 将来填入报告内容
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+        
+        // 保存到数据库
+        const orderId = dbOperations.createOrder(orderData);
+        
+        console.log(`创建订单成功: 订单ID ${orderId}, 用户 ${userFullName} (${username}), 老师 ${merchant.teacher_name}, 课程 ${courseContent}`);
+        
+        return orderId;
+        
+    } catch (error) {
+        console.error('创建订单数据失败:', error);
+        throw error;
     }
 }
 
@@ -1756,6 +2684,9 @@ module.exports = {
     sendRebookingQuestionToUser,
     startMerchantEvaluation,
     startUserEvaluation,
+    sendMessageWithDelete,
+    sendMessageWithoutDelete,
+    handleBackButton,
     // 导出缓存数据的getter
     getCacheData: () => ({
         merchants,

@@ -15,6 +15,9 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
+# 进入项目根目录
+cd "$(dirname "$0")/.."
+
 # 检查依赖
 if [ ! -d "node_modules" ]; then
     echo "📦 安装依赖..."

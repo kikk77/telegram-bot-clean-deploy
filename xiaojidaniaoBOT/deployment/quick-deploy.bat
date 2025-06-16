@@ -5,6 +5,9 @@ cls
 echo 🤖 Telegram营销机器人 - 一键部署脚本
 echo ==================================
 
+REM 进入项目根目录
+cd /d "%~dp0\.."
+
 REM 检查Node.js
 where node >nul 2>nul
 if %errorlevel% neq 0 (

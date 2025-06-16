@@ -26,13 +26,39 @@ function createHttpServer() {
 
         // 静态文件服务
         if (pathname === '/' || pathname === '/admin') {
-            fs.readFile('admin.html', 'utf8', (err, data) => {
+            const path = require('path');
+            const adminPath = path.join(__dirname, '..', 'admin', 'admin-legacy.html');
+            fs.readFile(adminPath, 'utf8', (err, data) => {
+                if (err) {
+                    console.error('读取管理后台文件失败:', err);
+                    res.writeHead(404);
+                    res.end('Admin file not found');
+                    return;
+                }
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end(data);
+            });
+            return;
+        }
+
+        // 静态资源服务（CSS, JS文件）
+        if (pathname.startsWith('/admin/')) {
+            const path = require('path');
+            const filePath = path.join(__dirname, '..', pathname);
+            const ext = path.extname(filePath);
+            
+            let contentType = 'text/plain';
+            if (ext === '.css') contentType = 'text/css';
+            else if (ext === '.js') contentType = 'application/javascript';
+            else if (ext === '.html') contentType = 'text/html';
+            
+            fs.readFile(filePath, 'utf8', (err, data) => {
                 if (err) {
                     res.writeHead(404);
                     res.end('File not found');
                     return;
                 }
-                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.writeHead(200, { 'Content-Type': contentType + '; charset=utf-8' });
                 res.end(data);
             });
             return;

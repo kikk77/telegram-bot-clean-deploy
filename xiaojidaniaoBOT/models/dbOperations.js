@@ -502,6 +502,67 @@ const dbOperations = {
     getActiveEvaluationSession(userId) {
         const stmt = db.prepare('SELECT * FROM evaluation_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1');
         return stmt.get(userId);
+    },
+
+    // 订单管理
+    createOrder(orderData) {
+        const stmt = db.prepare(`
+            INSERT INTO orders (
+                booking_session_id, user_id, user_name, user_username, 
+                merchant_id, teacher_name, teacher_contact, course_content, 
+                price, booking_time, status, user_evaluation, merchant_evaluation, 
+                report_content, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+            orderData.booking_session_id,
+            orderData.user_id,
+            orderData.user_name,
+            orderData.user_username,
+            orderData.merchant_id,
+            orderData.teacher_name,
+            orderData.teacher_contact,
+            orderData.course_content,
+            orderData.price,
+            orderData.booking_time,
+            orderData.status,
+            orderData.user_evaluation,
+            orderData.merchant_evaluation,
+            orderData.report_content,
+            orderData.created_at,
+            orderData.updated_at
+        );
+        return result.lastInsertRowid;
+    },
+
+    getOrder(id) {
+        const stmt = db.prepare('SELECT * FROM orders WHERE id = ?');
+        return stmt.get(id);
+    },
+
+    getOrderByBookingSession(bookingSessionId) {
+        const stmt = db.prepare('SELECT * FROM orders WHERE booking_session_id = ?');
+        return stmt.get(bookingSessionId);
+    },
+
+    getAllOrders() {
+        const stmt = db.prepare('SELECT * FROM orders ORDER BY created_at DESC');
+        return stmt.all();
+    },
+
+    updateOrderEvaluation(id, userEvaluation, merchantEvaluation) {
+        const stmt = db.prepare('UPDATE orders SET user_evaluation = ?, merchant_evaluation = ?, updated_at = ? WHERE id = ?');
+        return stmt.run(userEvaluation, merchantEvaluation, new Date().toISOString(), id);
+    },
+
+    updateOrderReport(id, reportContent) {
+        const stmt = db.prepare('UPDATE orders SET report_content = ?, updated_at = ? WHERE id = ?');
+        return stmt.run(reportContent, new Date().toISOString(), id);
+    },
+
+    updateOrderStatus(id, status) {
+        const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?');
+        return stmt.run(status, new Date().toISOString(), id);
     }
 };
 

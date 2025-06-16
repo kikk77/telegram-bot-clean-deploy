@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'telegram-marketing-bot',
-    script: 'app.js',
+    script: '../app.js',
     instances: 1,
     autorestart: true,
     watch: false,
@@ -14,9 +14,9 @@ module.exports = {
       NODE_ENV: 'production',
       PORT: 3000
     },
-    error_file: './logs/err.log',
-    out_file: './logs/out.log',
-    log_file: './logs/combined.log',
+    error_file: '../logs/err.log',
+    out_file: '../logs/out.log',
+    log_file: '../logs/combined.log',
     time: true
   }]
 }; 

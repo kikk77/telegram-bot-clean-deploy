@@ -1,7 +1,9 @@
 const Database = require('better-sqlite3');
+const path = require('path');
 
 // 初始化数据库
-const db = new Database('marketing_bot.db');
+const dbPath = path.join(__dirname, '..', 'data', 'marketing_bot.db');
+const db = new Database(dbPath);
 
 // 创建数据库表
 function initDatabase() {
@@ -240,6 +242,32 @@ function initDatabase() {
             created_at INTEGER DEFAULT (strftime('%s', 'now')),
             updated_at INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (evaluation_id) REFERENCES evaluations (id)
+        )
+    `);
+
+    // 订单管理表
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            booking_session_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            user_name TEXT NOT NULL,
+            user_username TEXT,
+            merchant_id INTEGER NOT NULL,
+            teacher_name TEXT NOT NULL,
+            teacher_contact TEXT,
+            course_content TEXT NOT NULL,
+            price TEXT,
+            booking_time TEXT NOT NULL,
+            status TEXT DEFAULT 'confirmed',
+            user_evaluation TEXT,
+            merchant_evaluation TEXT,
+            report_content TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (booking_session_id) REFERENCES booking_sessions (id),
+            FOREIGN KEY (user_id) REFERENCES merchants (user_id),
+            FOREIGN KEY (merchant_id) REFERENCES merchants (id)
         )
     `);
 

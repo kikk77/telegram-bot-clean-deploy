@@ -139,154 +139,163 @@ function initTestData() {
             userNames.push(`${prefix}${suffix}${number}`);
         }
         
-        // 生成订单数据（过去1个月）
+        // 生成真实的用户预约流程数据（过去1个月）
         const now = new Date();
         const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         
-        let orderId = 1;
+        let bookingSessionId = 1;
         let totalOrdersGenerated = 0;
         
-        // 每个用户平均2-4个订单
+        // 每个用户平均2-4个预约流程
         for (let userId = 2000000; userId < 2000220; userId++) {
             const userName = userNames[userId - 2000000];
             const username = `user${(userId - 2000000).toString().padStart(3, '0')}`;
-            const orderCount = getRandomInt(2, 5); // 2-4个订单
+            const bookingCount = getRandomInt(2, 5); // 2-4个预约
             
-            for (let j = 0; j < orderCount; j++) {
+            for (let j = 0; j < bookingCount; j++) {
                 const merchant = getRandomElement(merchants);
                 const courseType = getRandomElement(courseTypes);
-                const courseContent = getRandomElement(courseContents);
-                const orderDate = getRandomDate(oneMonthAgo, now);
                 
-                // 85%的订单被确认，70%的确认订单被完成
-                const isConfirmed = Math.random() > 0.15;
-                const isCompleted = isConfirmed && Math.random() > 0.3;
+                // 根据课程类型确定价格和内容（按照真实逻辑）
+                let courseContent = '';
+                let price = '';
                 
-                let status = 'pending';
-                let confirmedTime = null;
-                let completedTime = null;
-                
-                if (isConfirmed) {
-                    status = 'confirmed';
-                    confirmedTime = Math.floor(orderDate.getTime() / 1000) + getRandomInt(3600, 86400);
-                    
-                    if (isCompleted) {
-                        status = 'completed';
-                        completedTime = confirmedTime + getRandomInt(3600, 172800);
-                    }
+                switch (courseType) {
+                    case 'p':
+                        courseContent = 'p';
+                        price = merchant.price1 || getRandomInt(400, 600);
+                        break;
+                    case 'pp':
+                        courseContent = 'pp';
+                        price = merchant.price2 || getRandomInt(600, 900);
+                        break;
+                    case 'other':
+                        courseContent = '其他时长';
+                        price = getRandomInt(500, 800);
+                        break;
                 }
                 
-                const actualPrice = getRandomInt(merchant.price1, merchant.price2);
-                const bookingSessionId = orderId;
+                const initialDate = getRandomDate(oneMonthAgo, now);
                 
-                // 先创建booking_session
+                // 1. 首先创建预约会话（模拟用户点击预约按钮）
                 const bookingStmt = db.prepare(`
                     INSERT INTO booking_sessions (
                         id, user_id, merchant_id, course_type, status, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 `);
                 
-                const bookingCreatedAt = Math.floor(orderDate.getTime() / 1000);
+                const bookingCreatedAt = Math.floor(initialDate.getTime() / 1000);
+                
+                // 85%的预约会约课成功，70%的成功约课会完成课程
+                const bookingSuccess = Math.random() > 0.15;
+                const courseCompleted = bookingSuccess && Math.random() > 0.3;
+                
+                let sessionStatus = 'pending';
+                let confirmedTime = bookingCreatedAt;
+                let completedTime = bookingCreatedAt;
+                
+                if (bookingSuccess) {
+                    sessionStatus = 'confirmed';
+                    confirmedTime = bookingCreatedAt + getRandomInt(1800, 7200); // 0.5-2小时后确认约课成功
+                    
+                    if (courseCompleted) {
+                        sessionStatus = 'completed';
+                        completedTime = confirmedTime + getRandomInt(3600, 172800); // 1小时-2天后完成课程
+                    }
+                }
                 
                 bookingStmt.run(
                     bookingSessionId, userId, merchant.id, courseType, 
-                    isCompleted ? 'completed' : (isConfirmed ? 'confirmed' : 'pending'),
-                    bookingCreatedAt, completedTime || confirmedTime || bookingCreatedAt
+                    sessionStatus, bookingCreatedAt, 
+                    courseCompleted ? completedTime : (bookingSuccess ? confirmedTime : bookingCreatedAt)
                 );
                 
-                // 插入订单 - 使用简化的结构
-                const orderStmt = db.prepare(`
-                    INSERT INTO orders (
-                        id, booking_session_id, user_id, user_name, user_username,
-                        merchant_id, teacher_name, teacher_contact,
-                        course_content, price, booking_time, status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `);
-                
-                const bookingTimeStr = orderDate.toISOString();
-                const createdAtStr = orderDate.toISOString();
-                const updatedAtStr = (completedTime ? new Date(completedTime * 1000) : orderDate).toISOString();
-                
-                orderStmt.run(
-                    orderId, bookingSessionId, userId, userName, username,
-                    merchant.id, merchant.teacher_name, merchant.contact,
-                    courseContent, actualPrice.toString(), bookingTimeStr, status, createdAtStr, updatedAtStr
-                );
-                
-                // 如果订单完成，生成双方评价
-                if (isCompleted) {
-                    // 生成用户评价
-                    const userScore = getRandomInt(7, 10);
-                    const userEvaluationStmt = db.prepare(`
-                        INSERT INTO evaluations (
-                            booking_session_id, evaluator_type, evaluator_id, target_id,
-                            overall_score, detailed_scores, comments, status, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                // 2. 如果约课成功，创建订单（模拟createOrderData函数）
+                if (bookingSuccess) {
+                    const orderStmt = db.prepare(`
+                        INSERT INTO orders (
+                            booking_session_id, user_id, user_name, user_username,
+                            merchant_id, teacher_name, teacher_contact,
+                            course_content, price, booking_time, status, 
+                            user_evaluation, merchant_evaluation, report_content,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     `);
                     
-                    const userDetailScores = {
-                        service: getRandomInt(7, 10),
-                        skill: getRandomInt(7, 10),
-                        environment: getRandomInt(7, 10),
-                        value: getRandomInt(6, 9),
-                        punctuality: getRandomInt(7, 10)
-                    };
+                    const bookingTimeStr = new Date(confirmedTime * 1000).toISOString();
+                    const createdAtStr = new Date(confirmedTime * 1000).toISOString();
+                    let updatedAtStr = createdAtStr;
+                    let orderStatus = 'confirmed';
+                    let userEvaluation = null;
+                    let merchantEvaluation = null;
                     
-                    const userComments = [
-                        '服务很好，很满意',
-                        '老师很专业，态度也很好',
-                        '整体体验不错，下次还会来',
-                        '性价比很高，推荐',
-                        '服务到位，环境也很干净',
-                        '老师技术很好，很用心',
-                        '预约很方便，服务很棒',
-                        '非常满意，会推荐给朋友',
-                        '专业水准很高',
-                        '服务态度非常好'
-                    ];
+                    // 3. 如果课程完成，更新订单状态并生成评价
+                    if (courseCompleted) {
+                        orderStatus = 'completed';
+                        updatedAtStr = new Date(completedTime * 1000).toISOString();
+                        
+                        // 生成用户评价（按照真实评价结构）
+                        const userScore = getRandomInt(7, 10);
+                        const userScores = {
+                            hardware1: getRandomInt(7, 10), // 长度
+                            hardware2: getRandomInt(7, 10), // 粗细  
+                            hardware3: getRandomInt(7, 10), // 持久力
+                            software1: getRandomInt(7, 10), // 技巧
+                        };
+                        
+                        const userComments = [
+                            '服务很好，很满意',
+                            '老师很专业，态度也很好',
+                            '整体体验不错，下次还会来',
+                            '性价比很高，推荐',
+                            '服务到位，环境也很干净',
+                            '老师技术很好，很用心'
+                        ];
+                        
+                        userEvaluation = JSON.stringify({
+                            overall_score: userScore,
+                            scores: userScores,
+                            comments: getRandomElement(userComments),
+                            created_at: new Date(completedTime * 1000 + 3600000).toISOString()
+                        });
+                        
+                        // 生成商家评价
+                        const merchantScore = getRandomInt(8, 10);
+                        const merchantScores = {
+                            length: getRandomInt(8, 10),
+                            thickness: getRandomInt(8, 10),
+                            durability: getRandomInt(8, 10),
+                            technique: getRandomInt(8, 10)
+                        };
+                        
+                        const merchantComments = [
+                            '客户很配合，沟通顺畅',
+                            '准时到达，很守时',
+                            '很好的客户，推荐',
+                            '付款及时，合作愉快',
+                            '客户很友善，体验很好'
+                        ];
+                        
+                        merchantEvaluation = JSON.stringify({
+                            overall_score: merchantScore,
+                            scores: merchantScores,
+                            comments: getRandomElement(merchantComments),
+                            created_at: new Date(completedTime * 1000 + 7200000).toISOString()
+                        });
+                    }
                     
-                    userEvaluationStmt.run(
-                        bookingSessionId, 'user', userId, merchant.user_id,
-                        userScore, JSON.stringify(userDetailScores), 
-                        getRandomElement(userComments), 'completed', completedTime
+                    orderStmt.run(
+                        bookingSessionId, userId, userName, username,
+                        merchant.id, merchant.teacher_name, merchant.contact,
+                        courseContent, price.toString(), bookingTimeStr, orderStatus,
+                        userEvaluation, merchantEvaluation, null,
+                        createdAtStr, updatedAtStr
                     );
                     
-                    // 生成商家评价
-                    const merchantScore = getRandomInt(8, 10);
-                    const merchantEvaluationStmt = db.prepare(`
-                        INSERT INTO evaluations (
-                            booking_session_id, evaluator_type, evaluator_id, target_id,
-                            overall_score, detailed_scores, comments, status, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    `);
-                    
-                    const merchantDetailScores = {
-                        communication: getRandomInt(8, 10),
-                        punctuality: getRandomInt(8, 10),
-                        cooperation: getRandomInt(8, 10),
-                        payment: getRandomInt(9, 10)
-                    };
-                    
-                    const merchantComments = [
-                        '客户很配合，沟通顺畅',
-                        '准时到达，很守时',
-                        '很好的客户，推荐',
-                        '付款及时，合作愉快',
-                        '客户很友善，体验很好',
-                        '沟通很好，没有问题',
-                        '非常配合的客户',
-                        '准时守约，很好合作'
-                    ];
-                    
-                    merchantEvaluationStmt.run(
-                        bookingSessionId, 'merchant', merchant.user_id, userId,
-                        merchantScore, JSON.stringify(merchantDetailScores),
-                        getRandomElement(merchantComments), 'completed', completedTime + 3600
-                    );
+                    totalOrdersGenerated++;
                 }
                 
-                orderId++;
-                totalOrdersGenerated++;
+                bookingSessionId++;
             }
         }
         

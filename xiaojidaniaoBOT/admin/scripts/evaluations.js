@@ -35,7 +35,7 @@ class EvaluationManager {
 
     async loadStats() {
         try {
-            const stats = await api.get('/evaluation-stats');
+            const stats = await api.get('/api/evaluation-stats');
             this.data.stats = stats;
             this.renderStats();
         } catch (error) {
@@ -47,7 +47,7 @@ class EvaluationManager {
     async loadEvaluations() {
         try {
             this.showLoading('evaluationsList');
-            const evaluations = await api.get('/evaluations');
+            const evaluations = await api.get('/api/evaluations');
             this.data.evaluations = evaluations;
             this.data.filteredEvaluations = evaluations;
             this.renderEvaluations();
@@ -126,7 +126,7 @@ class EvaluationManager {
 
     async showEvaluationDetails(evaluationId) {
         try {
-            const details = await api.get(`/evaluations/${evaluationId}`);
+            const details = await api.get(`/api/evaluations/${evaluationId}`);
             this.renderEvaluationModal(details);
             document.getElementById('evaluationModal').style.display = 'block';
         } catch (error) {
@@ -148,7 +148,7 @@ class EvaluationManager {
                 <div class="eval-section">
                     <h4>👤 用户评价</h4>
                     ${this.renderEvaluationScores(userEval.scores)}
-                    ${userEval.comment ? `<div class="eval-comment"><strong>评论：</strong>${userEval.comment}</div>` : ''}
+                    ${userEval.comments ? `<div class="eval-comment"><strong>评论：</strong>${userEval.comments}</div>` : ''}
                 </div>
             `;
         }
@@ -160,7 +160,7 @@ class EvaluationManager {
                 <div class="eval-section">
                     <h4>👩‍🏫 老师评价</h4>
                     ${this.renderEvaluationScores(merchantEval.scores)}
-                    ${merchantEval.comment ? `<div class="eval-comment"><strong>评论：</strong>${merchantEval.comment}</div>` : ''}
+                    ${merchantEval.comments ? `<div class="eval-comment"><strong>评论：</strong>${merchantEval.comments}</div>` : ''}
                 </div>
             `;
         }
@@ -203,6 +203,7 @@ class EvaluationManager {
         if (!scores) return '';
         
         const scoreLabels = {
+            // 你原有的评价标签
             appearance: '👀 外观',
             tightness: '🤏 紧度',
             feet: '🦶 脚部',
@@ -214,7 +215,24 @@ class EvaluationManager {
             sexiness: '💋 性感度',
             attitude: '😊 态度',
             voice: '🎵 声音',
-            initiative: '🔥 主动性'
+            initiative: '🔥 主动性',
+            
+            // 添加模拟数据中使用的字段映射
+            hardware1: '硬件1',
+            hardware2: '硬件2', 
+            hardware3: '硬件3',
+            software1: '软件1',
+            length: '长度',
+            thickness: '粗细',
+            durability: '持久力',
+            technique: '技巧',
+            service: '服务',
+            skill: '技能',
+            value: '性价比',
+            punctuality: '准时性',
+            communication: '沟通',
+            cooperation: '配合度',
+            payment: '付款'
         };
 
         const html = Object.entries(scores)

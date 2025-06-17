@@ -107,19 +107,157 @@ class DatabaseSchema {
                 merchant_id INTEGER NOT NULL,
                 course_type TEXT NOT NULL,
                 status TEXT DEFAULT 'pending',
+                user_course_status TEXT DEFAULT 'pending',
+                merchant_course_status TEXT DEFAULT 'pending',
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 completed_at INTEGER,
                 FOREIGN KEY (merchant_id) REFERENCES merchants (id)
             )
         `);
 
-        // 创建索引
+        // 订单表 - 完整业务数据
+        this.coreDb.exec(`
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_number TEXT UNIQUE NOT NULL,
+                booking_session_id TEXT,
+                user_id INTEGER NOT NULL,
+                user_name TEXT,
+                user_username TEXT,
+                merchant_id INTEGER NOT NULL,
+                merchant_user_id INTEGER NOT NULL,
+                teacher_name TEXT,
+                teacher_contact TEXT,
+                region_id INTEGER,
+                course_type TEXT CHECK(course_type IN ('p', 'pp', 'other')),
+                course_content TEXT,
+                price_range TEXT,
+                actual_price INTEGER,
+                status TEXT CHECK(status IN ('pending', 'confirmed', 'completed', 'cancelled')) DEFAULT 'pending',
+                booking_time INTEGER,
+                confirmed_time INTEGER,
+                completed_time INTEGER,
+                user_evaluation_id INTEGER,
+                merchant_evaluation_id INTEGER,
+                report_content TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id),
+                FOREIGN KEY (region_id) REFERENCES regions(id),
+                FOREIGN KEY (booking_session_id) REFERENCES booking_sessions(id)
+            )
+        `);
+
+        // 评价表 - 统一评价系统
+        this.coreDb.exec(`
+            CREATE TABLE IF NOT EXISTS evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER,
+                booking_session_id TEXT,
+                evaluator_type TEXT CHECK(evaluator_type IN ('user', 'merchant')) NOT NULL,
+                evaluator_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                overall_score INTEGER CHECK(overall_score >= 1 AND overall_score <= 10),
+                detail_scores TEXT,
+                text_comment TEXT,
+                status TEXT CHECK(status IN ('pending', 'overall_completed', 'completed')) DEFAULT 'pending',
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (order_id) REFERENCES orders(id),
+                FOREIGN KEY (booking_session_id) REFERENCES booking_sessions(id)
+            )
+        `);
+
+        // 评价会话表 - 支持分步评价流程
+        this.coreDb.exec(`
+            CREATE TABLE IF NOT EXISTS evaluation_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                evaluation_id INTEGER NOT NULL,
+                current_step TEXT,
+                temp_data TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (evaluation_id) REFERENCES evaluations(id)
+            )
+        `);
+
+        // 数据统计缓存表
+        this.coreDb.exec(`
+            CREATE TABLE IF NOT EXISTS order_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stat_date TEXT NOT NULL,
+                stat_type TEXT NOT NULL,
+                region_id INTEGER,
+                price_range TEXT,
+                merchant_id INTEGER,
+                total_orders INTEGER DEFAULT 0,
+                confirmed_orders INTEGER DEFAULT 0,
+                completed_orders INTEGER DEFAULT 0,
+                cancelled_orders INTEGER DEFAULT 0,
+                avg_user_score REAL DEFAULT 0,
+                avg_merchant_score REAL DEFAULT 0,
+                total_evaluations INTEGER DEFAULT 0,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(stat_date, stat_type, region_id, price_range, merchant_id)
+            )
+        `);
+
+        // 商家评分汇总表
+        this.coreDb.exec(`
+            CREATE TABLE IF NOT EXISTS merchant_ratings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                merchant_id INTEGER NOT NULL,
+                total_evaluations INTEGER DEFAULT 0,
+                avg_overall_score REAL DEFAULT 0,
+                avg_length_score REAL DEFAULT 0,
+                avg_hardness_score REAL DEFAULT 0,
+                avg_duration_score REAL DEFAULT 0,
+                avg_technique_score REAL DEFAULT 0,
+                overall_rank INTEGER,
+                region_rank INTEGER,
+                price_range_rank INTEGER,
+                last_updated INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id),
+                UNIQUE(merchant_id)
+            )
+        `);
+
+        // 用户评分汇总表
+        this.coreDb.exec(`
+            CREATE TABLE IF NOT EXISTS user_ratings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                total_evaluations INTEGER DEFAULT 0,
+                avg_overall_score REAL DEFAULT 0,
+                avg_attitude_score REAL DEFAULT 0,
+                avg_punctuality_score REAL DEFAULT 0,
+                avg_cooperation_score REAL DEFAULT 0,
+                last_updated INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(user_id)
+            )
+        `);
+
+        // 创建索引 - 优化查询性能
         this.coreDb.exec(`
             CREATE INDEX IF NOT EXISTS idx_merchants_user_id ON merchants (user_id);
             CREATE INDEX IF NOT EXISTS idx_merchants_region_id ON merchants (region_id);
             CREATE INDEX IF NOT EXISTS idx_merchants_status ON merchants (status);
             CREATE INDEX IF NOT EXISTS idx_booking_sessions_user_id ON booking_sessions (user_id);
             CREATE INDEX IF NOT EXISTS idx_booking_sessions_merchant_id ON booking_sessions (merchant_id);
+            CREATE INDEX IF NOT EXISTS idx_orders_date ON orders (date(created_at, 'unixepoch'));
+            CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status);
+            CREATE INDEX IF NOT EXISTS idx_orders_merchant ON orders (merchant_id);
+            CREATE INDEX IF NOT EXISTS idx_orders_region ON orders (region_id);
+            CREATE INDEX IF NOT EXISTS idx_orders_price_range ON orders (price_range);
+            CREATE INDEX IF NOT EXISTS idx_orders_number ON orders (order_number);
+            CREATE INDEX IF NOT EXISTS idx_evaluations_order ON evaluations (order_id);
+            CREATE INDEX IF NOT EXISTS idx_evaluations_type ON evaluations (evaluator_type);
+            CREATE INDEX IF NOT EXISTS idx_evaluations_booking ON evaluations (booking_session_id);
+            CREATE INDEX IF NOT EXISTS idx_stats_date_type ON order_stats (stat_date, stat_type);
+            CREATE INDEX IF NOT EXISTS idx_merchant_ratings_score ON merchant_ratings (avg_overall_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_ratings_score ON user_ratings (avg_overall_score DESC);
         `);
 
         console.log('核心数据库初始化完成');

@@ -266,7 +266,6 @@ function initDatabase() {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (booking_session_id) REFERENCES booking_sessions (id),
-            FOREIGN KEY (user_id) REFERENCES merchants (user_id),
             FOREIGN KEY (merchant_id) REFERENCES merchants (id)
         )
     `);

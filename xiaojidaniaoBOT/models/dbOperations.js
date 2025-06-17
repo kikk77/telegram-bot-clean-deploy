@@ -724,4 +724,5 @@ const dbOperations = {
     }
 };
 
-module.exports = dbOperations; 
+module.exports = dbOperations;
+module.exports.db = db; 

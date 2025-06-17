@@ -269,9 +269,8 @@ class EfficientBotService {
     // 启动HTTP服务器
     async startHttpServer() {
         try {
-            const { createHttpServer } = require('./httpService');
-            createHttpServer();
-            console.log('✅ HTTP服务器启动成功');
+            // 注意：HTTP服务器将在主应用中启动，这里不需要启动
+            console.log('✅ HTTP服务器将在主应用中启动');
         } catch (error) {
             console.error('❌ HTTP服务器启动失败:', error);
             throw error;

@@ -489,6 +489,58 @@ function processApiRequest(pathname, method, data) {
         };
     }
 
+    // 订单管理API - 为orders页面提供支持
+    if (pathname === '/api/orders' && method === 'GET') {
+        const orders = dbOperations.getAllOrders();
+        // 转换数据格式以匹配orders页面的期望
+        const formattedOrders = orders.map(order => ({
+            id: order.id,
+            order_number: order.id,
+            user_name: order.user_name,
+            user_username: order.user_username,
+            merchant_name: order.teacher_name,
+            course_content: order.course_content,
+            actual_price: order.price || '未设置',
+            status: order.status,
+            created_at: order.created_at,
+            booking_time: order.booking_time,
+            completed_time: order.updated_at,
+            region_name: '',
+            user_evaluation_status: order.user_evaluation ? 'completed' : 'pending',
+            merchant_evaluation_status: order.merchant_evaluation ? 'completed' : 'pending'
+        }));
+        
+        return {
+            success: true,
+            data: {
+                orders: formattedOrders,
+                total: formattedOrders.length,
+                page: 1,
+                pageSize: 50,
+                totalPages: 1
+            }
+        };
+    }
+
+    // 订单统计API
+    if (pathname === '/api/stats/optimized' && method === 'GET') {
+        const orders = dbOperations.getAllOrders();
+        const stats = {
+            totalOrders: orders.length,
+            confirmedOrders: orders.filter(o => o.status === 'confirmed').length,
+            completedOrders: orders.filter(o => o.status === 'completed').length,
+            avgPrice: 0,
+            avgRating: 0,
+            completionRate: orders.length > 0 ? orders.filter(o => o.status === 'completed').length / orders.length : 0
+        };
+        
+        return {
+            success: true,
+            data: stats,
+            fromCache: false
+        };
+    }
+
     return { success: false, error: 'API路径不存在' };
 }
 

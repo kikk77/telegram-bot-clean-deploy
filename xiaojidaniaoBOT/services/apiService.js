@@ -14,6 +14,14 @@ class ApiService {
         this.routes.set('GET /api/stats/optimized', this.getOptimizedStats.bind(this));
         this.routes.set('GET /api/stats/dashboard', this.getDashboardStats.bind(this));
         this.routes.set('GET /api/stats/cache-info', this.getCacheInfo.bind(this));
+        this.routes.set('GET /api/stats', this.getBasicStats.bind(this));
+        this.routes.set('GET /api/merchant-bookings', this.getMerchantBookings.bind(this));
+        this.routes.set('GET /api/recent-bookings', this.getRecentBookings.bind(this));
+        this.routes.set('GET /api/message-stats', this.getMessageStats.bind(this));
+        this.routes.set('GET /api/button-stats', this.getButtonStats.bind(this));
+        this.routes.set('GET /api/evaluation-stats', this.getEvaluationStats.bind(this));
+        this.routes.set('GET /api/evaluations', this.getEvaluations.bind(this));
+        this.routes.set('GET /api/evaluations/:id', this.getEvaluationDetails.bind(this));
 
         // 图表数据接口
         this.routes.set('GET /api/charts/orders-trend', this.getOrdersTrendChart.bind(this));
@@ -689,6 +697,83 @@ class ApiService {
         }
 
         return { conditions, params };
+    }
+
+    // Dashboard需要的基础API方法
+    async getBasicStats() {
+        try {
+            const stats = dbOperations.getInteractionStats();
+            return { data: stats };
+        } catch (error) {
+            throw new Error('获取基础统计失败: ' + error.message);
+        }
+    }
+
+    async getMerchantBookings() {
+        try {
+            const bookings = dbOperations.getMerchantBookingStats();
+            return { data: bookings };
+        } catch (error) {
+            throw new Error('获取商家预约统计失败: ' + error.message);
+        }
+    }
+
+    async getRecentBookings() {
+        try {
+            const bookings = dbOperations.getRecentBookings(20);
+            return { data: bookings };
+        } catch (error) {
+            throw new Error('获取最近预约失败: ' + error.message);
+        }
+    }
+
+    async getMessageStats() {
+        try {
+            const stats = dbOperations.getMessageStats();
+            return { data: stats };
+        } catch (error) {
+            throw new Error('获取消息统计失败: ' + error.message);
+        }
+    }
+
+    async getButtonStats() {
+        try {
+            const stats = dbOperations.getButtonClickStats();
+            return { data: stats };
+        } catch (error) {
+            throw new Error('获取按钮统计失败: ' + error.message);
+        }
+    }
+
+    async getEvaluationStats() {
+        try {
+            const stats = dbOperations.getEvaluationStats();
+            return { data: stats };
+        } catch (error) {
+            throw new Error('获取评价统计失败: ' + error.message);
+        }
+    }
+
+    async getEvaluations() {
+        try {
+            const evaluations = dbOperations.getAllEvaluations();
+            return { data: evaluations };
+        } catch (error) {
+            throw new Error('获取评价列表失败: ' + error.message);
+        }
+    }
+
+    async getEvaluationDetails({ params }) {
+        try {
+            const evaluationId = params.id;
+            const details = dbOperations.getEvaluationDetails(evaluationId);
+            if (!details) {
+                throw new Error('评价不存在');
+            }
+            return { data: details };
+        } catch (error) {
+            throw new Error('获取评价详情失败: ' + error.message);
+        }
     }
 }
 

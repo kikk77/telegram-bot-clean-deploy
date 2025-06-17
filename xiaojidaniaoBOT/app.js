@@ -15,7 +15,7 @@ const { initDatabase } = require('./config/database');
 const { initTestData } = require('./utils/initData');
 const { loadCacheData, initBotHandlers } = require('./services/botService');
 const { initScheduler } = require('./services/schedulerService');
-const HttpService = require('./services/httpService');
+const { createHttpServer } = require('./services/httpService');
 
 // 启动函数
 function start() {
@@ -37,8 +37,7 @@ function start() {
     initScheduler();
     
     // 启动HTTP服务器
-    const httpService = new HttpService(PORT);
-    httpService.start();
+    createHttpServer();
     
     console.log('✅ 所有服务启动完成！');
     console.log('🎯 功能列表:');

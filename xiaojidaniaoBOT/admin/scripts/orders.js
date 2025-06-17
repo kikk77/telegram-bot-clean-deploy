@@ -569,10 +569,15 @@ class OptimizedOrdersManager {
     async updateDashboard() {
         try {
             const filters = this.getCurrentFilters();
-            const stats = await this.fetchWithCache('/api/stats/optimized', filters);
+            const response = await this.fetchWithCache('/api/stats/optimized', filters);
             
-            if (stats.success) {
-                this.updateMetricCards(stats.data);
+            // 处理不同的API返回格式
+            const stats = response.data || response;
+            
+            console.log('Orders页面获取到的统计数据:', stats);
+            
+            if (stats) {
+                this.updateMetricCards(stats);
                 
                 // 标记需要重新加载的图表
                 this.chartsLoaded.clear();
@@ -583,11 +588,14 @@ class OptimizedOrdersManager {
                         this.lazyObserver.observe(canvas);
                     }
                 });
+            } else {
+                console.error('未获取到有效的统计数据');
+                this.showError('未获取到有效的统计数据');
             }
             
         } catch (error) {
             console.error('更新仪表板失败:', error);
-            this.showError('更新仪表板失败');
+            this.showError('更新仪表板失败: ' + error.message);
         }
     }
 

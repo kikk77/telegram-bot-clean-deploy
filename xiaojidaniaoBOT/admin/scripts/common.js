@@ -22,11 +22,17 @@ class ApiClient {
             const response = await fetch(`${this.baseUrl}${url}`, options);
             const result = await response.json();
             
-            if (!result.success) {
-                throw new Error(result.error || '请求失败');
+            console.log(`API请求 ${method} ${url}:`, result);
+            
+            // 处理不同的API返回格式
+            // 有些API返回 { success: true, data: {...} }
+            // 有些API直接返回 { data: {...} }
+            if (result.success === false) {
+                throw new Error(result.error || result.message || '请求失败');
             }
             
-            return result.data;
+            // 如果有data字段，返回data；否则返回整个结果
+            return result.data !== undefined ? result.data : result;
         } catch (error) {
             console.error('API请求失败:', error);
             throw error;

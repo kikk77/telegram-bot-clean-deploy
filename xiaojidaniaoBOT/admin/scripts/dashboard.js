@@ -42,32 +42,40 @@ class Dashboard {
     async loadStats() {
         try {
             // 使用优化的统计API获取真实订单数据
-            const orderStats = await api.get('/stats/optimized');
-            const basicStats = await api.get('/stats');
+            const orderStatsResponse = await api.get('/stats/optimized');
+            const basicStatsResponse = await api.get('/stats');
+            
+            // 处理不同的API返回格式
+            const orderStats = orderStatsResponse.data || orderStatsResponse;
+            const basicStats = basicStatsResponse.data || basicStatsResponse;
+            
+            console.log('订单统计数据:', orderStats);
+            console.log('基础统计数据:', basicStats);
             
             // 合并数据
             this.data.stats = {
                 // 订单相关数据（来自优化API）
-                totalOrders: orderStats.data.totalOrders,
-                confirmedOrders: orderStats.data.confirmedOrders, 
-                completedOrders: orderStats.data.completedOrders,
-                avgPrice: orderStats.data.avgPrice,
-                avgRating: orderStats.data.avgRating,
-                completionRate: orderStats.data.completionRate,
+                totalOrders: orderStats.totalOrders || 0,
+                confirmedOrders: orderStats.confirmedOrders || 0, 
+                completedOrders: orderStats.completedOrders || 0,
+                avgPrice: orderStats.avgPrice || 0,
+                avgRating: orderStats.avgRating || 0,
+                completionRate: orderStats.completionRate || 0,
                 
                 // 基础数据（来自基础API）
-                totalMerchants: basicStats.data.totalMerchants,
-                totalTemplates: basicStats.data.totalTemplates || 0,
+                totalMerchants: basicStats.totalMerchants || 0,
+                totalTemplates: basicStats.totalTemplates || 0,
                 totalBindCodes: 35, // 固定值，已知有35个绑定码
                 totalRegions: 10, // 固定值，已知有10个地区
-                totalClicks: basicStats.data.totalClicks || 0,
+                totalClicks: basicStats.totalClicks || 0,
                 
                 // 用户交互数据
-                total_interactions: basicStats.data.total_interactions || 0,
-                unique_users: basicStats.data.unique_users || 0,
-                active_chats: basicStats.data.active_chats || 0
+                total_interactions: basicStats.total_interactions || 0,
+                unique_users: basicStats.unique_users || 0,
+                active_chats: basicStats.active_chats || 0
             };
             
+            console.log('合并后的统计数据:', this.data.stats);
             this.renderStats();
         } catch (error) {
             console.error('加载统计数据失败:', error);
@@ -78,8 +86,8 @@ class Dashboard {
     async loadMerchantBookingStats() {
         try {
             this.showLoading('merchantBookingStats');
-            const stats = await api.get('/merchant-bookings');
-            this.data.merchantBookings = stats;
+            const response = await api.get('/merchant-bookings');
+            this.data.merchantBookings = response.data || response;
             this.renderMerchantBookingStats();
         } catch (error) {
             console.error('加载商家预约统计失败:', error);
@@ -90,8 +98,8 @@ class Dashboard {
     async loadRecentBookings() {
         try {
             this.showLoading('recentBookings');
-            const bookings = await api.get('/recent-bookings');
-            this.data.recentBookings = bookings;
+            const response = await api.get('/recent-bookings');
+            this.data.recentBookings = response.data || response;
             this.renderRecentBookings();
         } catch (error) {
             console.error('加载最近预约记录失败:', error);
@@ -102,8 +110,8 @@ class Dashboard {
     async loadMessageStats() {
         try {
             this.showLoading('messageStats');
-            const stats = await api.get('/message-stats');
-            this.data.messageStats = stats;
+            const response = await api.get('/message-stats');
+            this.data.messageStats = response.data || response;
             this.renderMessageStats();
         } catch (error) {
             console.error('加载消息统计失败:', error);
@@ -114,8 +122,8 @@ class Dashboard {
     async loadButtonStats() {
         try {
             this.showLoading('buttonStats');
-            const stats = await api.get('/button-stats');
-            this.data.buttonStats = stats;
+            const response = await api.get('/button-stats');
+            this.data.buttonStats = response.data || response;
             this.renderButtonStats();
         } catch (error) {
             console.error('加载按钮统计失败:', error);

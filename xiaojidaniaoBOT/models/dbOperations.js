@@ -52,6 +52,11 @@ const dbOperations = {
         return stmt.all();
     },
 
+    getRegionById(id) {
+        const stmt = db.prepare('SELECT * FROM regions WHERE id = ? AND active = 1');
+        return stmt.get(id);
+    },
+
     updateRegion(id, name, sortOrder) {
         const stmt = db.prepare('UPDATE regions SET name = ?, sort_order = ? WHERE id = ?');
         return stmt.run(name, sortOrder, id);
@@ -100,6 +105,16 @@ const dbOperations = {
             WHERE m.id = ?
         `);
         return stmt.get(id);
+    },
+
+    getMerchantsByRegion(regionId) {
+        const stmt = db.prepare(`
+            SELECT m.*, r.name as region_name 
+            FROM merchants m 
+            LEFT JOIN regions r ON m.region_id = r.id 
+            WHERE m.region_id = ?
+        `);
+        return stmt.all(regionId);
     },
 
     updateMerchantBindStep(userId, step, bindData = null) {
@@ -563,6 +578,149 @@ const dbOperations = {
     updateOrderStatus(id, status) {
         const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?');
         return stmt.run(status, new Date().toISOString(), id);
+    },
+
+    // ===== 评价系统 - 简单高效的数据返回 =====
+    
+    // 获取所有评价数据（简化版本，只返回基础信息）
+    getAllEvaluations() {
+        const stmt = db.prepare(`
+            SELECT 
+                o.id,
+                o.user_name as user_name,
+                o.user_username,
+                o.teacher_name,
+                o.course_content,
+                o.price,
+                datetime(o.created_at, 'unixepoch', 'localtime') as order_time,
+                CASE 
+                    WHEN o.user_evaluation IS NOT NULL AND o.merchant_evaluation IS NOT NULL 
+                    THEN '✅ 双向完成' 
+                    WHEN o.user_evaluation IS NOT NULL 
+                    THEN '👤 用户已评' 
+                    WHEN o.merchant_evaluation IS NOT NULL 
+                    THEN '👩‍🏫 老师已评'
+                    ELSE '⏳ 待评价'
+                END as eval_status,
+                o.status as order_status
+            FROM orders o
+            ORDER BY o.created_at DESC
+            LIMIT 50
+        `);
+        return stmt.all();
+    },
+
+    // 获取评价详情（包含完整评价内容）
+    getEvaluationDetails(orderId) {
+        const stmt = db.prepare(`
+            SELECT 
+                o.*,
+                r.name as region_name,
+                datetime(o.created_at, 'unixepoch', 'localtime') as formatted_time
+            FROM orders o
+            LEFT JOIN merchants m ON o.merchant_id = m.id
+            LEFT JOIN regions r ON m.region_id = r.id
+            WHERE o.id = ?
+        `);
+        const order = stmt.get(orderId);
+        
+        if (order) {
+            // 解析评价数据
+            try {
+                order.user_eval_parsed = order.user_evaluation ? JSON.parse(order.user_evaluation) : null;
+                order.merchant_eval_parsed = order.merchant_evaluation ? JSON.parse(order.merchant_evaluation) : null;
+            } catch (e) {
+                order.user_eval_parsed = null;
+                order.merchant_eval_parsed = null;
+            }
+        }
+        
+        return order;
+    },
+
+    // 获取评价统计数据
+    getEvaluationStats() {
+        const totalOrders = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
+        const userEvaluated = db.prepare('SELECT COUNT(*) as count FROM orders WHERE user_evaluation IS NOT NULL').get().count;
+        const merchantEvaluated = db.prepare('SELECT COUNT(*) as count FROM orders WHERE merchant_evaluation IS NOT NULL').get().count;
+        const bothEvaluated = db.prepare('SELECT COUNT(*) as count FROM orders WHERE user_evaluation IS NOT NULL AND merchant_evaluation IS NOT NULL').get().count;
+        
+        return {
+            total_orders: totalOrders,
+            user_evaluated: userEvaluated,
+            merchant_evaluated: merchantEvaluated,
+            both_evaluated: bothEvaluated,
+            user_eval_rate: totalOrders > 0 ? Math.round((userEvaluated / totalOrders) * 100) : 0,
+            merchant_eval_rate: totalOrders > 0 ? Math.round((merchantEvaluated / totalOrders) * 100) : 0,
+            completion_rate: totalOrders > 0 ? Math.round((bothEvaluated / totalOrders) * 100) : 0
+        };
+    },
+
+    // 获取订单评价数据（用于管理后台展示）
+    getOrderEvaluations() {
+        const stmt = db.prepare(`
+            SELECT 
+                o.id,
+                o.user_name,
+                o.user_username,
+                o.teacher_name,
+                o.course_content,
+                o.price,
+                o.user_evaluation,
+                o.merchant_evaluation,
+                datetime(o.created_at, 'unixepoch', 'localtime') as order_time,
+                CASE 
+                    WHEN o.user_evaluation IS NOT NULL AND o.merchant_evaluation IS NOT NULL 
+                    THEN 'completed' 
+                    WHEN o.user_evaluation IS NOT NULL 
+                    THEN 'user_only' 
+                    WHEN o.merchant_evaluation IS NOT NULL 
+                    THEN 'merchant_only'
+                    ELSE 'pending'
+                END as eval_status
+            FROM orders o
+            WHERE o.user_evaluation IS NOT NULL OR o.merchant_evaluation IS NOT NULL
+            ORDER BY o.created_at DESC
+        `);
+        
+        const evaluations = stmt.all();
+        
+        // 简化评价数据，只提取关键信息用于展示
+        return evaluations.map(eval => {
+            const result = { ...eval };
+            
+            // 解析用户评价，提取平均分和关键信息
+            if (eval.user_evaluation) {
+                try {
+                    const userEval = JSON.parse(eval.user_evaluation);
+                    if (userEval.scores) {
+                        const scores = Object.values(userEval.scores).filter(s => typeof s === 'number');
+                        result.user_avg_score = scores.length > 0 ? 
+                            (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 'N/A';
+                    }
+                    result.user_eval_summary = `👤 ${result.user_avg_score || 'N/A'}分`;
+                } catch (e) {
+                    result.user_eval_summary = '👤 数据异常';
+                }
+            }
+            
+            // 解析商家评价
+            if (eval.merchant_evaluation) {
+                try {
+                    const merchantEval = JSON.parse(eval.merchant_evaluation);
+                    if (merchantEval.scores) {
+                        const scores = Object.values(merchantEval.scores).filter(s => typeof s === 'number');
+                        result.merchant_avg_score = scores.length > 0 ? 
+                            (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 'N/A';
+                    }
+                    result.merchant_eval_summary = `👩‍🏫 ${result.merchant_avg_score || 'N/A'}分`;
+                } catch (e) {
+                    result.merchant_eval_summary = '👩‍🏫 数据异常';
+                }
+            }
+            
+            return result;
+        });
     }
 };
 

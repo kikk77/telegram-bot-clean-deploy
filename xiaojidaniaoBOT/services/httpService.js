@@ -452,6 +452,43 @@ function processApiRequest(pathname, method, data) {
         };
     }
 
+    // 评价管理API
+    if (pathname === '/api/evaluations' && method === 'GET') {
+        const evaluations = dbOperations.getAllEvaluations();
+        return {
+            success: true,
+            data: evaluations
+        };
+    }
+
+    // 评价详情API
+    if (pathname.match(/^\/api\/evaluations\/\d+$/) && method === 'GET') {
+        const evaluationId = pathname.split('/')[3];
+        const evaluation = dbOperations.getEvaluationDetails(evaluationId);
+        return {
+            success: true,
+            data: evaluation
+        };
+    }
+
+    // 评价统计API
+    if (pathname === '/api/evaluation-stats' && method === 'GET') {
+        const stats = dbOperations.getEvaluationStats();
+        return {
+            success: true,
+            data: stats
+        };
+    }
+
+    // 订单评价API
+    if (pathname === '/api/order-evaluations' && method === 'GET') {
+        const orderEvaluations = dbOperations.getOrderEvaluations();
+        return {
+            success: true,
+            data: orderEvaluations
+        };
+    }
+
     return { success: false, error: 'API路径不存在' };
 }
 

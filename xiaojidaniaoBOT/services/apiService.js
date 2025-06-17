@@ -114,7 +114,7 @@ class ApiService {
         return params;
     }
 
-    // 获取优化统计数据
+    // 获取优化的统计数据
     async getOptimizedStats({ query }) {
         try {
             const filters = this.parseFilters(query);
@@ -122,29 +122,55 @@ class ApiService {
             const whereClause = whereConditions.conditions.join(' AND ');
             const params = whereConditions.params;
 
-            // 获取真实订单统计
+            // 获取真实订单统计，包括平均价格计算
             const orderStats = dbOperations.db.prepare(`
                 SELECT 
                     COUNT(*) as totalOrders,
                     SUM(CASE WHEN o.status = 'confirmed' THEN 1 ELSE 0 END) as confirmedOrders,
                     SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completedOrders,
-                    0 as avgPrice,
+                    AVG(CAST(o.price AS REAL)) as avgPrice,
                     CAST(SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) AS FLOAT) / 
                     NULLIF(COUNT(*), 0) as completionRate
                 FROM orders o
                 WHERE ${whereClause}
             `).get(...params);
 
-            // 获取真实评价统计 (简化版本，因为没有evaluations表)
-            const avgRating = 0;
+            // 获取真实评价统计 - 解析JSON评价数据
+            const completedOrdersCount = dbOperations.db.prepare(`
+                SELECT COUNT(*) as count FROM orders o WHERE ${whereClause} AND o.status = 'completed'
+            `).get(...params);
+
+            let avgRating = 0;
+            if (completedOrdersCount.count > 0) {
+                const userRatingResult = dbOperations.db.prepare(`
+                    SELECT AVG(CAST(json_extract(o.user_evaluation, '$.overall_score') AS REAL)) as avgUserRating
+                    FROM orders o
+                    WHERE ${whereClause} AND o.status = 'completed' AND o.user_evaluation IS NOT NULL
+                `).get(...params);
+
+                const merchantRatingResult = dbOperations.db.prepare(`
+                    SELECT AVG(CAST(json_extract(o.merchant_evaluation, '$.overall_score') AS REAL)) as avgMerchantRating
+                    FROM orders o
+                    WHERE ${whereClause} AND o.status = 'completed' AND o.merchant_evaluation IS NOT NULL
+                `).get(...params);
+
+                const avgUserRating = userRatingResult.avgUserRating || 0;
+                const avgMerchantRating = merchantRatingResult.avgMerchantRating || 0;
+                
+                if (avgUserRating > 0 && avgMerchantRating > 0) {
+                    avgRating = (avgUserRating + avgMerchantRating) / 2;
+                } else {
+                    avgRating = avgUserRating || avgMerchantRating || 0;
+                }
+            }
 
             const stats = {
                 totalOrders: orderStats.totalOrders || 0,
                 confirmedOrders: orderStats.confirmedOrders || 0,
                 completedOrders: orderStats.completedOrders || 0,
-                avgPrice: orderStats.avgPrice || 0,
-                avgRating: avgRating || 0,
-                completionRate: orderStats.completionRate || 0
+                avgPrice: orderStats.avgPrice ? Math.round(orderStats.avgPrice) : 0,
+                avgRating: avgRating ? Math.round(avgRating * 10) / 10 : 0,
+                completionRate: orderStats.completionRate ? Math.round(orderStats.completionRate * 1000) / 10 : 0
             };
             
             return {
@@ -152,6 +178,7 @@ class ApiService {
                 fromCache: false
             };
         } catch (error) {
+            console.error('获取统计数据失败:', error);
             throw new Error('获取统计数据失败: ' + error.message);
         }
     }
@@ -199,20 +226,29 @@ class ApiService {
                     COUNT(*) as totalOrders,
                     SUM(CASE WHEN o.status = 'confirmed' THEN 1 ELSE 0 END) as confirmedOrders,
                     SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completedOrders,
-                    0 as avgPrice,
+                    AVG(CAST(o.price AS REAL)) as avgPrice,
                     CAST(SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) AS FLOAT) / 
                     NULLIF(COUNT(*), 0) as completionRate
                 FROM orders o
                 WHERE ${whereClause}
             `).get(...params);
 
-            // 获取平均评分 (简化版本)
-            const avgRating = { avgRating: 0 };
+            // 获取平均评分
+            const avgRatingResult = dbOperations.db.prepare(`
+                SELECT 
+                    AVG(CAST(json_extract(o.user_evaluation, '$.overall_score') AS REAL)) as avgUserRating,
+                    AVG(CAST(json_extract(o.merchant_evaluation, '$.overall_score') AS REAL)) as avgMerchantRating
+                FROM orders o
+                WHERE ${whereClause} AND o.status = 'completed'
+            `).get(...params);
+
+            const avgRating = (avgRatingResult.avgUserRating + avgRatingResult.avgMerchantRating) / 2 || 0;
 
             return {
                 ...metrics,
-                avgRating: avgRating.avgRating || 0,
-                completionRate: metrics.completionRate || 0
+                avgPrice: Math.round(metrics.avgPrice || 0),
+                avgRating: Math.round(avgRating * 10) / 10,
+                completionRate: Math.round((metrics.completionRate || 0) * 100) / 100
             };
         } catch (error) {
             throw new Error('计算仪表板指标失败: ' + error.message);
@@ -229,19 +265,19 @@ class ApiService {
             switch (period) {
                 case 'hourly':
                     dateFormat = '%Y-%m-%d %H:00:00';
-                    groupBy = "strftime('%Y-%m-%d %H', created_at, 'unixepoch')";
+                    groupBy = "strftime('%Y-%m-%d %H', o.created_at)";
                     break;
                 case 'weekly':
                     dateFormat = '%Y-W%W';
-                    groupBy = "strftime('%Y-W%W', created_at, 'unixepoch')";
+                    groupBy = "strftime('%Y-W%W', o.created_at)";
                     break;
                 case 'monthly':
                     dateFormat = '%Y-%m';
-                    groupBy = "strftime('%Y-%m', created_at, 'unixepoch')";
+                    groupBy = "strftime('%Y-%m', o.created_at)";
                     break;
                 default: // daily
                     dateFormat = '%Y-%m-%d';
-                    groupBy = "date(created_at, 'unixepoch')";
+                    groupBy = "date(o.created_at)";
             }
 
             const whereConditions = this.buildWhereConditions(filters);
@@ -251,8 +287,8 @@ class ApiService {
                 SELECT 
                     ${groupBy} as period,
                     COUNT(*) as orderCount,
-                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedCount
-                FROM orders 
+                    SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completedCount
+                FROM orders o
                 WHERE ${whereClause}
                 GROUP BY ${groupBy}
                 ORDER BY period DESC
@@ -267,6 +303,7 @@ class ApiService {
                 }
             };
         } catch (error) {
+            console.error('获取订单趋势数据失败:', error);
             throw new Error('获取订单趋势数据失败: ' + error.message);
         }
     }
@@ -280,11 +317,13 @@ class ApiService {
 
             const regionData = dbOperations.db.prepare(`
                 SELECT 
-                    '未知地区' as regionName,
+                    COALESCE(r.name, '未知地区') as regionName,
                     COUNT(o.id) as orderCount
                 FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
                 WHERE ${whereClause}
-                GROUP BY 1
+                GROUP BY r.name
                 ORDER BY orderCount DESC
                 LIMIT 10
             `).all(...whereConditions.params);
@@ -296,6 +335,7 @@ class ApiService {
                 }
             };
         } catch (error) {
+            console.error('获取地区分布数据失败:', error);
             throw new Error('获取地区分布数据失败: ' + error.message);
         }
     }
@@ -309,28 +349,35 @@ class ApiService {
 
             const priceData = dbOperations.db.prepare(`
                 SELECT 
-                    price_range,
+                    CASE 
+                        WHEN CAST(o.price AS REAL) < 500 THEN '0-500'
+                        WHEN CAST(o.price AS REAL) < 700 THEN '500-700'
+                        WHEN CAST(o.price AS REAL) < 900 THEN '700-900'
+                        WHEN CAST(o.price AS REAL) < 1100 THEN '900-1100'
+                        ELSE '1100+'
+                    END as price_range,
                     COUNT(*) as orderCount
-                FROM orders 
+                FROM orders o
                 WHERE ${whereClause}
                 GROUP BY price_range
                 ORDER BY 
                     CASE price_range
                         WHEN '0-500' THEN 1
-                        WHEN '500-1000' THEN 2
-                        WHEN '1000-2000' THEN 3
-                        WHEN '2000+' THEN 4
-                        ELSE 5
+                        WHEN '500-700' THEN 2
+                        WHEN '700-900' THEN 3
+                        WHEN '900-1100' THEN 4
+                        WHEN '1100+' THEN 5
                     END
             `).all(...whereConditions.params);
 
             return {
                 data: {
-                    labels: priceData.map(d => d.price_range || '未知'),
+                    labels: priceData.map(d => d.price_range),
                     values: priceData.map(d => d.orderCount)
                 }
             };
         } catch (error) {
+            console.error('获取价格分布数据失败:', error);
             throw new Error('获取价格分布数据失败: ' + error.message);
         }
     }
@@ -440,15 +487,12 @@ class ApiService {
             const order = dbOperations.db.prepare(`
                 SELECT 
                     o.*,
-                    u.name as user_name,
-                    u.username as user_username,
                     m.teacher_name as merchant_name,
                     m.username as merchant_username,
                     r.name as region_name
                 FROM orders o
-                LEFT JOIN users u ON o.user_id = u.id
                 LEFT JOIN merchants m ON o.merchant_id = m.id
-                LEFT JOIN regions r ON o.region_id = r.id
+                LEFT JOIN regions r ON m.region_id = r.id
                 WHERE o.id = ?
             `).get(orderId);
 
@@ -456,16 +500,8 @@ class ApiService {
                 throw new Error('订单不存在');
             }
 
-            // 获取评价信息
-            const evaluations = dbOperations.db.prepare(`
-                SELECT * FROM evaluations WHERE order_id = ? ORDER BY created_at DESC
-            `).all(orderId);
-
             return {
-                data: {
-                    order,
-                    evaluations
-                }
+                data: order
             };
         } catch (error) {
             throw new Error('获取订单详情失败: ' + error.message);
@@ -672,12 +708,12 @@ class ApiService {
         const params = [];
 
         if (filters.dateFrom) {
-            conditions.push('date(o.created_at) >= ?');
+            conditions.push('date(o.created_at) >= date(?)');
             params.push(filters.dateFrom);
         }
 
         if (filters.dateTo) {
-            conditions.push('date(o.created_at) <= ?');
+            conditions.push('date(o.created_at) <= date(?)');
             params.push(filters.dateTo);
         }
 

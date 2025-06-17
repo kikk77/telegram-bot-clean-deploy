@@ -122,10 +122,10 @@ function handleApiRequest(req, res, pathname, method) {
         body += chunk.toString();
     });
 
-    req.on('end', () => {
+    req.on('end', async () => {
         try {
             const data = body ? JSON.parse(body) : {};
-            const response = processApiRequest(pathname, method, data);
+            const response = await processApiRequest(pathname, method, data);
             
             res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
             res.end(JSON.stringify(response));
@@ -138,7 +138,7 @@ function handleApiRequest(req, res, pathname, method) {
 }
 
 // API请求路由处理
-function processApiRequest(pathname, method, data) {
+async function processApiRequest(pathname, method, data) {
     // 绑定码管理API
     if (pathname === '/api/bind-codes') {
         if (method === 'GET') {
@@ -524,21 +524,75 @@ function processApiRequest(pathname, method, data) {
 
     // 订单统计API
     if (pathname === '/api/stats/optimized' && method === 'GET') {
-        const orders = dbOperations.getAllOrders();
-        const stats = {
-            totalOrders: orders.length,
-            confirmedOrders: orders.filter(o => o.status === 'confirmed').length,
-            completedOrders: orders.filter(o => o.status === 'completed').length,
-            avgPrice: 0,
-            avgRating: 0,
-            completionRate: orders.length > 0 ? orders.filter(o => o.status === 'completed').length / orders.length : 0
-        };
-        
-        return {
-            success: true,
-            data: stats,
-            fromCache: false
-        };
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getOptimizedStats({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取优化统计失败:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 图表API路由
+    if (pathname === '/api/charts/orders-trend' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getOrdersTrendChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取订单趋势图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    if (pathname === '/api/charts/region-distribution' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getRegionDistributionChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取地区分布图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    if (pathname === '/api/charts/price-distribution' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getPriceDistributionChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取价格分布图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    if (pathname === '/api/charts/status-distribution' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getStatusDistributionChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取状态分布图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 订单详情API
+    if (pathname.match(/^\/api\/orders\/\d+$/) && method === 'GET') {
+        try {
+            const orderId = pathname.split('/')[3];
+            const apiService = require('./apiService');
+            const result = await apiService.getOrderById({ params: { id: orderId } });
+            return result;
+        } catch (error) {
+            console.error('获取订单详情失败:', error);
+            return { success: false, error: error.message };
+        }
     }
 
     return { success: false, error: 'API路径不存在' };

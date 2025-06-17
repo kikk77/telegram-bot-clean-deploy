@@ -403,24 +403,22 @@ const dbOperations = {
     getRecentBookings(limit = 20) {
         const stmt = db.prepare(`
             SELECT 
-                i.username,
-                i.first_name,
-                i.last_name,
-                i.user_id,
+                o.user_username as username,
+                o.user_name as first_name,
+                '' as last_name,
+                o.user_id,
                 CASE 
-                    WHEN i.action_type = 'book_p' THEN 'p课程'
-                    WHEN i.action_type = 'book_pp' THEN 'pp课程'
-                    WHEN i.action_type = 'book_other' THEN '其他时长'
-                    ELSE i.action_type
+                    WHEN o.course_content LIKE '%基础%' THEN 'p'
+                    WHEN o.course_content LIKE '%高级%' THEN 'pp'
+                    ELSE 'other'
                 END as course_type,
-                datetime(i.timestamp, 'unixepoch', 'localtime') as booking_time,
-                m.teacher_name,
+                o.booking_time,
+                o.teacher_name,
                 r.name as region_name
-            FROM interactions i
-            LEFT JOIN merchants m ON i.user_id = m.user_id
+            FROM orders o
+            LEFT JOIN merchants m ON o.merchant_id = m.id
             LEFT JOIN regions r ON m.region_id = r.id
-            WHERE i.action_type LIKE 'book_%'
-            ORDER BY i.timestamp DESC
+            ORDER BY datetime(o.booking_time) DESC
             LIMIT ?
         `);
         return stmt.all(limit);

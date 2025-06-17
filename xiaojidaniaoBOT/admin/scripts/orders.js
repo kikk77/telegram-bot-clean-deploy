@@ -740,6 +740,184 @@ class OptimizedOrdersManager {
 
     showOrderDetails(orderId) {
         // 显示订单详情
+        this.fetchOrderDetails(orderId);
+    }
+
+    async fetchOrderDetails(orderId) {
+        try {
+            this.showLoading(true);
+            const response = await fetch(`/api/orders/${orderId}`);
+            const result = await response.json();
+            
+            if (result.success) {
+                this.displayOrderDetailsModal(result.data);
+            } else {
+                this.showError('获取订单详情失败: ' + result.message);
+            }
+        } catch (error) {
+            console.error('获取订单详情失败:', error);
+            this.showError('获取订单详情失败');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    displayOrderDetailsModal(order) {
+        // 创建模态框
+        const modal = document.createElement('div');
+        modal.className = 'modal fade';
+        modal.id = 'orderDetailsModal';
+        modal.innerHTML = `
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">订单详情 - ${order.id}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>基本信息</h6>
+                                <table class="table table-borderless table-sm">
+                                    <tr><td>订单ID:</td><td>${order.id}</td></tr>
+                                    <tr><td>用户:</td><td>${order.user_name || '未知用户'}</td></tr>
+                                    <tr><td>用户名:</td><td>${order.user_username || '-'}</td></tr>
+                                    <tr><td>商家:</td><td>${order.teacher_name || '未知商家'}</td></tr>
+                                    <tr><td>联系方式:</td><td>${order.teacher_contact || '-'}</td></tr>
+                                    <tr><td>课程内容:</td><td>${order.course_content || '-'}</td></tr>
+                                    <tr><td>价格:</td><td>¥${order.price || 0}</td></tr>
+                                    <tr><td>状态:</td><td><span class="status-badge status-${order.status}">${this.getStatusText(order.status)}</span></td></tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>时间信息</h6>
+                                <table class="table table-borderless table-sm">
+                                    <tr><td>预约时间:</td><td>${this.formatDate(order.booking_time)}</td></tr>
+                                    <tr><td>创建时间:</td><td>${this.formatDate(order.created_at)}</td></tr>
+                                    <tr><td>更新时间:</td><td>${this.formatDate(order.updated_at)}</td></tr>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        ${order.user_evaluation ? `
+                        <div class="mt-3">
+                            <h6>用户评价</h6>
+                            <div class="card">
+                                <div class="card-body">
+                                    ${this.renderEvaluation(order.user_evaluation)}
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${order.merchant_evaluation ? `
+                        <div class="mt-3">
+                            <h6>商家评价</h6>
+                            <div class="card">
+                                <div class="card-body">
+                                    ${this.renderEvaluation(order.merchant_evaluation)}
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${order.report_content ? `
+                        <div class="mt-3">
+                            <h6>报告内容</h6>
+                            <div class="card">
+                                <div class="card-body">
+                                    <pre>${order.report_content}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // 移除现有模态框
+        const existingModal = document.getElementById('orderDetailsModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // 添加到页面
+        document.body.appendChild(modal);
+
+        // 显示模态框
+        if (typeof bootstrap !== 'undefined') {
+            const modalInstance = new bootstrap.Modal(modal);
+            modalInstance.show();
+            
+            // 模态框关闭后移除
+            modal.addEventListener('hidden.bs.modal', () => {
+                modal.remove();
+            });
+        } else {
+            // 降级处理：简单显示
+            modal.style.display = 'block';
+            modal.style.position = 'fixed';
+            modal.style.top = '50%';
+            modal.style.left = '50%';
+            modal.style.transform = 'translate(-50%, -50%)';
+            modal.style.zIndex = '9999';
+            modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            
+            // 点击背景关闭
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            // 关闭按钮
+            modal.querySelector('.btn-close, [data-bs-dismiss="modal"]').addEventListener('click', () => {
+                modal.remove();
+            });
+        }
+    }
+
+    renderEvaluation(evaluationData) {
+        try {
+            const evaluation = typeof evaluationData === 'string' ? JSON.parse(evaluationData) : evaluationData;
+            
+            let html = `<div class="evaluation-display">`;
+            
+            if (evaluation.overall_score) {
+                html += `<div class="mb-2"><strong>总体评分:</strong> ${evaluation.overall_score}/10</div>`;
+            }
+            
+            if (evaluation.detailed_scores) {
+                html += `<div class="mb-2"><strong>详细评分:</strong></div>`;
+                html += `<ul class="list-unstyled ms-3">`;
+                Object.entries(evaluation.detailed_scores).forEach(([key, score]) => {
+                    const labels = {
+                        service: '服务态度',
+                        skill: '专业技能', 
+                        environment: '环境卫生',
+                        value: '性价比',
+                        punctuality: '准时性',
+                        communication: '沟通能力'
+                    };
+                    html += `<li>${labels[key] || key}: ${score}/10</li>`;
+                });
+                html += `</ul>`;
+            }
+            
+            if (evaluation.comments) {
+                html += `<div class="mt-2"><strong>评价内容:</strong></div>`;
+                html += `<div class="border-start border-3 ps-3 mt-1">${evaluation.comments}</div>`;
+            }
+            
+            html += `</div>`;
+            return html;
+        } catch (error) {
+            return `<div class="text-muted">评价数据格式错误</div>`;
+        }
     }
 
     loadAllCharts() {

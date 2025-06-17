@@ -163,13 +163,31 @@ async function handleBackButton(userId, messageType, data = {}) {
                 break;
                 
             case 'user_evaluation':
-                // 返回到课程完成确认
-                await sendCourseCompletionCheck(userId, data.merchantId, data.bookingSessionId, data.userFullName, data.username, data.teacherName);
+                // 返回到课程完成确认（只给当前用户发送，避免重复）
+                const userMessage = `是否完成该老师（${data.teacherName}）的课程？`;
+                const userKeyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '已完成', callback_data: `course_completed_${data.bookingSessionId}` },
+                            { text: '未完成', callback_data: `course_incomplete_${data.bookingSessionId}` }
+                        ]
+                    ]
+                };
+                await sendMessageWithDelete(userId, userMessage, { reply_markup: userKeyboard }, 'course_completion_check', data);
                 break;
                 
             case 'merchant_evaluation':
-                // 返回到课程完成确认
-                await sendCourseCompletionCheck(data.merchantId, userId, data.bookingSessionId, data.userFullName, data.username, data.teacherName);
+                // 返回到课程完成确认（只给当前商家发送，避免重复）
+                const merchantMessage = `是否完成该用户（${data.userFullName}）的课程？`;
+                const merchantKeyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '已完成', callback_data: `course_completed_${data.bookingSessionId}` },
+                            { text: '未完成', callback_data: `course_incomplete_${data.bookingSessionId}` }
+                        ]
+                    ]
+                };
+                await sendMessageWithDelete(userId, merchantMessage, { reply_markup: merchantKeyboard }, 'course_completion_check', data);
                 break;
                 
             case 'rebook_question':
@@ -927,7 +945,7 @@ async function sendCourseCompletionCheck(userId, merchantId, bookingSessionId, u
             teacherName
         });
         
-        // 给商家发送
+        // 给商家发送 - 只发送一次确认消息
         const merchantMessage = `是否完成该用户（${userFullName}）的课程？`;
         const merchantKeyboard = {
             inline_keyboard: [
@@ -2382,10 +2400,32 @@ async function handleBackToCourseCompletion(userId, sessionId) {
             const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
             if (merchant) {
                 const userFullName = '用户'; // 简化处理
-                const username = '';
                 const teacherName = merchant.teacher_name;
                 
-                await sendCourseCompletionCheck(userId, merchant.user_id, sessionId, userFullName, username, teacherName);
+                // 只给当前用户发送确认消息，避免重复发给商家
+                const isUser = userId === bookingSession.user_id;
+                const message = isUser ? 
+                    `是否完成该老师（${teacherName}）的课程？` : 
+                    `是否完成该用户（${userFullName}）的课程？`;
+                    
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '已完成', callback_data: `course_completed_${sessionId}` },
+                            { text: '未完成', callback_data: `course_incomplete_${sessionId}` }
+                        ]
+                    ]
+                };
+                
+                await sendMessageWithDelete(userId, message, { 
+                    reply_markup: keyboard 
+                }, 'course_completion_check', {
+                    bookingSessionId: sessionId,
+                    merchantId: merchant.id,
+                    userFullName,
+                    username: '',
+                    teacherName
+                });
             }
         }
     } catch (error) {

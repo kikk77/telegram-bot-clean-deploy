@@ -42,8 +42,8 @@ class Dashboard {
     async loadStats() {
         try {
             // 使用优化的统计API获取真实订单数据
-            const orderStatsResponse = await api.get('/stats/optimized');
-            const basicStatsResponse = await api.get('/stats');
+            const orderStatsResponse = await api.get('/api/stats/optimized');
+            const basicStatsResponse = await api.get('/api/stats');
             
             // 处理不同的API返回格式
             const orderStats = orderStatsResponse.data || orderStatsResponse;
@@ -86,7 +86,7 @@ class Dashboard {
     async loadMerchantBookingStats() {
         try {
             this.showLoading('merchantBookingStats');
-            const response = await api.get('/merchant-bookings');
+            const response = await api.get('/api/merchant-bookings');
             this.data.merchantBookings = response.data || response;
             this.renderMerchantBookingStats();
         } catch (error) {
@@ -98,7 +98,7 @@ class Dashboard {
     async loadRecentBookings() {
         try {
             this.showLoading('recentBookings');
-            const response = await api.get('/recent-bookings');
+            const response = await api.get('/api/recent-bookings');
             this.data.recentBookings = response.data || response;
             this.renderRecentBookings();
         } catch (error) {
@@ -110,7 +110,7 @@ class Dashboard {
     async loadMessageStats() {
         try {
             this.showLoading('messageStats');
-            const response = await api.get('/message-stats');
+            const response = await api.get('/api/message-stats');
             this.data.messageStats = response.data || response;
             this.renderMessageStats();
         } catch (error) {
@@ -122,7 +122,7 @@ class Dashboard {
     async loadButtonStats() {
         try {
             this.showLoading('buttonStats');
-            const response = await api.get('/button-stats');
+            const response = await api.get('/api/button-stats');
             this.data.buttonStats = response.data || response;
             this.renderButtonStats();
         } catch (error) {

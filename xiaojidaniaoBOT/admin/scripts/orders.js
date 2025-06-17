@@ -35,10 +35,15 @@ class OptimizedOrdersManager {
     }
 
     init() {
-        this.setupLazyLoading();
         this.setupVirtualScroll();
         this.setupEventListeners();
         this.loadInitialData();
+        
+        // 直接加载所有图表，不使用懒加载
+        setTimeout(() => {
+            console.log('开始加载所有图表...');
+            this.loadAllCharts();
+        }, 1000);
     }
 
     // 设置懒加载
@@ -317,8 +322,12 @@ class OptimizedOrdersManager {
     // 懒加载图表
     async loadChart(chartId) {
         try {
+            console.log(`开始加载图表: ${chartId}`);
             const canvas = document.getElementById(chartId);
-            if (!canvas) return;
+            if (!canvas) {
+                console.error(`找不到图表canvas元素: ${chartId}`);
+                return;
+            }
 
             // 显示加载指示器
             const container = canvas.closest('.chart-container');
@@ -328,10 +337,14 @@ class OptimizedOrdersManager {
             container.appendChild(loadingDiv);
 
             // 获取图表数据
+            console.log(`获取图表数据: ${chartId}`);
             const chartData = await this.fetchChartData(chartId);
+            console.log(`图表数据获取成功 (${chartId}):`, chartData);
             
             // 创建图表
+            console.log(`创建图表: ${chartId}`);
             this.createChart(chartId, chartData);
+            console.log(`图表创建完成: ${chartId}`);
             
             // 移除加载指示器
             container.removeChild(loadingDiv);
@@ -346,18 +359,26 @@ class OptimizedOrdersManager {
     async fetchChartData(chartId) {
         const filters = this.getCurrentFilters();
         
+        let response;
         switch (chartId) {
             case 'ordersChart':
-                return await this.fetchWithCache('/api/charts/orders-trend', filters);
+                response = await this.fetchWithCache('/api/charts/orders-trend', filters);
+                break;
             case 'regionChart':
-                return await this.fetchWithCache('/api/charts/region-distribution', filters);
+                response = await this.fetchWithCache('/api/charts/region-distribution', filters);
+                break;
             case 'priceChart':
-                return await this.fetchWithCache('/api/charts/price-distribution', filters);
+                response = await this.fetchWithCache('/api/charts/price-distribution', filters);
+                break;
             case 'statusChart':
-                return await this.fetchWithCache('/api/charts/status-distribution', filters);
+                response = await this.fetchWithCache('/api/charts/status-distribution', filters);
+                break;
             default:
                 throw new Error(`未知图表类型: ${chartId}`);
         }
+        
+        // 处理API返回的数据格式
+        return response.data || response;
     }
 
     // 创建图表

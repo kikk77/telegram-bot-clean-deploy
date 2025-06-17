@@ -312,4 +312,9 @@ function initTestData() {
 
 module.exports = {
     initTestData
-}; 
+};
+
+// 如果直接运行此文件，执行初始化
+if (require.main === module) {
+    initTestData();
+} 

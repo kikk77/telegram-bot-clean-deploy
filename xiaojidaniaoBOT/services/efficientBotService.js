@@ -41,26 +41,14 @@ class EfficientBotService {
                 throw new Error('BOT_TOKEN 环境变量未设置');
             }
 
-            // 根据官方文档创建Bot实例 - 使用polling模式
+            // 创建Bot实例 - 不使用polling，纯事件驱动webhook模式
             this.bot = new TelegramBot(token, {
-                polling: {
-                    interval: 1000,
-                    autoStart: true,
-                    params: {
-                        timeout: 10,
-                        limit: 100,
-                        allowed_updates: ['message', 'callback_query']
-                    }
-                }
+                // 完全不使用polling，事件驱动
             });
 
-            console.log('✅ Bot实例创建成功（Polling模式）');
+            console.log('✅ Bot实例创建成功（Webhook模式）');
 
-            // 根据官方文档设置错误处理
-            this.bot.on('polling_error', (error) => {
-                console.error('❌ Polling错误:', error.code, error.message);
-            });
-
+            // 设置错误处理
             this.bot.on('error', (error) => {
                 console.error('❌ Bot错误:', error);
             });
@@ -328,7 +316,9 @@ class EfficientBotService {
             console.log('🛑 停止高效机器人服务...');
             
             if (this.bot) {
-                await this.bot.stopPolling();
+                // 删除webhook而不是停止polling
+                await this.bot.deleteWebHook();
+                console.log('✅ Webhook已删除');
             }
             
             console.log('✅ 高效机器人服务已停止');

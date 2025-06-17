@@ -18,6 +18,31 @@ const { initScheduler } = require('./services/schedulerService');
 // 全局服务实例
 let botService = null;
 
+// 设置Webhook
+async function setupWebhook(bot) {
+    try {
+        // 开发环境使用本地webhook（需要ngrok或其他隧道工具）
+        const webhookUrl = process.env.WEBHOOK_URL || `http://localhost:${PORT}/webhook`;
+        
+        console.log('🔗 设置Webhook:', webhookUrl);
+        
+        // 删除现有webhook（如果有）
+        await bot.deleteWebHook();
+        console.log('✅ 已删除旧webhook');
+        
+        // 设置新webhook
+        await bot.setWebHook(webhookUrl, {
+            allowed_updates: ['message', 'callback_query']
+        });
+        console.log('✅ Webhook设置成功');
+        
+    } catch (error) {
+        console.error('❌ Webhook设置失败:', error);
+        console.log('💡 如果在本地开发，请使用ngrok等工具暴露localhost:3000');
+        console.log('💡 或者设置WEBHOOK_URL环境变量为公网可访问的URL');
+    }
+}
+
 // 启动函数
 async function start() {
     try {
@@ -26,6 +51,12 @@ async function start() {
         // 创建并初始化高效机器人服务
         botService = new EfficientBotService();
         await botService.initialize();
+        
+        // 设置全局引用供webhook使用
+        global.botService = botService;
+        
+        // 设置webhook（替代polling）
+        await setupWebhook(botService.bot);
         
         // 初始化测试数据（保持原有逻辑）
         initTestData();

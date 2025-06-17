@@ -64,6 +64,12 @@ function createHttpServer() {
             return;
         }
 
+        // Webhook路由 - Telegram Bot更新
+        if (pathname === '/webhook' && method === 'POST') {
+            handleWebhookRequest(req, res);
+            return;
+        }
+
         // API路由
         if (pathname.startsWith('/api/')) {
             handleApiRequest(req, res, pathname, method);
@@ -78,6 +84,33 @@ function createHttpServer() {
     server.listen(PORT, () => {
         console.log(`🚀 HTTP服务器启动在端口 ${PORT}`);
         console.log(`📱 管理后台: http://localhost:${PORT}/admin`);
+    });
+}
+
+// Webhook请求处理 - 处理Telegram更新
+function handleWebhookRequest(req, res) {
+    let body = '';
+    
+    req.on('data', chunk => {
+        body += chunk.toString();
+    });
+
+    req.on('end', () => {
+        try {
+            const update = JSON.parse(body);
+            
+            // 立即响应Telegram服务器
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end('OK');
+            
+            // 处理更新（事件驱动，不阻塞响应）
+            processWebhookUpdate(update);
+            
+        } catch (error) {
+            console.error('Webhook处理错误:', error);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end('OK'); // 总是返回200给Telegram
+        }
     });
 }
 
@@ -422,8 +455,48 @@ function processApiRequest(pathname, method, data) {
     return { success: false, error: 'API路径不存在' };
 }
 
+// Webhook更新处理 - 事件驱动机制
+function processWebhookUpdate(update) {
+    try {
+        // 获取Bot服务实例（通过全局引用或依赖注入）
+        const botService = global.botService;
+        if (!botService) {
+            console.error('❌ Bot服务实例不存在');
+            return;
+        }
+
+        // 处理文本消息
+        if (update.message && update.message.text) {
+            // 模拟bot.on('message')事件
+            setImmediate(() => {
+                botService.bot.emit('message', update.message);
+            });
+        }
+
+        // 处理callback query
+        if (update.callback_query) {
+            // 模拟bot.on('callback_query')事件
+            setImmediate(() => {
+                botService.bot.emit('callback_query', update.callback_query);
+            });
+        }
+
+        // 处理其他类型的更新
+        if (update.inline_query) {
+            setImmediate(() => {
+                botService.bot.emit('inline_query', update.inline_query);
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ 处理webhook更新失败:', error);
+    }
+}
+
 module.exports = {
     createHttpServer,
     handleApiRequest,
-    processApiRequest
+    processApiRequest,
+    handleWebhookRequest,
+    processWebhookUpdate
 }; 

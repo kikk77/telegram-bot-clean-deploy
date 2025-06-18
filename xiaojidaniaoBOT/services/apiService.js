@@ -170,7 +170,7 @@ class ApiService {
                 completedOrders: orderStats.completedOrders || 0,
                 avgPrice: orderStats.avgPrice ? Math.round(orderStats.avgPrice) : 0,
                 avgRating: avgRating ? Math.round(avgRating * 10) / 10 : 0,
-                completionRate: orderStats.completionRate ? Math.round(orderStats.completionRate * 1000) / 10 : 0
+                completionRate: orderStats.completionRate ? Math.round(orderStats.completionRate * 100 * 10) / 10 : 0
             };
             
             return {
@@ -429,38 +429,59 @@ class ApiService {
             const whereClause = whereConditions.conditions.join(' AND ');
             const params = whereConditions.params;
 
-            // 获取真实订单数据
-            const orders = dbOperations.db.prepare(`
+            // 获取真实订单数据，关联商家和地区信息  
+            const rawOrders = dbOperations.db.prepare(`
                 SELECT 
                     o.id,
                     o.id as order_number,
                     o.user_name,
                     o.user_username,
                     o.teacher_name as merchant_name,
+                    m.teacher_name as actual_merchant_name,
+                    m.price1,
+                    m.price2,
+                    r.name as region_name,
                     o.course_content,
-                    CAST(o.price AS INTEGER) as actual_price,
+                    o.price as order_price,
                     o.status,
                     o.created_at,
                     o.booking_time,
                     o.updated_at,
-                    '' as region_name,
+                    bs.user_course_status,
+                    bs.merchant_course_status,
                     CASE 
-                        WHEN o.user_evaluation IS NOT NULL THEN 'completed' 
+                        WHEN bs.user_course_status = 'completed' THEN 'completed' 
                         ELSE 'pending' 
                     END as user_evaluation_status,
                     CASE 
-                        WHEN o.merchant_evaluation IS NOT NULL THEN 'completed' 
+                        WHEN bs.merchant_course_status = 'completed' THEN 'completed' 
                         ELSE 'pending' 
                     END as merchant_evaluation_status
                 FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE ${whereClause}
                 ORDER BY o.created_at DESC
                 LIMIT ? OFFSET ?
             `).all(...params, pageSize, offset);
 
+            // 处理订单数据，计算正确价格
+            const orders = rawOrders.map(order => ({
+                ...order,
+                actual_price: this.calculateOrderPrice(order),
+                merchant_name: order.actual_merchant_name || order.teacher_name,
+                region_name: order.region_name || '未知地区'
+            }));
+
             // 获取总数
             const total = dbOperations.db.prepare(`
-                SELECT COUNT(*) as count FROM orders o WHERE ${whereClause}
+                SELECT COUNT(*) as count 
+                FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                WHERE ${whereClause}
             `).get(...params);
 
             return {
@@ -485,11 +506,36 @@ class ApiService {
             const order = dbOperations.db.prepare(`
                 SELECT 
                     o.*,
-                    o.teacher_name as merchant_name,
-                    '' as merchant_username,
-                    o.teacher_contact,
-                    '' as region_name
+                    m.teacher_name as actual_merchant_name,
+                    m.username as merchant_username,
+                    m.contact as teacher_contact,
+                    m.price1,
+                    m.price2,
+                    r.name as region_name,
+                    bs.user_course_status,
+                    bs.merchant_course_status,
+                    -- 获取用户评价
+                    (SELECT json_object(
+                        'overall_score', overall_score,
+                        'detailed_scores', detailed_scores,
+                        'comments', comments,
+                        'created_at', created_at
+                    ) FROM evaluations 
+                     WHERE booking_session_id = o.booking_session_id 
+                     AND evaluator_type = 'user' LIMIT 1) as user_evaluation,
+                    -- 获取商家评价
+                    (SELECT json_object(
+                        'overall_score', overall_score,
+                        'detailed_scores', detailed_scores,
+                        'comments', comments,
+                        'created_at', created_at
+                    ) FROM evaluations 
+                     WHERE booking_session_id = o.booking_session_id 
+                     AND evaluator_type = 'merchant' LIMIT 1) as merchant_evaluation
                 FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE o.id = ?
             `).get(orderId);
 
@@ -497,18 +543,27 @@ class ApiService {
                 throw new Error('订单不存在');
             }
 
-            // 处理时间字段，确保格式正确
+            // 处理时间字段和商家信息
             const processedOrder = {
                 ...order,
-                region: order.region_name,
+                // 商家信息
+                merchant_name: order.actual_merchant_name || order.teacher_name,
+                region: order.region_name || '未知地区',
+                // 价格逻辑：根据课程类型匹配商家价格
+                actual_price: this.calculateOrderPrice(order),
+                course_content: order.course_content,
+                
                 // 确保时间字段存在并格式正确
                 created_at: order.created_at || new Date().toISOString(),
                 updated_at: order.updated_at || new Date().toISOString(),
-                booking_time: order.booking_time || new Date().toISOString()
+                booking_time: order.booking_time || new Date().toISOString(),
+                
+                // 评价信息
+                user_evaluation: order.user_evaluation ? JSON.parse(order.user_evaluation) : null,
+                merchant_evaluation: order.merchant_evaluation ? JSON.parse(order.merchant_evaluation) : null,
+                user_evaluation_status: order.user_course_status || 'pending',
+                merchant_evaluation_status: order.merchant_course_status || 'pending'
             };
-
-            // 清理辅助字段
-            delete processedOrder.region_name;
 
             return {
                 data: processedOrder
@@ -739,6 +794,30 @@ class ApiService {
         return filters;
     }
 
+    // 计算订单实际价格
+    calculateOrderPrice(order) {
+        // 如果订单有明确价格且不是"未设置"，使用订单价格
+        if (order.price && order.price !== '未设置' && !isNaN(order.price)) {
+            return parseInt(order.price);
+        }
+        
+        // 根据课程类型匹配商家价格
+        if (order.course_content === 'p' && order.price1) {
+            return order.price1;
+        } else if (order.course_content === 'pp' && order.price2) {
+            return order.price2;
+        }
+        
+        // 如果没有匹配，返回课程类型提示
+        if (order.course_content === 'p') {
+            return '待定价(p服务)';
+        } else if (order.course_content === 'pp') {
+            return '待定价(pp服务)';
+        }
+        
+        return '价格未设置';
+    }
+
     // 构建WHERE条件
     buildWhereConditions(filters) {
         const conditions = ['1=1'];
@@ -757,14 +836,14 @@ class ApiService {
 
         // 商家筛选 - 支持按商家ID或老师名称
         if (filters.merchantId) {
-            conditions.push('(o.merchant_id = ? OR o.teacher_name = ?)');
+            conditions.push('(o.merchant_id = ? OR m.teacher_name = ?)');
             params.push(filters.merchantId);
             params.push(filters.merchantId); // 当作老师名称搜索
         }
 
-        // 地区筛选 - 通过商家的region_id关联
+        // 地区筛选 - 直接通过JOIN的条件筛选
         if (filters.regionId) {
-            conditions.push('o.merchant_id IN (SELECT id FROM merchants WHERE region_id = ?)');
+            conditions.push('m.region_id = ?');
             params.push(filters.regionId);
         }
 

@@ -69,8 +69,8 @@ async function start() {
         // 设置webhook（替代polling）
         await setupWebhook(botService.bot);
         
-        // 初始化测试数据（保持原有逻辑）
-        initTestData();
+        // 初始化测试数据（保持原有逻辑）- 暂时禁用以测试真实数据
+        // initTestData();
         
         // 启动定时任务调度器（保持原有逻辑）
         initScheduler();

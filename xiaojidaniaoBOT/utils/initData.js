@@ -110,14 +110,16 @@ function initTestData() {
             console.log('✅ 32位老师数据创建完成');
         }
 
-        // 生成大量订单数据
-        console.log('📦 开始生成订单数据...');
+        // 生成大量订单数据 - 已禁用，保留真实数据
+        console.log('📦 跳过生成订单数据，保留真实数据...');
         
-        // 清空现有订单数据重新生成
-        db.prepare('DELETE FROM orders').run();
-        db.prepare('DELETE FROM booking_sessions').run();
-        db.prepare('DELETE FROM evaluations').run();
+        // 清空现有订单数据重新生成 - 已禁用以保护真实数据
+        // db.prepare('DELETE FROM orders').run();
+        // db.prepare('DELETE FROM booking_sessions').run();
+        // db.prepare('DELETE FROM evaluations').run();
         
+        // 订单生成逻辑已禁用，保留真实数据
+        /*
         const merchants = dbOperations.getAllMerchants();
         const regions = dbOperations.getAllRegions();
         const courseTypes = ['p', 'pp', 'other'];
@@ -138,8 +140,10 @@ function initTestData() {
             const number = Math.random() > 0.7 ? getRandomInt(1, 99) : '';
             userNames.push(`${prefix}${suffix}${number}`);
         }
+        */
         
-        // 生成真实的用户预约流程数据（过去1个月）
+        // 生成真实的用户预约流程数据（过去1个月）- 已禁用
+        /*
         const now = new Date();
         const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         
@@ -306,6 +310,9 @@ function initTestData() {
         console.log(`✅ 涵盖 ${userNames.length} 位用户`);
         console.log(`✅ 涵盖 ${merchants.length} 位老师`);
         console.log('🎉 完整测试数据生成完成！');
+        */
+        
+        console.log('✅ 跳过订单数据生成，保留真实数据');
         
     } catch (error) {
         console.error('❌ 初始化测试数据失败:', error);
@@ -323,7 +330,7 @@ module.exports = {
     initTestData
 }; 
 
-// 如果直接运行此文件，执行初始化
-if (require.main === module) {
-    initTestData();
-} 
+// 如果直接运行此文件，执行初始化 - 暂时禁用
+// if (require.main === module) {
+//     initTestData();
+// } 

@@ -24,8 +24,8 @@ function start() {
     // 初始化数据库
     initDatabase();
     
-    // 初始化测试数据
-    initTestData();
+    // 初始化测试数据 - 暂时禁用以测试真实数据
+    // initTestData();
     
     // 加载缓存数据
     loadCacheData();

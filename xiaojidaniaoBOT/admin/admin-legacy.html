@@ -155,28 +155,40 @@
         <div id="dashboard" class="tab-content active">
             <div class="stats">
                 <div class="stat-card">
-                    <div class="stat-number" id="totalMerchants">0</div>
-                    <div>👨‍🏫 商家数量</div>
+                    <div class="stat-number" id="totalOrders">0</div>
+                    <div>📋 总订单</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number" id="totalBookings">0</div>
-                    <div>📦 总订单数</div>
+                    <div class="stat-number" id="bookedOrders">0</div>
+                    <div>📅 已预约订单</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number" id="confirmedOrders">0</div>
-                    <div>✅ 已确认订单</div>
+                    <div class="stat-number" id="incompleteOrders">0</div>
+                    <div>⏳ 待处理订单</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number" id="completedOrders">0</div>
-                    <div>🎉 已完成订单</div>
+                    <div>✅ 已完成订单</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number" id="avgPrice">¥0</div>
-                    <div>💰 平均价格</div>
+                    <div>💰 平均订单价格</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="avgUserRating">-</div>
+                    <div>👤 平均用户评分</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="avgMerchantRating">-</div>
+                    <div>👩‍🏫 平均商家评分</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number" id="completionRate">0%</div>
                     <div>📊 完成率</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="totalMerchants">0</div>
+                    <div>👨‍🏫 商家数量</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number" id="totalBindCodes">0</div>
@@ -987,30 +999,18 @@
         async function loadStats() {
             try {
                 const stats = await apiRequest('/api/stats');
+                document.getElementById('totalOrders').textContent = stats.totalOrders || 0;
+                document.getElementById('bookedOrders').textContent = stats.bookedOrders || 0;
+                document.getElementById('incompleteOrders').textContent = stats.incompleteOrders || 0;
+                document.getElementById('completedOrders').textContent = stats.completedOrders || 0;
+                document.getElementById('avgPrice').textContent = stats.avgPrice || '¥0';
+                document.getElementById('avgUserRating').textContent = stats.avgUserRating || '-';
+                document.getElementById('avgMerchantRating').textContent = stats.avgMerchantRating || '-';
+                document.getElementById('completionRate').textContent = stats.completionRate || '0%';
                 document.getElementById('totalMerchants').textContent = stats.totalMerchants || 0;
-                document.getElementById('totalBookings').textContent = stats.totalBookings || 0;
+                document.getElementById('totalBindCodes').textContent = stats.totalBindCodes || 0;
+                document.getElementById('totalRegions').textContent = stats.totalRegions || 0;
                 document.getElementById('totalTemplates').textContent = stats.totalTemplates || 0;
-                document.getElementById('totalTriggers').textContent = stats.totalTriggers || 0;
-                
-                // 更新绑定统计
-                const totalBindCodes = bindCodes.length;
-                const usedBindCodes = bindCodes.filter(code => code.used).length;
-                const boundMerchants = merchants.filter(m => m.bind_step === 5).length;
-                const bindingInProgress = merchants.filter(m => m.bind_step > 0 && m.bind_step < 5).length;
-                
-                if (document.getElementById('totalBindCodes')) {
-                    document.getElementById('totalBindCodes').textContent = totalBindCodes;
-                }
-                if (document.getElementById('usedBindCodes')) {
-                    document.getElementById('usedBindCodes').textContent = usedBindCodes;
-                }
-                if (document.getElementById('boundMerchants')) {
-                    document.getElementById('boundMerchants').textContent = boundMerchants;
-                }
-                if (document.getElementById('bindingInProgress')) {
-                    document.getElementById('bindingInProgress').textContent = bindingInProgress;
-                }
-                document.getElementById('totalTasks').textContent = stats.totalTasks || 0;
                 document.getElementById('totalClicks').textContent = stats.totalClicks || 0;
             } catch (error) {
                 console.error('加载统计数据失败:', error);

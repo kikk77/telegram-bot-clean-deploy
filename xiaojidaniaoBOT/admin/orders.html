@@ -26,13 +26,15 @@
             <!-- 筛选器 -->
             <div class="filters">
                 <div class="filter-group">
-                    <label>时间范围:</label>
+                    <label>📅 时间范围:</label>
                     <select id="timeRange" onchange="updateDashboard()">
-                        <option value="today">今日</option>
-                        <option value="week">本周</option>
-                        <option value="month" selected>本月</option>
-                        <option value="quarter">本季度</option>
-                        <option value="custom">自定义</option>
+                        <option value="本日">🗓️ 本日</option>
+                        <option value="本周">📆 本周</option>
+                        <option value="本月" selected>📅 本月</option>
+                        <option value="本季度">📊 本季度</option>
+                        <option value="本年">📈 本年</option>
+                        <option value="全部">🌐 全部时间</option>
+                        <option value="custom">📋 自定义</option>
                     </select>
                 </div>
                 
@@ -67,6 +69,15 @@
                         <option value="">全部商家</option>
                     </select>
                 </div>
+                
+                <div class="filter-group">
+                    <button type="button" class="btn btn-secondary" onclick="window.ordersManager.resetFilters()">
+                        🔄 重置筛选
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="window.ordersManager.refreshDashboard()">
+                        ⚡ 立即刷新
+                    </button>
+                </div>
             </div>
 
             <!-- 关键指标卡片 -->
@@ -74,25 +85,34 @@
                 <div class="metric-card">
                     <div class="metric-icon">📋</div>
                     <div class="metric-content">
-                        <div class="metric-title">总订单数</div>
+                        <div class="metric-title">总订单</div>
                         <div class="metric-value" id="totalOrders">-</div>
                         <div class="metric-change" id="totalOrdersChange">-</div>
                     </div>
                 </div>
                 
                 <div class="metric-card">
-                    <div class="metric-icon">✅</div>
+                    <div class="metric-icon">📅</div>
                     <div class="metric-content">
-                        <div class="metric-title">确认订单</div>
-                        <div class="metric-value" id="confirmedOrders">-</div>
-                        <div class="metric-change" id="confirmedOrdersChange">-</div>
+                        <div class="metric-title">已预约订单</div>
+                        <div class="metric-value" id="bookedOrders">-</div>
+                        <div class="metric-change" id="bookedOrdersChange">-</div>
                     </div>
                 </div>
                 
                 <div class="metric-card">
-                    <div class="metric-icon">🎯</div>
+                    <div class="metric-icon">⏳</div>
                     <div class="metric-content">
-                        <div class="metric-title">完成订单</div>
+                        <div class="metric-title">待处理订单</div>
+                        <div class="metric-value" id="incompleteOrders">-</div>
+                        <div class="metric-change" id="incompleteOrdersChange">-</div>
+                    </div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-icon">✅</div>
+                    <div class="metric-content">
+                        <div class="metric-title">已完成订单</div>
                         <div class="metric-value" id="completedOrders">-</div>
                         <div class="metric-change" id="completedOrdersChange">-</div>
                     </div>
@@ -101,18 +121,27 @@
                 <div class="metric-card">
                     <div class="metric-icon">💰</div>
                     <div class="metric-content">
-                        <div class="metric-title">平均价格</div>
+                        <div class="metric-title">平均订单价格</div>
                         <div class="metric-value" id="avgPrice">-</div>
                         <div class="metric-change" id="avgPriceChange">-</div>
                     </div>
                 </div>
                 
                 <div class="metric-card">
-                    <div class="metric-icon">⭐</div>
+                    <div class="metric-icon">👤</div>
                     <div class="metric-content">
-                        <div class="metric-title">平均评分</div>
-                        <div class="metric-value" id="avgRating">-</div>
-                        <div class="metric-change" id="avgRatingChange">-</div>
+                        <div class="metric-title">平均用户评分</div>
+                        <div class="metric-value" id="avgUserRating">-</div>
+                        <div class="metric-change" id="avgUserRatingChange">-</div>
+                    </div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-icon">👩‍🏫</div>
+                    <div class="metric-content">
+                        <div class="metric-title">平均商家评分</div>
+                        <div class="metric-value" id="avgMerchantRating">-</div>
+                        <div class="metric-change" id="avgMerchantRatingChange">-</div>
                     </div>
                 </div>
                 

@@ -56,10 +56,12 @@ class Dashboard {
             this.data.stats = {
                 // 订单相关数据（来自优化API）
                 totalOrders: orderStats.totalOrders || 0,
-                confirmedOrders: orderStats.confirmedOrders || 0, 
+                bookedOrders: orderStats.bookedOrders || 0,
+                incompleteOrders: orderStats.incompleteOrders || 0,
                 completedOrders: orderStats.completedOrders || 0,
                 avgPrice: orderStats.avgPrice || 0,
-                avgRating: orderStats.avgRating || 0,
+                avgUserRating: orderStats.avgUserRating || 0,
+                avgMerchantRating: orderStats.avgMerchantRating || 0,
                 completionRate: orderStats.completionRate || 0,
                 
                 // 基础数据（来自基础API）
@@ -134,25 +136,23 @@ class Dashboard {
     renderStats() {
         const stats = this.data.stats;
         
-        // 更新统计数字 - 使用真实的订单数据
+        // 更新新的8个核心指标
+        this.updateStatNumber('totalOrders', stats.totalOrders || 0);
+        this.updateStatNumber('bookedOrders', stats.bookedOrders || 0);
+        this.updateStatNumber('incompleteOrders', stats.incompleteOrders || 0);
+        this.updateStatNumber('completedOrders', stats.completedOrders || 0);
+        this.updateStatNumber('avgPrice', `¥${stats.avgPrice || 0}`);
+        this.updateStatNumber('avgUserRating', stats.avgUserRating > 0 ? `${stats.avgUserRating}/10` : '-');
+        this.updateStatNumber('avgMerchantRating', stats.avgMerchantRating > 0 ? `${stats.avgMerchantRating}/10` : '-');
+        this.updateStatNumber('completionRate', `${stats.completionRate || 0}%`);
+        
+        // 更新基础数据 
         this.updateStatNumber('totalMerchants', stats.totalMerchants || 0);
-        this.updateStatNumber('totalBookings', stats.totalOrders || 0); // 总订单数
+        this.updateStatNumber('totalBookings', stats.totalOrders || 0); // 总订单数 (dashboard.html使用)
         this.updateStatNumber('totalTemplates', stats.totalTemplates || 0);
         this.updateStatNumber('totalBindCodes', stats.totalBindCodes || 0);
         this.updateStatNumber('totalRegions', stats.totalRegions || 0);
         this.updateStatNumber('totalClicks', stats.totalClicks || 0);
-        
-        // 添加更多统计信息显示
-        this.updateStatNumber('confirmedOrders', stats.confirmedOrders || 0);
-        this.updateStatNumber('completedOrders', stats.completedOrders || 0);
-        this.updateStatNumber('avgPrice', `¥${stats.avgPrice || 0}`);
-        this.updateStatNumber('completionRate', `${stats.completionRate || 0}%`);
-        
-        // 如果页面上有这些元素，也更新它们
-        const avgRatingEl = document.getElementById('avgRating');
-        if (avgRatingEl) {
-            avgRatingEl.textContent = stats.avgRating ? `${stats.avgRating}/10` : '暂无评分';
-        }
         
         // 更新用户交互数据
         this.updateStatNumber('totalInteractions', stats.total_interactions || 0);

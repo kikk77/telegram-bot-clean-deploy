@@ -122,58 +122,96 @@ class ApiService {
             const whereClause = whereConditions.conditions.join(' AND ');
             const params = whereConditions.params;
 
-            // 获取真实订单统计，包括平均价格计算
+            // 1. 基础订单统计 - 使用与订单列表一致的状态判断逻辑
             const orderStats = dbOperations.db.prepare(`
                 SELECT 
                     COUNT(*) as totalOrders,
-                    SUM(CASE WHEN o.status = 'confirmed' THEN 1 ELSE 0 END) as confirmedOrders,
-                    SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completedOrders,
-                    AVG(CAST(o.price AS REAL)) as avgPrice,
-                    CAST(SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) AS FLOAT) / 
-                    NULLIF(COUNT(*), 0) as completionRate
+                    SUM(CASE 
+                        WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' 
+                        THEN 1 ELSE 0 
+                    END) as bookedOrders,
+                    SUM(CASE 
+                        WHEN bs.user_course_status != 'completed' 
+                        OR bs.user_course_status IS NULL
+                        THEN 1 ELSE 0 
+                    END) as incompleteOrders,
+                    SUM(CASE 
+                        WHEN bs.user_course_status = 'completed' 
+                        THEN 1 ELSE 0 
+                    END) as completedOrders
                 FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE ${whereClause}
             `).get(...params);
 
-            // 获取真实评价统计 - 解析JSON评价数据
-            const completedOrdersCount = dbOperations.db.prepare(`
-                SELECT COUNT(*) as count FROM orders o WHERE ${whereClause} AND o.status = 'completed'
+            // 2. 计算平均订单价格 - 根据课程内容和商家价格设置
+            const priceStats = dbOperations.db.prepare(`
+                SELECT 
+                    AVG(
+                        CASE 
+                            WHEN o.price IS NOT NULL AND o.price != '未设置' AND CAST(o.price AS REAL) > 0 
+                            THEN CAST(o.price AS REAL)
+                            WHEN o.course_content = 'p' AND m.price1 IS NOT NULL 
+                            THEN CAST(m.price1 AS REAL)
+                            WHEN o.course_content = 'pp' AND m.price2 IS NOT NULL 
+                            THEN CAST(m.price2 AS REAL)
+                            ELSE NULL
+                        END
+                    ) as avgPrice
+                FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                WHERE ${whereClause}
             `).get(...params);
 
-            let avgRating = 0;
-            if (completedOrdersCount.count > 0) {
-                const userRatingResult = dbOperations.db.prepare(`
-                    SELECT AVG(CAST(json_extract(o.user_evaluation, '$.overall_score') AS REAL)) as avgUserRating
-                    FROM orders o
-                    WHERE ${whereClause} AND o.status = 'completed' AND o.user_evaluation IS NOT NULL
-                `).get(...params);
+            // 3. 计算平均用户评分 - 基于evaluations表
+            const userRatingStats = dbOperations.db.prepare(`
+                SELECT AVG(e.overall_score) as avgUserRating
+                FROM evaluations e
+                INNER JOIN orders o ON e.booking_session_id = o.booking_session_id
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                WHERE e.evaluator_type = 'user' 
+                AND e.status = 'completed' 
+                AND e.overall_score IS NOT NULL
+                AND ${whereClause}
+            `).get(...params);
 
-                const merchantRatingResult = dbOperations.db.prepare(`
-                    SELECT AVG(CAST(json_extract(o.merchant_evaluation, '$.overall_score') AS REAL)) as avgMerchantRating
-                    FROM orders o
-                    WHERE ${whereClause} AND o.status = 'completed' AND o.merchant_evaluation IS NOT NULL
-                `).get(...params);
+            // 4. 计算平均商家评分 - 基于evaluations表
+            const merchantRatingStats = dbOperations.db.prepare(`
+                SELECT AVG(e.overall_score) as avgMerchantRating
+                FROM evaluations e
+                INNER JOIN orders o ON e.booking_session_id = o.booking_session_id
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                WHERE e.evaluator_type = 'merchant' 
+                AND e.status = 'completed' 
+                AND e.overall_score IS NOT NULL
+                AND ${whereClause}
+            `).get(...params);
 
-                const avgUserRating = userRatingResult.avgUserRating || 0;
-                const avgMerchantRating = merchantRatingResult.avgMerchantRating || 0;
-                
-                if (avgUserRating > 0 && avgMerchantRating > 0) {
-                    avgRating = (avgUserRating + avgMerchantRating) / 2;
-                } else {
-                    avgRating = avgUserRating || avgMerchantRating || 0;
-                }
-            }
+            // 5. 计算完成率
+            const completionRate = orderStats.totalOrders > 0 ? 
+                (orderStats.completedOrders / orderStats.totalOrders) * 100 : 0;
 
             const stats = {
                 totalOrders: orderStats.totalOrders || 0,
-                confirmedOrders: orderStats.confirmedOrders || 0,
-                completedOrders: orderStats.completedOrders || 0,
-                avgPrice: orderStats.avgPrice ? Math.round(orderStats.avgPrice) : 0,
-                avgRating: avgRating ? Math.round(avgRating * 10) / 10 : 0,
-                completionRate: orderStats.completionRate ? Math.round(orderStats.completionRate * 100 * 10) / 10 : 0
+                bookedOrders: orderStats.bookedOrders || 0,  // 已预约订单 (confirmed状态)
+                incompleteOrders: orderStats.incompleteOrders || 0,  // 待处理订单 (包括预约完成但课程未完成的订单)
+                completedOrders: orderStats.completedOrders || 0,  // 已完成订单
+                avgPrice: priceStats.avgPrice ? Math.round(priceStats.avgPrice) : 0,  // 平均订单价格
+                avgUserRating: userRatingStats.avgUserRating ? Math.round(userRatingStats.avgUserRating * 10) / 10 : 0,  // 平均用户评分
+                avgMerchantRating: merchantRatingStats.avgMerchantRating ? Math.round(merchantRatingStats.avgMerchantRating * 10) / 10 : 0,  // 平均商家评分
+                completionRate: Math.round(completionRate * 10) / 10  // 完成率
             };
             
             return {
+                success: true,
                 data: stats,
                 fromCache: false
             };
@@ -224,12 +262,21 @@ class ApiService {
             const metrics = dbOperations.db.prepare(`
                 SELECT 
                     COUNT(*) as totalOrders,
-                    SUM(CASE WHEN o.status = 'confirmed' THEN 1 ELSE 0 END) as confirmedOrders,
-                    SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completedOrders,
+                    SUM(CASE 
+                        WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' 
+                        THEN 1 ELSE 0 
+                    END) as confirmedOrders,
+                    SUM(CASE 
+                        WHEN bs.user_course_status = 'completed' 
+                        THEN 1 ELSE 0 
+                    END) as completedOrders,
                     AVG(CAST(o.price AS REAL)) as avgPrice,
-                    CAST(SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) AS FLOAT) / 
-                    NULLIF(COUNT(*), 0) as completionRate
+                    CAST(SUM(CASE 
+                        WHEN bs.user_course_status = 'completed' 
+                        THEN 1 ELSE 0 
+                    END) AS FLOAT) / NULLIF(COUNT(*), 0) as completionRate
                 FROM orders o
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE ${whereClause}
             `).get(...params);
 
@@ -239,7 +286,8 @@ class ApiService {
                     AVG(CAST(json_extract(o.user_evaluation, '$.overall_score') AS REAL)) as avgUserRating,
                     AVG(CAST(json_extract(o.merchant_evaluation, '$.overall_score') AS REAL)) as avgMerchantRating
                 FROM orders o
-                WHERE ${whereClause} AND o.status = 'completed'
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                WHERE ${whereClause} AND bs.user_course_status = 'completed'
             `).get(...params);
 
             const avgRating = (avgRatingResult.avgUserRating + avgRatingResult.avgMerchantRating) / 2 || 0;
@@ -287,8 +335,12 @@ class ApiService {
                 SELECT 
                     ${groupBy} as period,
                     COUNT(*) as orderCount,
-                    SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completedCount
+                    SUM(CASE 
+                        WHEN bs.user_course_status = 'completed' 
+                        THEN 1 ELSE 0 
+                    END) as completedCount
                 FROM orders o
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE ${whereClause}
                 GROUP BY ${groupBy}
                 ORDER BY period DESC
@@ -391,11 +443,22 @@ class ApiService {
 
             const statusData = dbOperations.db.prepare(`
                 SELECT 
-                    o.status,
+                    CASE 
+                        WHEN bs.user_course_status = 'completed' THEN 'completed'
+                        WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
+                        WHEN o.status = 'cancelled' THEN 'cancelled'
+                        ELSE 'pending'
+                    END as status,
                     COUNT(*) as orderCount
                 FROM orders o
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE ${whereClause}
-                GROUP BY o.status
+                GROUP BY CASE 
+                    WHEN bs.user_course_status = 'completed' THEN 'completed'
+                    WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
+                    WHEN o.status = 'cancelled' THEN 'cancelled'
+                    ELSE 'pending'
+                END
                 ORDER BY orderCount DESC
             `).all(...whereConditions.params);
 

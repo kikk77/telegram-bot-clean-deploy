@@ -624,10 +624,12 @@ class OptimizedOrdersManager {
     updateMetricCards(data) {
         const metrics = {
             totalOrders: data.totalOrders || 0,
-            confirmedOrders: data.confirmedOrders || 0,
+            bookedOrders: data.bookedOrders || 0,
+            incompleteOrders: data.incompleteOrders || 0,
             completedOrders: data.completedOrders || 0,
             avgPrice: data.avgPrice || 0,
-            avgRating: data.avgRating || 0,
+            avgUserRating: data.avgUserRating || 0,
+            avgMerchantRating: data.avgMerchantRating || 0,
             completionRate: data.completionRate || 0
         };
 
@@ -635,11 +637,11 @@ class OptimizedOrdersManager {
             const element = document.getElementById(key);
             if (element) {
                 if (key === 'avgPrice') {
-                    element.textContent = `¥${value.toFixed(2)}`;
-                } else if (key === 'avgRating') {
-                    element.textContent = value.toFixed(1);
+                    element.textContent = `¥${value}`;
+                } else if (key === 'avgUserRating' || key === 'avgMerchantRating') {
+                    element.textContent = value > 0 ? `${value}/10` : '-';
                 } else if (key === 'completionRate') {
-                    element.textContent = `${(value * 100).toFixed(1)}%`;
+                    element.textContent = `${value}%`;
                 } else {
                     element.textContent = value.toLocaleString();
                 }
@@ -877,6 +879,12 @@ class OptimizedOrdersManager {
     }
 
     handleTimeRangeChange(value) {
+        // 显示/隐藏自定义日期范围
+        const customDateRange = document.getElementById('customDateRange');
+        if (customDateRange) {
+            customDateRange.style.display = value === 'custom' ? 'flex' : 'none';
+        }
+        
         // 清除缓存
         this.cache.clear();
         
@@ -884,6 +892,76 @@ class OptimizedOrdersManager {
         this.loadOrders(1, false);
         this.updateDashboard();
         this.loadAllCharts();
+    }
+
+    // 重置筛选器
+    resetFilters() {
+        document.getElementById('timeRange').value = '本月';
+        document.getElementById('regionFilter').value = '';
+        document.getElementById('priceRangeFilter').value = '';
+        document.getElementById('merchantFilter').value = '';
+        document.getElementById('searchInput').value = '';
+        
+        // 隐藏自定义日期范围
+        const customDateRange = document.getElementById('customDateRange');
+        if (customDateRange) {
+            customDateRange.style.display = 'none';
+        }
+        
+        // 重新加载数据
+        this.cache.clear();
+        this.updateDashboard();
+        this.loadOrders(1, false);
+        this.loadAllCharts();
+    }
+
+    // 立即刷新
+    refreshDashboard() {
+        // 显示加载状态
+        this.showLoading(true);
+        
+        // 清除所有缓存
+        this.cache.clear();
+        
+        // 重新加载所有数据
+        Promise.all([
+            this.updateDashboard(),
+            this.loadOrders(1, false),
+            this.loadAllCharts()
+        ]).then(() => {
+            this.showLoading(false);
+            this.showMessage('数据已刷新', 'success');
+        }).catch(error => {
+            this.showLoading(false);
+            this.showError('刷新失败: ' + error.message);
+        });
+    }
+
+    // 显示消息
+    showMessage(message, type = 'info') {
+        // 创建消息元素
+        const messageEl = document.createElement('div');
+        messageEl.className = `message message-${type}`;
+        messageEl.textContent = message;
+        messageEl.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'success' ? '#d4edda' : type === 'error' ? '#f8d7da' : '#d1ecf1'};
+            color: ${type === 'success' ? '#155724' : type === 'error' ? '#721c24' : '#0c5460'};
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: 1px solid ${type === 'success' ? '#c3e6cb' : type === 'error' ? '#f5c6cb' : '#bee5eb'};
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+        `;
+        
+        document.body.appendChild(messageEl);
+        
+        // 3秒后自动移除
+        setTimeout(() => {
+            messageEl.remove();
+        }, 3000);
     }
 
     recalculateVirtualScroll() {

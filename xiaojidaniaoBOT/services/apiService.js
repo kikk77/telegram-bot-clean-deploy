@@ -438,20 +438,18 @@ class ApiService {
                     o.user_username,
                     o.teacher_name as merchant_name,
                     o.course_content,
-                    o.price as actual_price,
+                    CAST(o.price AS INTEGER) as actual_price,
                     o.status,
                     o.created_at,
                     o.booking_time,
-                    o.updated_at as completed_time,
+                    o.updated_at,
                     '' as region_name,
                     CASE 
-                        WHEN o.user_evaluation IS NOT NULL
-                        THEN 'completed' 
+                        WHEN o.user_evaluation IS NOT NULL THEN 'completed' 
                         ELSE 'pending' 
                     END as user_evaluation_status,
                     CASE 
-                        WHEN o.merchant_evaluation IS NOT NULL
-                        THEN 'completed' 
+                        WHEN o.merchant_evaluation IS NOT NULL THEN 'completed' 
                         ELSE 'pending' 
                     END as merchant_evaluation_status
                 FROM orders o
@@ -487,12 +485,11 @@ class ApiService {
             const order = dbOperations.db.prepare(`
                 SELECT 
                     o.*,
-                    m.teacher_name as merchant_name,
-                    m.username as merchant_username,
-                    r.name as region_name
+                    o.teacher_name as merchant_name,
+                    '' as merchant_username,
+                    o.teacher_contact,
+                    '' as region_name
                 FROM orders o
-                LEFT JOIN merchants m ON o.merchant_id = m.id
-                LEFT JOIN regions r ON m.region_id = r.id
                 WHERE o.id = ?
             `).get(orderId);
 
@@ -500,8 +497,21 @@ class ApiService {
                 throw new Error('订单不存在');
             }
 
+            // 处理时间字段，确保格式正确
+            const processedOrder = {
+                ...order,
+                region: order.region_name,
+                // 确保时间字段存在并格式正确
+                created_at: order.created_at || new Date().toISOString(),
+                updated_at: order.updated_at || new Date().toISOString(),
+                booking_time: order.booking_time || new Date().toISOString()
+            };
+
+            // 清理辅助字段
+            delete processedOrder.region_name;
+
             return {
-                data: order
+                data: processedOrder
             };
         } catch (error) {
             throw new Error('获取订单详情失败: ' + error.message);

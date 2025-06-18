@@ -215,16 +215,12 @@ function initTestData() {
                     const orderStmt = db.prepare(`
                         INSERT INTO orders (
                             booking_session_id, user_id, user_name, user_username,
-                            merchant_id, teacher_name, teacher_contact,
-                            course_content, price, booking_time, status, 
-                            user_evaluation, merchant_evaluation, report_content,
-                            created_at, updated_at
+                            merchant_id, teacher_name, teacher_contact, course_content,
+                            price, booking_time, status, user_evaluation, merchant_evaluation,
+                            report_content, created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     `);
                     
-                    const bookingTimeStr = new Date(confirmedTime * 1000).toISOString();
-                    const createdAtStr = new Date(confirmedTime * 1000).toISOString();
-                    let updatedAtStr = createdAtStr;
                     let orderStatus = 'confirmed';
                     let userEvaluation = null;
                     let merchantEvaluation = null;
@@ -232,7 +228,6 @@ function initTestData() {
                     // 3. 如果课程完成，更新订单状态并生成评价
                     if (courseCompleted) {
                         orderStatus = 'completed';
-                        updatedAtStr = new Date(completedTime * 1000).toISOString();
                         
                         // 生成用户评价（按照真实评价结构）
                         const userScore = getRandomInt(7, 10);
@@ -284,10 +279,15 @@ function initTestData() {
                         });
                     }
                     
+                    // 生成时间字符串
+                    const bookingTimeStr = new Date(confirmedTime * 1000).toISOString();
+                    const createdAtStr = new Date(confirmedTime * 1000).toISOString();
+                    const updatedAtStr = new Date((courseCompleted ? completedTime : confirmedTime) * 1000).toISOString();
+                    
                     orderStmt.run(
                         bookingSessionId, userId, userName, username,
-                        merchant.id, merchant.teacher_name, merchant.contact,
-                        courseContent, price.toString(), bookingTimeStr, orderStatus,
+                        merchant.id, merchant.teacher_name, merchant.contact, courseContent,
+                        price.toString(), bookingTimeStr, orderStatus,
                         userEvaluation, merchantEvaluation, null,
                         createdAtStr, updatedAtStr
                     );
@@ -321,7 +321,7 @@ function initTestData() {
 
 module.exports = {
     initTestData
-};
+}; 
 
 // 如果直接运行此文件，执行初始化
 if (require.main === module) {

@@ -667,9 +667,47 @@ class OptimizedOrdersManager {
 
     // 工具方法
     formatDate(timestamp) {
-        if (!timestamp) return '-';
-        const date = new Date(timestamp * 1000);
-        return date.toLocaleString('zh-CN');
+        if (!timestamp || timestamp === 'Invalid Date') return '-';
+        
+        let date;
+        
+        // 处理不同的时间格式
+        if (typeof timestamp === 'string') {
+            // ISO字符串格式
+            if (timestamp.includes('T') || timestamp.includes('-')) {
+                date = new Date(timestamp);
+            } else {
+                // 可能是字符串形式的Unix时间戳
+                const numericTimestamp = parseInt(timestamp);
+                if (!isNaN(numericTimestamp)) {
+                    // 判断是秒还是毫秒
+                    date = new Date(numericTimestamp < 1e10 ? numericTimestamp * 1000 : numericTimestamp);
+                } else {
+                    return 'Invalid Date';
+                }
+            }
+        } else if (typeof timestamp === 'number') {
+            // 数字时间戳 - 判断是秒还是毫秒
+            date = new Date(timestamp < 1e10 ? timestamp * 1000 : timestamp);
+        } else if (timestamp instanceof Date) {
+            date = timestamp;
+        } else {
+            return 'Invalid Date';
+        }
+        
+        // 检查日期是否有效
+        if (isNaN(date.getTime())) {
+            return 'Invalid Date';
+        }
+        
+        return date.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
     }
 
     getStatusText(status) {

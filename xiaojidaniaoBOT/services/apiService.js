@@ -565,9 +565,9 @@ class ApiService {
                     status: realStatus,
                     merchant_name: order.actual_merchant_name || order.teacher_name,
                     region_name: order.region_name || '未知地区',
-                    // 添加评价状态字段
-                    user_evaluation_status: order.user_evaluation_status,
-                    merchant_evaluation_status: order.merchant_evaluation_status
+                                    // 添加评价状态字段 - 基于evaluations表的实际数据
+                user_evaluation_status: this.getUserEvaluationStatus(order.booking_session_id),
+                merchant_evaluation_status: this.getMerchantEvaluationStatus(order.booking_session_id)
                 };
             });
 
@@ -593,6 +593,48 @@ class ApiService {
             };
         } catch (error) {
             throw new Error('获取订单列表失败: ' + error.message);
+        }
+    }
+
+    // 获取用户评价状态
+    getUserEvaluationStatus(bookingSessionId) {
+        try {
+            const dbOperations = require('../models/dbOperations');
+            const evaluation = dbOperations.db.prepare(`
+                SELECT status, detailed_scores, overall_score FROM evaluations 
+                WHERE booking_session_id = ? AND evaluator_type = 'user'
+            `).get(bookingSessionId);
+            
+            // 必须状态为completed且有实际评分数据
+            if (evaluation && evaluation.status === 'completed') {
+                const hasDetailedScores = evaluation.detailed_scores && evaluation.detailed_scores !== 'null';
+                const hasOverallScore = evaluation.overall_score !== null;
+                return (hasDetailedScores || hasOverallScore) ? 'completed' : 'pending';
+            }
+            return 'pending';
+        } catch (error) {
+            return 'pending';
+        }
+    }
+    
+    // 获取商家评价状态
+    getMerchantEvaluationStatus(bookingSessionId) {
+        try {
+            const dbOperations = require('../models/dbOperations');
+            const evaluation = dbOperations.db.prepare(`
+                SELECT status, detailed_scores, overall_score FROM evaluations 
+                WHERE booking_session_id = ? AND evaluator_type = 'merchant'
+            `).get(bookingSessionId);
+            
+            // 必须状态为completed且有实际评分数据
+            if (evaluation && evaluation.status === 'completed') {
+                const hasDetailedScores = evaluation.detailed_scores && evaluation.detailed_scores !== 'null';
+                const hasOverallScore = evaluation.overall_score !== null;
+                return (hasDetailedScores || hasOverallScore) ? 'completed' : 'pending';
+            }
+            return 'pending';
+        } catch (error) {
+            return 'pending';
         }
     }
 

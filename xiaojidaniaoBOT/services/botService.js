@@ -537,16 +537,28 @@ function initBotHandlers() {
         handleBindProcess(userId, chatId, text, username);
     });
 
+    // 简单防重复点击保护
+    const recentQueries = new Set();
+    
     // 处理按钮点击
     bot.on('callback_query', async (query) => {
         const chatId = query.message.chat.id;
         const userId = query.from.id;
         const data = query.data;
         const queryId = query.id;
+        
+        // 基础防重复：检查最近是否处理过相同的queryId
+        if (recentQueries.has(queryId)) {
+            console.log(`🛡️ 重复点击被拦截: ${queryId}`);
+            return;
+        }
+        
+        // 标记为已处理，2秒后自动清理
+        recentQueries.add(queryId);
+        setTimeout(() => recentQueries.delete(queryId), 2000);
 
         // 处理按钮点击
         if (data.startsWith('attack_')) {
-            bot.answerCallbackQuery(queryId);
             const merchantId = data.replace('attack_', '');
             
             // 发送认证提示信息
@@ -566,7 +578,7 @@ function initBotHandlers() {
                 }
             };
             
-            bot.sendMessage(chatId, attackMessage, options);
+            await bot.sendMessage(chatId, attackMessage, options);
             return;
         }
         
@@ -583,10 +595,12 @@ function initBotHandlers() {
             const cooldownPeriod = 30 * 60 * 1000; // 30分钟
             
             if (now - lastBookingTime < cooldownPeriod) {
-                bot.answerCallbackQuery(queryId, {
-                    text: `🐤鸡总，咱已经预约过了哦～\n请点击联系方式直接私聊老师。`,
-                    show_alert: true
-                });
+                // 显示重复预约提示 - 通过发送新消息而不是重复应答callback
+                try {
+                    await bot.sendMessage(chatId, `🐤鸡总，咱已经预约过了哦～\n请点击联系方式直接私聊老师。`);
+                } catch (error) {
+                    console.error('发送重复预约提示失败:', error);
+                }
                 return;
             }
             
@@ -664,7 +678,6 @@ function initBotHandlers() {
 
         // 处理绑定流程按钮
         if (data === 'start_bind') {
-            bot.answerCallbackQuery(queryId);
             const userState = userBindStates.get(userId);
             if (userState && userState.step === BindSteps.WELCOME) {
                 userState.step = BindSteps.INPUT_NAME;
@@ -678,13 +691,12 @@ function initBotHandlers() {
                     }
                 };
                 
-                bot.sendMessage(chatId, '👨‍🏫 请输入您的老师名称：', options);
+                await bot.sendMessage(chatId, '👨‍🏫 请输入您的老师名称：', options);
             }
             return;
         }
         
         if (data.startsWith('select_region_')) {
-            bot.answerCallbackQuery(queryId);
             const regionId = parseInt(data.replace('select_region_', ''));
             const userState = userBindStates.get(userId);
             
@@ -702,15 +714,16 @@ function initBotHandlers() {
                     }
                 };
                 
-                bot.sendMessage(chatId, `✅ 已选择地区：${region ? region.name : '未知'}\n\n📞 请输入您的联系方式（如：@username 或 手机号）：`, options);
+                await bot.sendMessage(chatId, `✅ 已选择地区：${region ? region.name : '未知'}\n\n📞 请输入您的联系方式（如：@username 或 手机号）：`, options);
             }
             return;
         }
         
         if (data === 'bind_prev_step') {
-            bot.answerCallbackQuery(queryId);
             const userState = userBindStates.get(userId);
-            if (!userState) return;
+            if (!userState) {
+                return;
+            }
             
             switch (userState.step) {
                 case BindSteps.INPUT_NAME:
@@ -726,7 +739,7 @@ function initBotHandlers() {
                         }
                     };
                     
-                    bot.sendMessage(chatId, `🎉 绑定码验证成功！\n\n📋 绑定码：${userState.bindCode}\n\n点击下方按钮开始绑定流程：`, options);
+                    await bot.sendMessage(chatId, `🎉 绑定码验证成功！\n\n📋 绑定码：${userState.bindCode}\n\n点击下方按钮开始绑定流程：`, options);
                     break;
                     
                 case BindSteps.SELECT_REGION:
@@ -743,7 +756,7 @@ function initBotHandlers() {
                         }
                     };
                     
-                    bot.sendMessage(chatId, '👨‍🏫 请输入您的老师名称：', nameOptions);
+                    await bot.sendMessage(chatId, '👨‍🏫 请输入您的老师名称：', nameOptions);
                     break;
                     
                 case BindSteps.INPUT_CONTACT:
@@ -761,9 +774,6 @@ function initBotHandlers() {
         // 处理原有按钮点击
         if (data.startsWith('contact_')) {
             const buttonId = data.replace('contact_', '');
-            
-            // 立即回应callback query
-            bot.answerCallbackQuery(queryId, { text: '正在处理...' });
             
             setImmediate(() => {
                 try {
@@ -792,9 +802,6 @@ function initBotHandlers() {
             const parts = data.split('_');
             const templateId = parts[1];
             
-            // 立即回应callback query
-            bot.answerCallbackQuery(queryId, { text: '正在处理...' });
-            
             setImmediate(() => {
                 try {
                     const template = messageTemplates.find(t => t.id == templateId);
@@ -815,19 +822,18 @@ function initBotHandlers() {
         
         // 处理课程完成流程
         else if (data.startsWith('course_')) {
-            handleCourseFlow(userId, data, query);
+            await handleCourseFlow(userId, data, query);
             return;
         }
         
         // 处理重新预约流程
         else if (data.startsWith('rebook_')) {
-            handleRebookFlow(userId, data, query);
+            await handleRebookFlow(userId, data, query);
             return;
         }
         
         // 处理返回按钮
         else if (data.startsWith('back_')) {
-            bot.answerCallbackQuery(queryId);
             
             console.log(`处理返回按钮: ${data}`);
             const backType = data.replace('back_', '');
@@ -914,21 +920,20 @@ function initBotHandlers() {
         // 处理约课成功确认
         else if (data.startsWith('booking_success_') || data.startsWith('booking_failed_')) {
             console.log(`路由到约课成功确认处理: ${data}`);
-            handleBookingSuccessFlow(userId, data, query);
+            await handleBookingSuccessFlow(userId, data, query);
             return;
         }
         
         // 处理评价流程
         else if (data.startsWith('evaluate_') || data.startsWith('eval_') || data.startsWith('user_eval_') || data.startsWith('merchant_detail_eval_')) {
             console.log(`路由到评价流程处理: ${data}`);
-            handleEvaluationFlow(userId, data, query);
+            await handleEvaluationFlow(userId, data, query);
             return;
         }
         
         // 如果没有匹配到任何处理逻辑，记录日志
         else {
             console.log(`未处理的callback data: ${data}`);
-            bot.answerCallbackQuery(queryId, { text: '操作完成' });
         }
     });
 }
@@ -1003,7 +1008,6 @@ async function handleCourseFlow(userId, data, query) {
                 if (isUser) {
                     // 用户确认课程完成
                     dbOperations.updateUserCourseStatus(bookingSessionId, 'completed');
-                    bot.answerCallbackQuery(query.id, { text: '课程完成确认' });
                     
                     await sendMessageWithoutDelete(userId, '✅ 您已确认课程完成，即将进入评价环节', {}, 'course_completed');
                     
@@ -1015,7 +1019,6 @@ async function handleCourseFlow(userId, data, query) {
                 } else if (isMerchant) {
                     // 商家确认课程完成
                     dbOperations.updateMerchantCourseStatus(bookingSessionId, 'completed');
-                    bot.answerCallbackQuery(query.id, { text: '课程完成确认' });
                     
                     await sendMessageWithoutDelete(userId, '✅ 您已确认课程完成，即将进入评价环节', {}, 'course_completed');
                     

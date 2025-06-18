@@ -781,11 +781,11 @@ class OptimizedOrdersManager {
             if (result.success) {
                 this.displayOrderDetailsModal(result.data);
             } else {
-                this.showError('获取订单详情失败: ' + result.message);
+                this.showError('获取订单详情失败: ' + (result.error || result.message || '未知错误'));
             }
         } catch (error) {
             console.error('获取订单详情失败:', error);
-            this.showError('获取订单详情失败');
+            this.showError('获取订单详情失败: ' + (error.message || error));
         } finally {
             this.showLoading(false);
         }
@@ -920,17 +920,29 @@ class OptimizedOrdersManager {
                 html += `<div class="mb-2"><strong>总体评分:</strong> ${evaluation.overall_score}/10</div>`;
             }
             
-            if (evaluation.detailed_scores) {
+            // 检查 scores 字段（实际数据结构）而不是 detailed_scores
+            if (evaluation.scores) {
                 html += `<div class="mb-2"><strong>详细评分:</strong></div>`;
                 html += `<ul class="list-unstyled ms-3">`;
-                Object.entries(evaluation.detailed_scores).forEach(([key, score]) => {
+                Object.entries(evaluation.scores).forEach(([key, score]) => {
                     const labels = {
+                        // 原有标签
                         service: '服务态度',
                         skill: '专业技能', 
                         environment: '环境卫生',
                         value: '性价比',
                         punctuality: '准时性',
-                        communication: '沟通能力'
+                        communication: '沟通能力',
+                        
+                        // 添加模拟数据中的标签映射
+                        hardware1: '硬件1',
+                        hardware2: '硬件2', 
+                        hardware3: '硬件3',
+                        software1: '软件1',
+                        length: '长度',
+                        thickness: '粗细',
+                        durability: '持久力',
+                        technique: '技巧'
                     };
                     html += `<li>${labels[key] || key}: ${score}/10</li>`;
                 });
@@ -945,7 +957,8 @@ class OptimizedOrdersManager {
             html += `</div>`;
             return html;
         } catch (error) {
-            return `<div class="text-muted">评价数据格式错误</div>`;
+            console.error('评价数据解析错误:', error);
+            return `<div class="text-muted">评价数据格式错误: ${error.message}</div>`;
         }
     }
 

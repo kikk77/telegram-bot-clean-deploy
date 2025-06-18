@@ -465,6 +465,12 @@ async function processApiRequest(pathname, method, data) {
     if (pathname.match(/^\/api\/evaluations\/\d+$/) && method === 'GET') {
         const evaluationId = pathname.split('/')[3];
         const evaluation = dbOperations.getEvaluationDetails(evaluationId);
+        if (!evaluation) {
+            return {
+                success: false,
+                error: '订单不存在或无评价数据'
+            };
+        }
         return {
             success: true,
             data: evaluation
@@ -588,7 +594,10 @@ async function processApiRequest(pathname, method, data) {
             const orderId = pathname.split('/')[3];
             const apiService = require('./apiService');
             const result = await apiService.getOrderById({ params: { id: orderId } });
-            return result;
+            return {
+                success: true,
+                ...result
+            };
         } catch (error) {
             console.error('获取订单详情失败:', error);
             return { success: false, error: error.message };

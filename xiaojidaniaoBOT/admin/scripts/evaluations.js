@@ -131,7 +131,7 @@ class EvaluationManager {
             document.getElementById('evaluationModal').style.display = 'block';
         } catch (error) {
             console.error('获取评价详情失败:', error);
-            notify.error('获取评价详情失败');
+            notify.error(`获取订单详情失败: ${error.message || error}`);
         }
     }
 

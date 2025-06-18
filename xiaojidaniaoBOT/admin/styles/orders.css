@@ -938,7 +938,9 @@
     display: flex;
     flex-direction: column;
     animation: slideUp 0.3s ease-out;
-    overflow: hidden;
+    overflow-y: auto;
+    gap: 1.5rem;
+    padding: 0 2rem 2rem 2rem;
 }
 
 .modal-header {
@@ -949,6 +951,8 @@
     justify-content: space-between;
     align-items: center;
     border-radius: 16px 16px 0 0;
+    margin: -0px -2rem 0 -2rem;
+    flex-shrink: 0;
 }
 
 .modal-title {
@@ -984,14 +988,7 @@
     transform: scale(1.1);
 }
 
-.modal-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-}
+
 
 /* 简化的卡片布局 */
 .detail-card {
@@ -1157,6 +1154,8 @@
     display: flex;
     justify-content: flex-end;
     background: #f8f9fa;
+    margin: 0 -2rem -2rem -2rem;
+    flex-shrink: 0;
 }
 
 .btn {
@@ -1204,15 +1203,18 @@
     .modal-container {
         width: 95%;
         max-height: 95vh;
+        padding: 0 1.5rem 1.5rem 1.5rem;
+        gap: 1rem;
     }
     
     .modal-header {
         padding: 1rem 1.5rem;
+        margin: 0 -1.5rem 0 -1.5rem;
     }
     
-    .modal-content {
-        padding: 1.5rem;
-        gap: 1rem;
+    .modal-footer {
+        margin: 0 -1.5rem -1.5rem -1.5rem;
+        padding: 1rem 1.5rem;
     }
     
     .card-content {

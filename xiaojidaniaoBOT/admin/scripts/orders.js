@@ -163,7 +163,7 @@ class OptimizedOrdersManager {
             <div class="order-cell" style="flex: 1.5;">${order.user_name || order.username || '未知用户'}</div>
             <div class="order-cell" style="flex: 1.5;">${order.merchant_name || '未知商家'}</div>
             <div class="order-cell" style="flex: 1;">${order.course_content || '-'}</div>
-            <div class="order-cell" style="flex: 0.8;">¥${order.actual_price || order.price || 0}</div>
+            <div class="order-cell" style="flex: 0.8;">${typeof order.actual_price === 'number' ? '¥' + order.actual_price : (order.actual_price || order.price || '未设置')}</div>
             <div class="order-cell" style="flex: 0.8;">
                 <span class="status-badge status-${order.status}">${this.getStatusText(order.status)}</span>
             </div>
@@ -278,6 +278,8 @@ class OptimizedOrdersManager {
             
             // 加载订单列表
             await this.loadOrders();
+            
+            // 注意：图表加载现在由调用方控制，避免重复加载
 
         } catch (error) {
             console.error('加载初始数据失败:', error);
@@ -754,8 +756,87 @@ class OptimizedOrdersManager {
 
     // 公共方法
     async refreshData() {
+        console.log('开始刷新所有数据...');
+        
+        // 1. 更新刷新按钮状态
+        const refreshBtn = document.querySelector('button[onclick="refreshData()"]');
+        const originalText = refreshBtn ? refreshBtn.innerHTML : '';
+        if (refreshBtn) {
+            refreshBtn.innerHTML = '⏳ 刷新中...';
+            refreshBtn.disabled = true;
+        }
+        
+        // 2. 清除所有缓存
         this.clearCache();
-        await this.loadInitialData();
+        
+        // 3. 重置页面状态
+        this.currentPage = 1;
+        this.chartsLoaded.clear();
+        
+        // 4. 显示加载状态
+        this.showLoading(true);
+        
+        try {
+            // 5. 重新加载基础数据和仪表板
+            await this.loadInitialData();
+            
+            // 6. 重新加载所有图表
+            await this.loadAllCharts();
+            
+            console.log('所有数据刷新完成');
+            
+            // 7. 显示成功提示
+            this.showSuccessMessage('数据刷新完成');
+            
+        } catch (error) {
+            console.error('刷新数据失败:', error);
+            this.showError('刷新数据失败: ' + error.message);
+        } finally {
+            this.showLoading(false);
+            
+            // 8. 恢复刷新按钮状态
+            if (refreshBtn) {
+                refreshBtn.innerHTML = originalText || '🔄 刷新数据';
+                refreshBtn.disabled = false;
+            }
+        }
+    }
+    
+    // 显示成功消息
+    showSuccessMessage(message) {
+        // 创建成功提示
+        const successDiv = document.createElement('div');
+        successDiv.className = 'success-message';
+        successDiv.innerHTML = `
+            <div class="success-content">
+                <span class="success-icon">✅</span>
+                <span class="success-text">${message}</span>
+            </div>
+        `;
+        
+        // 添加样式
+        successDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            animation: slideInRight 0.3s ease;
+        `;
+        
+        document.body.appendChild(successDiv);
+        
+        // 3秒后自动移除
+        setTimeout(() => {
+            if (successDiv.parentNode) {
+                successDiv.style.animation = 'slideOutRight 0.3s ease';
+                setTimeout(() => successDiv.remove(), 300);
+            }
+        }, 3000);
     }
 
     async searchOrders(query) {
@@ -836,9 +917,10 @@ class OptimizedOrdersManager {
     }
 
     displayOrderDetailsModal(order) {
-        const modal = document.createElement('div');
-        modal.className = 'order-details-modal';
-        modal.id = 'orderDetailsModal';
+        try {
+            const modal = document.createElement('div');
+            modal.className = 'order-details-modal';
+            modal.id = 'orderDetailsModal';
         
         modal.innerHTML = `
             <div class="modal-overlay"></div>
@@ -853,113 +935,137 @@ class OptimizedOrdersManager {
                     </button>
                 </div>
                 
-                <div class="modal-content">
-                    <!-- 基本信息卡片 -->
-                    <div class="detail-card">
-                        <div class="card-title">
-                            <span class="card-icon">ℹ️</span>
-                            基本信息
+                <!-- 基本信息卡片 -->
+                <div class="detail-card">
+                    <div class="card-title">
+                        <span class="card-icon">ℹ️</span>
+                        基本信息
+                    </div>
+                    <div class="card-content">
+                        <div class="info-item">
+                            <span class="info-label">订单编号</span>
+                            <span class="info-value">#${order.id}</span>
                         </div>
-                        <div class="card-content">
-                            <div class="info-item">
-                                <span class="info-label">订单编号</span>
-                                <span class="info-value">#${order.id}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">用户ID</span>
-                                <span class="info-value">${order.user_id}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">商家ID</span>
-                                <span class="info-value">${order.merchant_id}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">区域</span>
-                                <span class="info-value">${order.region || '-'}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">联系方式</span>
-                                <span class="info-value">${order.teacher_contact || '-'}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">课程内容</span>
-                                <span class="info-value">${order.course_content || '-'}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">价格</span>
-                                <span class="info-value price">¥${order.price || 0}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">状态</span>
-                                <span class="status-badge status-${order.status}">${this.getStatusText(order.status)}</span>
-                            </div>
+                        <div class="info-item">
+                            <span class="info-label">用户名</span>
+                            <span class="info-value">${order.user_username || '未知用户名'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">用户名称</span>
+                            <span class="info-value">${order.user_name || '未知用户名称'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">用户ID</span>
+                            <span class="info-value">${order.user_id}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">商家ID</span>
+                            <span class="info-value">${order.merchant_id}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">商家名称</span>
+                            <span class="info-value">${order.merchant_name || '未知商家'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">区域</span>
+                            <span class="info-value">${order.region || '-'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">联系方式</span>
+                            <span class="info-value">${order.teacher_contact || '-'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">课程类型</span>
+                            <span class="info-value">${order.course_content || '-'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">价格</span>
+                            <span class="info-value price">${typeof order.actual_price === 'number' ? '¥' + order.actual_price : order.actual_price}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">状态</span>
+                            <span class="status-badge status-${order.status}">${this.getStatusText(order.status)}</span>
                         </div>
                     </div>
-
-                    <!-- 时间信息卡片 -->
-                    <div class="detail-card">
-                        <div class="card-title">
-                            <span class="card-icon">🕒</span>
-                            时间信息
-                        </div>
-                        <div class="card-content">
-                            <div class="info-item">
-                                <span class="info-label">预约时间</span>
-                                <span class="info-value">${this.formatDate(order.booking_time)}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">创建时间</span>
-                                <span class="info-value">${this.formatDate(order.created_at)}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">更新时间</span>
-                                <span class="info-value">${this.formatDate(order.updated_at)}</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    ${order.user_evaluation ? `
-                    <!-- 用户评价卡片 -->
-                    <div class="detail-card evaluation-card">
-                        <div class="card-title">
-                            <span class="card-icon">👤</span>
-                            用户评价
-                        </div>
-                        <div class="card-content">
-                            ${this.renderEvaluation(order.user_evaluation)}
-                        </div>
-                    </div>
-                    ` : ''}
-                    
-                    ${order.merchant_evaluation ? `
-                    <!-- 商家评价卡片 -->
-                    <div class="detail-card evaluation-card">
-                        <div class="card-title">
-                            <span class="card-icon">👩‍🏫</span>
-                            商家评价
-                        </div>
-                        <div class="card-content">
-                            ${this.renderEvaluation(order.merchant_evaluation)}
-                        </div>
-                    </div>
-                    ` : ''}
-                    
-                    ${order.report_content ? `
-                    <!-- 报告内容卡片 -->
-                    <div class="detail-card">
-                        <div class="card-title">
-                            <span class="card-icon">📄</span>
-                            报告内容
-                        </div>
-                        <div class="card-content">
-                            <div class="info-item">
-                                <span class="info-label">报告详情</span>
-                                <span class="info-value">${order.report_content}</span>
-                            </div>
-                        </div>
-                    </div>
-                    ` : ''}
                 </div>
+
+                <!-- 时间信息卡片 -->
+                <div class="detail-card">
+                    <div class="card-title">
+                        <span class="card-icon">🕒</span>
+                        时间信息
+                    </div>
+                    <div class="card-content">
+                        <div class="info-item">
+                            <span class="info-label">预约时间</span>
+                            <span class="info-value">${this.formatDate(order.booking_time)}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">创建时间</span>
+                            <span class="info-value">${this.formatDate(order.created_at)}</span>
+                        </div>
+                        ${order.completion_time ? `
+                        <div class="info-item">
+                            <span class="info-label">完成时间</span>
+                            <span class="info-value">${this.formatDate(order.completion_time)}</span>
+                        </div>
+                        ` : ''}
+                        ${order.user_evaluation_time ? `
+                        <div class="info-item">
+                            <span class="info-label">用户评价时间</span>
+                            <span class="info-value">${this.formatDate(order.user_evaluation_time)}</span>
+                        </div>
+                        ` : ''}
+                        ${order.merchant_evaluation_time ? `
+                        <div class="info-item">
+                            <span class="info-label">商家评价时间</span>
+                            <span class="info-value">${this.formatDate(order.merchant_evaluation_time)}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                ${order.user_evaluation ? `
+                <!-- 用户评价卡片 -->
+                <div class="detail-card evaluation-card">
+                    <div class="card-title">
+                        <span class="card-icon">👤</span>
+                        用户评价
+                    </div>
+                    <div class="card-content">
+                        ${this.renderEvaluation(order.user_evaluation)}
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${order.merchant_evaluation ? `
+                <!-- 商家评价卡片 -->
+                <div class="detail-card evaluation-card">
+                    <div class="card-title">
+                        <span class="card-icon">👩‍🏫</span>
+                        商家评价
+                    </div>
+                    <div class="card-content">
+                        ${this.renderEvaluation(order.merchant_evaluation)}
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${order.report_content ? `
+                <!-- 报告内容卡片 -->
+                <div class="detail-card">
+                    <div class="card-title">
+                        <span class="card-icon">📄</span>
+                        报告内容
+                    </div>
+                    <div class="card-content">
+                        <div class="info-item">
+                            <span class="info-label">报告详情</span>
+                            <span class="info-value">${order.report_content}</span>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
                 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="this.closest('.order-details-modal').remove()">
@@ -1013,84 +1119,77 @@ class OptimizedOrdersManager {
             });
         });
         observer.observe(document.body, { childList: true });
+        } catch (error) {
+            console.error('创建订单详情模态框失败:', error);
+            this.showError('显示订单详情失败: ' + error.message);
+        }
     }
 
     renderEvaluation(evaluationData) {
         try {
             const evaluation = typeof evaluationData === 'string' ? JSON.parse(evaluationData) : evaluationData;
             
-            let html = `<div class="evaluation-display">`;
+            let html = '';
             
-            // 总体评分
+            // 总体评分 - 简化样式，避免嵌套
             if (evaluation.overall_score) {
                 html += `
-                <div class="overall-score">
-                    <span class="score-label">总体评分</span>
-                    <div class="score-display">
-                        <span class="score-number">${evaluation.overall_score}</span>
-                        <span class="score-max">/10</span>
-                        <div class="score-stars">
-                            ${this.renderStars(evaluation.overall_score)}
-                        </div>
-                    </div>
+                <div class="info-item">
+                    <span class="info-label">总体评分</span>
+                    <span class="info-value price">${evaluation.overall_score}/10 ${this.renderStars(evaluation.overall_score)}</span>
                 </div>`;
             }
             
-            // 详细评分
+            // 详细评分 - 使用info-item格式
             if (evaluation.scores) {
-                html += `<div class="detailed-scores">`;
-                html += `<div class="scores-grid">`;
-                
                 Object.entries(evaluation.scores).forEach(([key, score]) => {
+                    // 使用真实的中文标签映射
                     const labels = {
-                        // 原有标签
-                        service: '服务态度',
-                        skill: '专业技能', 
-                        environment: '环境卫生',
-                        value: '性价比',
-                        punctuality: '准时性',
-                        communication: '沟通能力',
+                        // 硬件评价
+                        'appearance': '颜值',
+                        'tightness': '松紧',
+                        'feet': '脚型',
+                        'legs': '腿型',
+                        'waist': '腰腹',
+                        'breasts': '咪咪',
                         
-                        // 添加模拟数据中的标签映射
-                        hardware1: '硬件1',
-                        hardware2: '硬件2', 
-                        hardware3: '硬件3',
-                        software1: '软件1',
-                        length: '长度',
-                        thickness: '粗细',
-                        durability: '持久力',
-                        technique: '技巧'
+                        // 软件评价
+                        'temperament': '气质',
+                        'environment': '环境',
+                        'sexiness': '骚气',
+                        'attitude': '态度',
+                        'voice': '叫声',
+                        'initiative': '主动',
+                        
+                        // 其他可能的标签
+                        'service': '服务态度',
+                        'skill': '专业技能',
+                        'punctuality': '准时性',
+                        'communication': '沟通能力',
+                        'value': '性价比'
                     };
                     
                     html += `
-                    <div class="score-item">
-                        <div class="score-item-header">
-                            <span class="score-item-label">${labels[key] || key}</span>
-                            <span class="score-item-value">${score}/10</span>
-                        </div>
-                        <div class="score-bar">
-                            <div class="score-fill" style="width: ${(score/10)*100}%"></div>
-                        </div>
+                    <div class="info-item">
+                        <span class="info-label">${labels[key] || key}</span>
+                        <span class="info-value">${score}/10</span>
                     </div>`;
                 });
-                
-                html += `</div></div>`;
             }
             
             // 评价内容
             if (evaluation.comments) {
                 html += `
-                <div class="evaluation-comment">
-                    <div class="comment-title">评价内容</div>
-                    <div class="comment-text">${evaluation.comments}</div>
+                <div class="info-item">
+                    <span class="info-label">评价内容</span>
+                    <span class="info-value">${evaluation.comments}</span>
                 </div>`;
             }
             
-            html += `</div>`;
             return html;
         } catch (error) {
             console.error('评价数据解析错误:', error);
-            return `<div class="evaluation-error">评价数据格式错误: ${error.message}</div>`;
+            return `<div class="info-item"><span class="info-label">评价数据</span><span class="info-value" style="color: #dc3545;">格式错误: ${error.message}</span></div>`;
         }
     }
 
@@ -1113,11 +1212,35 @@ class OptimizedOrdersManager {
         return stars;
     }
 
-    loadAllCharts() {
-        // 加载所有图表（降级方案）
-        ['ordersChart', 'regionChart', 'priceChart', 'statusChart'].forEach(chartId => {
-            this.loadChart(chartId);
+    async loadAllCharts() {
+        console.log('开始重新加载所有图表...');
+        
+        // 销毁现有图表
+        Object.values(this.charts).forEach(chart => {
+            if (chart) {
+                chart.destroy();
+            }
         });
+        this.charts = {};
+        
+        // 清除图表加载状态
+        this.chartsLoaded.clear();
+        
+        // 并行加载所有图表
+        const chartIds = ['ordersChart', 'regionChart', 'priceChart', 'statusChart'];
+        const chartPromises = chartIds.map(chartId => {
+            return this.loadChart(chartId).catch(error => {
+                console.error(`图表 ${chartId} 加载失败:`, error);
+                this.showChartError(chartId);
+            });
+        });
+        
+        try {
+            await Promise.all(chartPromises);
+            console.log('所有图表重新加载完成');
+        } catch (error) {
+            console.error('批量加载图表时出错:', error);
+        }
     }
 }
 

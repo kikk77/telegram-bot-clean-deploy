@@ -792,130 +792,135 @@ class OptimizedOrdersManager {
     }
 
     displayOrderDetailsModal(order) {
-        // 创建模态框
         const modal = document.createElement('div');
         modal.className = 'order-details-modal';
         modal.id = 'orderDetailsModal';
+        
         modal.innerHTML = `
-            <div class="modal-overlay">
-                <div class="modal-container">
-                    <div class="modal-header">
-                        <h3 class="modal-title">
-                            <span class="order-icon">📋</span>
-                            订单详情 - #${order.id}
-                        </h3>
-                        <button type="button" class="modal-close" onclick="this.closest('.order-details-modal').remove()">
-                            <span>×</span>
-                        </button>
-                    </div>
-                    
-                    <div class="modal-content">
-                        <!-- 基本信息 -->
-                        <div class="info-section">
-                            <div class="section-title">
-                                <span class="section-icon">ℹ️</span>
-                                基本信息
+            <div class="modal-overlay"></div>
+            <div class="modal-container">
+                <div class="modal-header">
+                    <h3 class="modal-title">
+                        <span class="order-icon">📋</span>
+                        订单详情 - #${order.id}
+                    </h3>
+                    <button class="modal-close" onclick="this.closest('.order-details-modal').remove()">
+                        ×
+                    </button>
+                </div>
+                
+                <div class="modal-content">
+                    <!-- 基本信息卡片 -->
+                    <div class="detail-card">
+                        <div class="card-title">
+                            <span class="card-icon">ℹ️</span>
+                            基本信息
+                        </div>
+                        <div class="card-content">
+                            <div class="info-item">
+                                <span class="info-label">订单编号</span>
+                                <span class="info-value">#${order.id}</span>
                             </div>
-                            <div class="info-grid">
-                                <div class="info-item">
-                                    <span class="info-label">订单ID</span>
-                                    <span class="info-value">#${order.id}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">用户</span>
-                                    <span class="info-value">${order.user_name || '未知用户'}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">用户名</span>
-                                    <span class="info-value">${order.user_username || '-'}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">商家</span>
-                                    <span class="info-value">${order.teacher_name || '未知商家'}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">联系方式</span>
-                                    <span class="info-value">${order.teacher_contact || '-'}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">课程内容</span>
-                                    <span class="info-value">${order.course_content || '-'}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">价格</span>
-                                    <span class="info-value price">¥${order.price || 0}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">状态</span>
-                                    <span class="status-badge status-${order.status}">${this.getStatusText(order.status)}</span>
-                                </div>
+                            <div class="info-item">
+                                <span class="info-label">用户ID</span>
+                                <span class="info-value">${order.user_id}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">商家ID</span>
+                                <span class="info-value">${order.merchant_id}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">区域</span>
+                                <span class="info-value">${order.region || '-'}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">联系方式</span>
+                                <span class="info-value">${order.teacher_contact || '-'}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">课程内容</span>
+                                <span class="info-value">${order.course_content || '-'}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">价格</span>
+                                <span class="info-value price">¥${order.price || 0}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">状态</span>
+                                <span class="status-badge status-${order.status}">${this.getStatusText(order.status)}</span>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- 时间信息 -->
-                        <div class="info-section">
-                            <div class="section-title">
-                                <span class="section-icon">🕒</span>
-                                时间信息
+                    <!-- 时间信息卡片 -->
+                    <div class="detail-card">
+                        <div class="card-title">
+                            <span class="card-icon">🕒</span>
+                            时间信息
+                        </div>
+                        <div class="card-content">
+                            <div class="info-item">
+                                <span class="info-label">预约时间</span>
+                                <span class="info-value">${this.formatDate(order.booking_time)}</span>
                             </div>
-                            <div class="info-grid">
-                                <div class="info-item">
-                                    <span class="info-label">预约时间</span>
-                                    <span class="info-value">${this.formatDate(order.booking_time)}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">创建时间</span>
-                                    <span class="info-value">${this.formatDate(order.created_at)}</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="info-label">更新时间</span>
-                                    <span class="info-value">${this.formatDate(order.updated_at)}</span>
-                                </div>
+                            <div class="info-item">
+                                <span class="info-label">创建时间</span>
+                                <span class="info-value">${this.formatDate(order.created_at)}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">更新时间</span>
+                                <span class="info-value">${this.formatDate(order.updated_at)}</span>
                             </div>
                         </div>
-                        
-                        ${order.user_evaluation ? `
-                        <div class="evaluation-section">
-                            <div class="section-title">
-                                <span class="section-icon">👤</span>
-                                用户评价
-                            </div>
-                            <div class="evaluation-content">
-                                ${this.renderEvaluation(order.user_evaluation)}
-                            </div>
-                        </div>
-                        ` : ''}
-                        
-                        ${order.merchant_evaluation ? `
-                        <div class="evaluation-section">
-                            <div class="section-title">
-                                <span class="section-icon">👩‍🏫</span>
-                                商家评价
-                            </div>
-                            <div class="evaluation-content">
-                                ${this.renderEvaluation(order.merchant_evaluation)}
-                            </div>
-                        </div>
-                        ` : ''}
-                        
-                        ${order.report_content ? `
-                        <div class="info-section">
-                            <div class="section-title">
-                                <span class="section-icon">📄</span>
-                                报告内容
-                            </div>
-                            <div class="report-content">
-                                <pre>${order.report_content}</pre>
-                            </div>
-                        </div>
-                        ` : ''}
                     </div>
                     
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="this.closest('.order-details-modal').remove()">
-                            关闭
-                        </button>
+                    ${order.user_evaluation ? `
+                    <!-- 用户评价卡片 -->
+                    <div class="detail-card evaluation-card">
+                        <div class="card-title">
+                            <span class="card-icon">👤</span>
+                            用户评价
+                        </div>
+                        <div class="card-content">
+                            ${this.renderEvaluation(order.user_evaluation)}
+                        </div>
                     </div>
+                    ` : ''}
+                    
+                    ${order.merchant_evaluation ? `
+                    <!-- 商家评价卡片 -->
+                    <div class="detail-card evaluation-card">
+                        <div class="card-title">
+                            <span class="card-icon">👩‍🏫</span>
+                            商家评价
+                        </div>
+                        <div class="card-content">
+                            ${this.renderEvaluation(order.merchant_evaluation)}
+                        </div>
+                    </div>
+                    ` : ''}
+                    
+                    ${order.report_content ? `
+                    <!-- 报告内容卡片 -->
+                    <div class="detail-card">
+                        <div class="card-title">
+                            <span class="card-icon">📄</span>
+                            报告内容
+                        </div>
+                        <div class="card-content">
+                            <div class="info-item">
+                                <span class="info-label">报告详情</span>
+                                <span class="info-value">${order.report_content}</span>
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('.order-details-modal').remove()">
+                        关闭
+                    </button>
                 </div>
             </div>
         `;
@@ -990,7 +995,6 @@ class OptimizedOrdersManager {
             // 详细评分
             if (evaluation.scores) {
                 html += `<div class="detailed-scores">`;
-                html += `<div class="scores-title">详细评分</div>`;
                 html += `<div class="scores-grid">`;
                 
                 Object.entries(evaluation.scores).forEach(([key, score]) => {

@@ -265,19 +265,19 @@ class ApiService {
             switch (period) {
                 case 'hourly':
                     dateFormat = '%Y-%m-%d %H:00:00';
-                    groupBy = "strftime('%Y-%m-%d %H', o.created_at)";
+                    groupBy = "strftime('%Y-%m-%d %H', datetime(o.created_at))";
                     break;
                 case 'weekly':
                     dateFormat = '%Y-W%W';
-                    groupBy = "strftime('%Y-W%W', o.created_at)";
+                    groupBy = "strftime('%Y-W%W', datetime(o.created_at))";
                     break;
                 case 'monthly':
                     dateFormat = '%Y-%m';
-                    groupBy = "strftime('%Y-%m', o.created_at)";
+                    groupBy = "strftime('%Y-%m', datetime(o.created_at))";
                     break;
                 default: // daily
                     dateFormat = '%Y-%m-%d';
-                    groupBy = "date(o.created_at)";
+                    groupBy = "date(datetime(o.created_at))";
             }
 
             const whereConditions = this.buildWhereConditions(filters);
@@ -391,11 +391,11 @@ class ApiService {
 
             const statusData = dbOperations.db.prepare(`
                 SELECT 
-                    status,
+                    o.status,
                     COUNT(*) as orderCount
-                FROM orders 
+                FROM orders o
                 WHERE ${whereClause}
-                GROUP BY status
+                GROUP BY o.status
                 ORDER BY orderCount DESC
             `).all(...whereConditions.params);
 
@@ -522,7 +522,7 @@ class ApiService {
     async getRegions() {
         try {
             const regions = dbOperations.db.prepare(`
-                SELECT id, name FROM regions ORDER BY id
+                SELECT id, name FROM regions WHERE active = 1 ORDER BY sort_order, name
             `).all();
 
             return { data: regions };
@@ -543,10 +543,11 @@ class ApiService {
                     m.contact,
                     m.price1,
                     m.price2,
-                    r.name as region_name
+                    COALESCE(r.name, '未知地区') as region_name
                 FROM merchants m
                 LEFT JOIN regions r ON m.region_id = r.id
-                ORDER BY m.id
+                WHERE m.status = 'active'
+                ORDER BY m.teacher_name
             `).all();
 
             return { data: merchants };
@@ -686,17 +687,43 @@ class ApiService {
         
         if (query.timeRange) {
             const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            
             switch (query.timeRange) {
                 case 'today':
-                    filters.dateFrom = now.toISOString().split('T')[0];
+                case '本日':
+                    filters.dateFrom = today.toISOString().split('T')[0];
+                    filters.dateTo = today.toISOString().split('T')[0];
                     break;
                 case 'week':
-                    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                    filters.dateFrom = weekAgo.toISOString().split('T')[0];
+                case '本周':
+                    // 本周开始（周一）
+                    const weekStart = new Date(today);
+                    weekStart.setDate(today.getDate() - today.getDay() + 1);
+                    filters.dateFrom = weekStart.toISOString().split('T')[0];
+                    filters.dateTo = today.toISOString().split('T')[0];
                     break;
                 case 'month':
-                    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                    filters.dateFrom = monthAgo.toISOString().split('T')[0];
+                case '本月':
+                    // 本月开始
+                    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+                    filters.dateFrom = monthStart.toISOString().split('T')[0];
+                    filters.dateTo = today.toISOString().split('T')[0];
+                    break;
+                case 'quarter':
+                case '本季度':
+                    // 本季度开始
+                    const quarter = Math.floor(today.getMonth() / 3);
+                    const quarterStart = new Date(today.getFullYear(), quarter * 3, 1);
+                    filters.dateFrom = quarterStart.toISOString().split('T')[0];
+                    filters.dateTo = today.toISOString().split('T')[0];
+                    break;
+                case 'year':
+                case '本年':
+                    // 本年开始
+                    const yearStart = new Date(today.getFullYear(), 0, 1);
+                    filters.dateFrom = yearStart.toISOString().split('T')[0];
+                    filters.dateTo = today.toISOString().split('T')[0];
                     break;
             }
         }
@@ -717,26 +744,55 @@ class ApiService {
         const conditions = ['1=1'];
         const params = [];
 
+        // 时间筛选 - 使用ISO字符串格式的时间
         if (filters.dateFrom) {
-            conditions.push('date(o.created_at) >= date(?)');
+            conditions.push('date(datetime(o.created_at)) >= date(?)');
             params.push(filters.dateFrom);
         }
 
         if (filters.dateTo) {
-            conditions.push('date(o.created_at) <= date(?)');
+            conditions.push('date(datetime(o.created_at)) <= date(?)');
             params.push(filters.dateTo);
         }
 
+        // 商家筛选 - 支持按商家ID或老师名称
         if (filters.merchantId) {
-            conditions.push('o.merchant_id = ?');
+            conditions.push('(o.merchant_id = ? OR o.teacher_name = ?)');
             params.push(filters.merchantId);
+            params.push(filters.merchantId); // 当作老师名称搜索
         }
 
+        // 地区筛选 - 通过商家的region_id关联
+        if (filters.regionId) {
+            conditions.push('o.merchant_id IN (SELECT id FROM merchants WHERE region_id = ?)');
+            params.push(filters.regionId);
+        }
+
+        // 价格区间筛选 - 基于实际价格计算
+        if (filters.priceRange) {
+            switch (filters.priceRange) {
+                case '0-500':
+                    conditions.push('CAST(o.price AS INTEGER) BETWEEN 0 AND 500');
+                    break;
+                case '500-1000':
+                    conditions.push('CAST(o.price AS INTEGER) BETWEEN 500 AND 1000');
+                    break;
+                case '1000-2000':
+                    conditions.push('CAST(o.price AS INTEGER) BETWEEN 1000 AND 2000');
+                    break;
+                case '2000+':
+                    conditions.push('CAST(o.price AS INTEGER) > 2000');
+                    break;
+            }
+        }
+
+        // 状态筛选
         if (filters.status) {
             conditions.push('o.status = ?');
             params.push(filters.status);
         }
 
+        // 课程类型筛选
         if (filters.courseType) {
             conditions.push('o.course_content LIKE ?');
             params.push(`%${filters.courseType}%`);

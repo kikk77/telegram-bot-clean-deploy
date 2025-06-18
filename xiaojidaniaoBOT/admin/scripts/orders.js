@@ -798,7 +798,13 @@ class OptimizedOrdersManager {
     }
 
     handleTimeRangeChange(value) {
-        // 实现时间范围变化处理
+        // 清除缓存
+        this.cache.clear();
+        
+        // 重新加载数据
+        this.loadOrders(1, false);
+        this.updateDashboard();
+        this.loadAllCharts();
     }
 
     recalculateVirtualScroll() {

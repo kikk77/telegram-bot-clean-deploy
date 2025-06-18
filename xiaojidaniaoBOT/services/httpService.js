@@ -180,12 +180,24 @@ async function processApiRequest(pathname, method, data) {
         }
     }
 
+    // 检查商家依赖关系API
+    if (pathname.match(/^\/api\/merchants\/\d+\/dependencies$/) && method === 'GET') {
+        const merchantId = pathname.split('/')[3];
+        const dependencies = dbOperations.checkMerchantDependencies(merchantId);
+        return { success: true, data: dependencies };
+    }
+
     // 删除商家API
     if (pathname.match(/^\/api\/merchants\/\d+$/) && method === 'DELETE') {
         const merchantId = pathname.split('/')[3];
-        dbOperations.deleteMerchant(merchantId);
-        loadCacheData();
-        return { success: true };
+        try {
+            dbOperations.deleteMerchant(merchantId);
+            loadCacheData();
+            return { success: true, message: '商家删除成功' };
+        } catch (error) {
+            console.error('删除商家失败:', error);
+            throw new Error('删除商家失败: ' + error.message);
+        }
     }
 
     // 商家绑定状态重置API

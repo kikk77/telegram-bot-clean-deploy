@@ -122,23 +122,97 @@ const dbOperations = {
         return stmt.run(step, bindData, userId);
     },
 
+    // 检查商家删除前的相关数据
+    checkMerchantDependencies(id) {
+        const bookingSessions = db.prepare('SELECT COUNT(*) as count FROM booking_sessions WHERE merchant_id = ?').get(id);
+        const buttons = db.prepare('SELECT COUNT(*) as count FROM buttons WHERE merchant_id = ?').get(id);
+        const ordersByBooking = db.prepare(`
+            SELECT COUNT(*) as count FROM orders 
+            WHERE booking_session_id IN (SELECT id FROM booking_sessions WHERE merchant_id = ?)
+        `).get(id);
+        const ordersByMerchant = db.prepare('SELECT COUNT(*) as count FROM orders WHERE merchant_id = ?').get(id);
+        
+        const totalOrders = ordersByBooking.count + ordersByMerchant.count;
+        
+        return {
+            bookingSessions: bookingSessions.count,
+            buttons: buttons.count,
+            orders: totalOrders,
+            total: bookingSessions.count + buttons.count + totalOrders
+        };
+    },
+
     deleteMerchant(id) {
         // 开始事务，确保数据一致性
         const transaction = db.transaction(() => {
-            // 1. 先删除相关的交互记录（通过按钮关联）
+            console.log(`开始删除商家ID: ${id}`);
+            
+            // 1. 先删除评价会话（基于evaluation_id）
+            const deleteEvalSessionsStmt = db.prepare(`
+                DELETE FROM evaluation_sessions 
+                WHERE evaluation_id IN (
+                    SELECT id FROM evaluations 
+                    WHERE booking_session_id IN (
+                        SELECT id FROM booking_sessions WHERE merchant_id = ?
+                    )
+                )
+            `);
+            const evalSessionResult = deleteEvalSessionsStmt.run(id);
+            console.log(`删除评价会话: ${evalSessionResult.changes} 条`);
+            
+            // 2. 删除预约会话相关的评价记录
+            const deleteEvaluationsStmt = db.prepare(`
+                DELETE FROM evaluations 
+                WHERE booking_session_id IN (
+                    SELECT id FROM booking_sessions WHERE merchant_id = ?
+                )
+            `);
+            const evalResult = deleteEvaluationsStmt.run(id);
+            console.log(`删除评价记录: ${evalResult.changes} 条`);
+            
+            // 3. 删除订单记录（通过booking_session_id）
+            const deleteOrdersByBookingStmt = db.prepare(`
+                DELETE FROM orders 
+                WHERE booking_session_id IN (
+                    SELECT id FROM booking_sessions WHERE merchant_id = ?
+                )
+            `);
+            const orderByBookingResult = deleteOrdersByBookingStmt.run(id);
+            console.log(`通过预约删除订单记录: ${orderByBookingResult.changes} 条`);
+            
+            // 4. 删除直接关联merchant_id的订单记录  
+            const deleteOrdersByMerchantStmt = db.prepare('DELETE FROM orders WHERE merchant_id = ?');
+            const orderByMerchantResult = deleteOrdersByMerchantStmt.run(id);
+            console.log(`直接删除商家订单记录: ${orderByMerchantResult.changes} 条`);
+            
+            // 5. 删除预约会话
+            const deleteBookingSessionsStmt = db.prepare('DELETE FROM booking_sessions WHERE merchant_id = ?');
+            const bookingResult = deleteBookingSessionsStmt.run(id);
+            console.log(`删除预约会话: ${bookingResult.changes} 条`);
+            
+            // 6. 删除相关的交互记录（通过按钮关联）
             const deleteInteractionsStmt = db.prepare(`
                 DELETE FROM interactions 
                 WHERE button_id IN (SELECT id FROM buttons WHERE merchant_id = ?)
             `);
-            deleteInteractionsStmt.run(id);
+            const interactionResult = deleteInteractionsStmt.run(id);
+            console.log(`删除交互记录: ${interactionResult.changes} 条`);
             
-            // 2. 删除商家相关的按钮
+            // 7. 删除商家相关的按钮
             const deleteButtonsStmt = db.prepare('DELETE FROM buttons WHERE merchant_id = ?');
-            deleteButtonsStmt.run(id);
+            const buttonResult = deleteButtonsStmt.run(id);
+            console.log(`删除按钮记录: ${buttonResult.changes} 条`);
             
-            // 3. 最后删除商家
+            // 8. 最后删除商家
             const deleteMerchantStmt = db.prepare('DELETE FROM merchants WHERE id = ?');
-            return deleteMerchantStmt.run(id);
+            const merchantResult = deleteMerchantStmt.run(id);
+            console.log(`删除商家记录: ${merchantResult.changes} 条`);
+            
+            if (merchantResult.changes === 0) {
+                throw new Error('商家记录不存在或已被删除');
+            }
+            
+            return merchantResult;
         });
         
         return transaction();

@@ -1188,8 +1188,15 @@
 
         // 加载商家数据
         async function loadMerchants() {
-            merchants = await apiRequest('/api/merchants');
-            renderMerchants();
+            try {
+                merchants = await apiRequest('/api/merchants');
+                renderMerchants();
+                updateSelects(); // 更新下拉选择框
+            } catch (error) {
+                console.error('加载商家数据失败:', error);
+                showAlert('加载商家数据失败: ' + error.message, 'error');
+                document.getElementById('merchantsList').innerHTML = '<p style="color: red;">加载商家数据失败</p>';
+            }
         }
 
         function renderMerchants() {
@@ -1417,7 +1424,14 @@
 
         // 删除商家
         async function deleteMerchant(id) {
-            if (!confirm('确定要删除这个商家吗？这将同时删除相关的按钮和数据。')) return;
+            // 找到要删除的商家
+            const merchant = merchants.find(m => m.id === id);
+            if (!merchant) {
+                showAlert('未找到指定的商家', 'error');
+                return;
+            }
+
+            if (!confirm(`确定要删除商家"${merchant.teacher_name}"吗？\n\n⚠️ 这将同时删除：\n- 相关的按钮数据\n- 相关的交互记录\n- 相关的预约数据\n\n此操作不可撤销！`)) return;
 
             // 验证管理员密码
             const password = prompt('请输入管理员密码以确认删除操作：');
@@ -1427,12 +1441,74 @@
             }
 
             try {
+                console.log(`开始删除商家: ID=${id}, 姓名=${merchant.teacher_name}`);
                 showLoading();
-                await apiRequest(`/api/merchants/${id}`, 'DELETE');
-                showAlert('商家删除成功');
-                await loadMerchants();
+                
+                // 先检查依赖关系
+                console.log('检查商家依赖关系...');
+                const checkResponse = await fetch(`/api/merchants/${id}/dependencies`);
+                if (checkResponse.ok) {
+                    const dependencies = await checkResponse.json();
+                    if (dependencies.data && dependencies.data.total > 0) {
+                        const details = [];
+                        if (dependencies.data.orders > 0) details.push(`${dependencies.data.orders}个订单`);
+                        if (dependencies.data.bookingSessions > 0) details.push(`${dependencies.data.bookingSessions}个预约`);
+                        if (dependencies.data.buttons > 0) details.push(`${dependencies.data.buttons}个按钮`);
+                        
+                        const confirmMessage = `该商家有以下相关数据：\n${details.join('、')}\n\n继续删除将清除所有相关数据，确定继续吗？`;
+                        if (!confirm(confirmMessage)) {
+                            hideLoading();
+                            return;
+                        }
+                    }
+                }
+                
+                const response = await fetch(`/api/merchants/${id}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status} ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                console.log('删除API响应:', result);
+                
+                if (!result.success) {
+                    throw new Error(result.error || result.message || '删除失败');
+                }
+
+                showAlert(`商家"${merchant.teacher_name}"删除成功`, 'success');
+                console.log('删除成功，开始重新加载数据...');
+                
+                // 重新加载所有相关数据
+                await Promise.all([
+                    loadMerchants(),
+                    loadButtons(),
+                    loadStats() // 如果存在统计数据也需要刷新
+                ]);
+                
+                console.log('数据重新加载完成');
+                
             } catch (error) {
-                showAlert('删除商家失败: ' + error.message, 'error');
+                console.error('删除商家失败:', error);
+                
+                // 详细的错误信息处理
+                let errorMessage = '删除商家失败';
+                if (error.message) {
+                    if (error.message.includes('FOREIGN KEY constraint')) {
+                        errorMessage = '删除失败：该商家仍有相关数据引用，请先删除相关的订单、预约或其他关联数据';
+                    } else if (error.message.includes('HTTP错误')) {
+                        errorMessage = `网络错误：${error.message}`;
+                    } else {
+                        errorMessage = `删除失败：${error.message}`;
+                    }
+                }
+                
+                showAlert(errorMessage, 'error');
             } finally {
                 hideLoading();
             }

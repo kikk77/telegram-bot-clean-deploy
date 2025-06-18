@@ -429,7 +429,7 @@ class ApiService {
             const whereClause = whereConditions.conditions.join(' AND ');
             const params = whereConditions.params;
 
-            // 获取真实订单数据，关联商家和地区信息
+            // 获取真实订单数据，关联商家和地区信息，包含评价状态
             const rawOrders = dbOperations.db.prepare(`
                 SELECT 
                     o.*,
@@ -442,7 +442,19 @@ class ApiService {
                     r.name as region_name,
                     bs.user_course_status,
                     bs.merchant_course_status,
-                    bs.updated_at as completion_time
+                    bs.updated_at as completion_time,
+                    -- 检查用户评价是否存在
+                    (SELECT CASE WHEN COUNT(*) > 0 THEN 'completed' ELSE 'pending' END 
+                     FROM evaluations 
+                     WHERE booking_session_id = o.booking_session_id 
+                     AND evaluator_type = 'user' 
+                     AND status = 'completed') as user_evaluation_status,
+                    -- 检查商家评价是否存在
+                    (SELECT CASE WHEN COUNT(*) > 0 THEN 'completed' ELSE 'pending' END 
+                     FROM evaluations 
+                     WHERE booking_session_id = o.booking_session_id 
+                     AND evaluator_type = 'merchant' 
+                     AND status = 'completed') as merchant_evaluation_status
                 FROM orders o
                 LEFT JOIN merchants m ON o.merchant_id = m.id
                 LEFT JOIN regions r ON m.region_id = r.id
@@ -486,7 +498,10 @@ class ApiService {
                     price: actualPrice,
                     status: realStatus,
                     merchant_name: order.actual_merchant_name || order.teacher_name,
-                    region_name: order.region_name || '未知地区'
+                    region_name: order.region_name || '未知地区',
+                    // 添加评价状态字段
+                    user_evaluation_status: order.user_evaluation_status,
+                    merchant_evaluation_status: order.merchant_evaluation_status
                 };
             });
 

@@ -169,9 +169,7 @@ class OptimizedOrdersManager {
             </div>
             <div class="order-cell" style="flex: 1.2;">${this.formatDate(order.created_at)}</div>
             <div class="order-cell" style="flex: 1;">
-                ${order.user_evaluation_status === 'completed' && order.merchant_evaluation_status === 'completed' ? 
-                    '<span class="eval-complete">已完成</span>' : 
-                    '<span class="eval-pending">待评价</span>'}
+                ${this.getEvaluationStatusDisplay(order)}
             </div>
             <div class="order-cell" style="flex: 0.8;">
                 <button class="btn btn-sm btn-primary" onclick="ordersManager.showOrderDetails('${order.id}')">详情</button>
@@ -1240,6 +1238,21 @@ class OptimizedOrdersManager {
             console.log('所有图表重新加载完成');
         } catch (error) {
             console.error('批量加载图表时出错:', error);
+        }
+    }
+
+    getEvaluationStatusDisplay(order) {
+        const userCompleted = order.user_evaluation_status === 'completed';
+        const merchantCompleted = order.merchant_evaluation_status === 'completed';
+        
+        if (userCompleted && merchantCompleted) {
+            return '<span class="eval-complete" style="color: #4caf50; font-weight: 500;">✅ 双向评价</span>';
+        } else if (userCompleted && !merchantCompleted) {
+            return '<span class="eval-partial" style="color: #2196f3; font-weight: 500;">👤 用户已评</span>';
+        } else if (!userCompleted && merchantCompleted) {
+            return '<span class="eval-partial" style="color: #ff9800; font-weight: 500;">👩‍🏫 老师已评</span>';
+        } else {
+            return '<span class="eval-pending" style="color: #9e9e9e; font-weight: 500;">⏳ 未评价</span>';
         }
     }
 }

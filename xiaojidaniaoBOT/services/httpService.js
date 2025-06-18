@@ -154,6 +154,44 @@ async function processApiRequest(pathname, method, data) {
         }
     }
 
+    // 强制删除绑定码API
+    if (pathname === '/api/bind-codes/force-delete' && method === 'DELETE') {
+        try {
+            // 直接操作数据库，然后重新加载缓存
+            dbOperations.deleteBindCode(data.id);
+            loadCacheData();
+            return { success: true, message: '绑定码已强制删除' };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 批量删除测试绑定码API
+    if (pathname === '/api/bind-codes/batch-delete-test' && method === 'DELETE') {
+        try {
+            // 获取所有绑定码，找出测试绑定码并删除
+            const allBindCodes = dbOperations.getAllBindCodes();
+            const testBindCodes = allBindCodes.filter(bc => 
+                bc.description && bc.description.includes('测试')
+            );
+            
+            let deletedCount = 0;
+            testBindCodes.forEach(bindCode => {
+                try {
+                    dbOperations.deleteBindCode(bindCode.id);
+                    deletedCount++;
+                } catch (error) {
+                    console.error(`删除测试绑定码 ${bindCode.code} 失败:`, error);
+                }
+            });
+            
+            loadCacheData();
+            return { success: true, data: { deletedCount }, message: `已删除 ${deletedCount} 个测试绑定码` };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+
     // 地区管理API
     if (pathname === '/api/regions') {
         if (method === 'GET') {

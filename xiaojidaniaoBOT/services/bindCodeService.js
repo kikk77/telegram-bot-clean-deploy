@@ -154,15 +154,15 @@ class BindCodeService {
     }
 
     // 删除绑定码
-    deleteBindCode(id) {
+    deleteBindCode(id, force = false) {
         try {
             const bindCode = this.getBindCodeById(id);
             if (!bindCode) {
                 throw new Error('绑定码不存在');
             }
             
-            if (bindCode.used) {
-                throw new Error('已使用的绑定码无法删除');
+            if (bindCode.used && !force) {
+                throw new Error('已使用的绑定码无法删除，如需强制删除请使用force参数');
             }
             
             // 从数据库删除
@@ -171,11 +171,40 @@ class BindCodeService {
             // 从缓存中移除
             this.bindCodes.delete(bindCode.code);
             
-            console.log(`删除绑定码: ${bindCode.code}`);
+            console.log(`删除绑定码: ${bindCode.code}${force ? ' (强制删除)' : ''}`);
             return true;
         } catch (error) {
             console.error('删除绑定码失败:', error);
             throw error;
+        }
+    }
+
+    // 强制删除已使用的绑定码（管理员功能）
+    forceDeleteBindCode(id) {
+        return this.deleteBindCode(id, true);
+    }
+
+    // 批量删除测试绑定码
+    deleteBatchTestBindCodes() {
+        try {
+            const testBindCodes = Array.from(this.bindCodes.values())
+                .filter(bc => bc.description && bc.description.includes('测试'));
+            
+            let deletedCount = 0;
+            testBindCodes.forEach(bindCode => {
+                try {
+                    this.deleteBindCode(bindCode.id, true); // 强制删除
+                    deletedCount++;
+                } catch (error) {
+                    console.error(`删除测试绑定码 ${bindCode.code} 失败:`, error);
+                }
+            });
+            
+            console.log(`批量删除了 ${deletedCount} 个测试绑定码`);
+            return deletedCount;
+        } catch (error) {
+            console.error('批量删除测试绑定码失败:', error);
+            return 0;
         }
     }
 

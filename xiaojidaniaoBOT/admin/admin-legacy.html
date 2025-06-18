@@ -275,6 +275,10 @@
 
             <div class="card">
                 <h3>📋 绑定码列表</h3>
+                <div style="margin-bottom: 15px;">
+                    <button class="btn btn-danger" onclick="batchDeleteTestBindCodes()">🗑️ 批量删除测试绑定码</button>
+                    <small style="margin-left: 10px; color: #666;">将删除所有描述中包含"测试"的绑定码（包括已使用的）</small>
+                </div>
                 <div id="bindCodesList"></div>
             </div>
         </div>
@@ -858,7 +862,10 @@
                         </div>
                     </div>
                     <div class="list-item-actions">
-                        ${!code.used ? `<button class="btn btn-danger btn-small" onclick="deleteBindCode(${code.id})">删除</button>` : ''}
+                        ${!code.used ? 
+                            `<button class="btn btn-danger btn-small" onclick="deleteBindCode(${code.id})">删除</button>` : 
+                            `<button class="btn btn-warning btn-small" onclick="forceDeleteBindCode(${code.id})">强制删除</button>`
+                        }
                     </div>
                 </div>
             `).join('');
@@ -893,6 +900,38 @@
                 await loadBindCodes();
             } catch (error) {
                 showAlert('删除绑定码失败: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 强制删除已使用的绑定码
+        async function forceDeleteBindCode(id) {
+            if (!confirm('确定要强制删除这个已使用的绑定码吗？\n注意：这将删除已经绑定的商家相关的绑定码记录！')) return;
+
+            try {
+                showLoading();
+                await apiRequest('/api/bind-codes/force-delete', 'DELETE', { id });
+                showAlert('绑定码已强制删除');
+                await loadBindCodes();
+            } catch (error) {
+                showAlert('强制删除绑定码失败: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 批量删除测试绑定码
+        async function batchDeleteTestBindCodes() {
+            if (!confirm('确定要批量删除所有测试绑定码吗？\n这将删除所有描述中包含"测试"的绑定码（包括已使用的）！')) return;
+
+            try {
+                showLoading();
+                const result = await apiRequest('/api/bind-codes/batch-delete-test', 'DELETE');
+                showAlert(`批量删除成功！删除了 ${result.deletedCount} 个测试绑定码`);
+                await loadBindCodes();
+            } catch (error) {
+                showAlert('批量删除测试绑定码失败: ' + error.message, 'error');
             } finally {
                 hideLoading();
             }

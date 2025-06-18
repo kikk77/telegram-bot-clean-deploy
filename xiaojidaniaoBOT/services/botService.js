@@ -1,5 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const dbOperations = require('../models/dbOperations');
+const evaluationService = require('./evaluationService');
 
 // 环境变量
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -1731,8 +1732,28 @@ async function handleMerchantEvaluationConfirm(userId, data, query) {
             const score = parseInt(parts[2]);
             const evaluationId = parts[3];
             
+            console.log('=== 商家评价确认调试 ===');
+            console.log('callback_data:', data);
+            console.log('解析parts:', parts);
+            console.log('解析score:', score, typeof score);
+            console.log('解析evaluationId:', evaluationId);
+            
             // 保存评分
-            dbOperations.updateEvaluation(evaluationId, score, null, null, 'overall_completed');
+            console.log('调用updateEvaluation保存总体评分');
+            try {
+                const result = evaluationService.updateEvaluation(evaluationId, score, null, null, 'overall_completed');
+                console.log('updateEvaluation执行结果:', result);
+                
+                // 验证保存是否成功
+                const savedEval = evaluationService.getEvaluation(evaluationId);
+                console.log('保存后的评价数据:', savedEval);
+                
+            } catch (error) {
+                console.error('保存总体评分失败:', error);
+                bot.sendMessage(userId, '保存评分失败，请重试');
+                return;
+            }
+            console.log('=== 商家评价确认调试结束 ===');
             
             // 询问是否进行详细评价
             const message = `是否进行详细评价？`;
@@ -1990,7 +2011,7 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
                 const detailScores = JSON.parse(evalSession.temp_data || '{}');
                 
                 // 保存详细评价到数据库
-                dbOperations.updateEvaluation(evaluationId, null, detailScores, '详细评价已完成', 'completed');
+                evaluationService.updateEvaluation(evaluationId, null, detailScores, '详细评价已完成', 'completed');
                 
                 // 发送完成消息
                 await sendMessageWithDelete(userId, '🎉 详细评价提交成功！\n\n感谢您的耐心评价，这将帮助我们提供更好的服务。', {}, 'detailed_evaluation_complete');
@@ -2077,9 +2098,12 @@ async function handleMerchantDetailEvaluationScoring(userId, data, query) {
             return;
             
         } else if (data.startsWith('merchant_detail_eval_no_')) {
-            // 不进行详细评价
+            // 不进行详细评价 - 只更新状态，保留已有的总体评分
             evaluationId = data.replace('merchant_detail_eval_no_', '');
-            dbOperations.updateEvaluation(evaluationId, null, null, null, 'completed');
+            
+            // 使用evaluationService，只更新状态，保留总体评分
+            evaluationService.updateEvaluation(evaluationId, null, null, null, 'completed');
+            
             bot.sendMessage(userId, '感谢您的支持。欢迎下次使用。');
             return;
             
@@ -2245,8 +2269,18 @@ async function handleMerchantDetailEvaluationConfirm(userId, data, query) {
         if (evalSession) {
             const detailScores = JSON.parse(evalSession.temp_data || '{}');
             
-            // 保存详细评价到数据库
-            dbOperations.updateEvaluation(evaluationId, null, detailScores, '详细评价已完成', 'completed');
+            // 获取现有评价，保留overall_score
+            const existingEvaluation = evaluationService.getEvaluation(evaluationId);
+            const existingOverallScore = existingEvaluation ? existingEvaluation.overall_score : null;
+            
+            console.log('=== 商家详细评价确认调试 ===');
+            console.log('evaluationId:', evaluationId);
+            console.log('detailScores:', detailScores);
+            console.log('existingOverallScore:', existingOverallScore);
+            console.log('=== 商家详细评价确认调试结束 ===');
+            
+            // 保存详细评价到数据库，保留原有的overall_score
+            evaluationService.updateEvaluation(evaluationId, existingOverallScore, detailScores, '详细评价已完成', 'completed');
             
             // 发送完成消息
             bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n感谢您的耐心评价，这将帮助我们提供更好的服务。');

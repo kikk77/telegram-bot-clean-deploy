@@ -47,6 +47,13 @@ class ApiService {
         // 导出接口 (暂时禁用，后续实现)
         // this.routes.set('GET /api/export/orders', this.exportOrders.bind(this));
         // this.routes.set('GET /api/export/stats', this.exportStats.bind(this));
+
+        // 测试端点
+        this.routes['/api/test/create-evaluation'] = { method: 'POST', handler: this.createTestEvaluation.bind(this) };
+        this.routes['/api/test/update-evaluation'] = { method: 'POST', handler: this.updateTestEvaluation.bind(this) };
+        this.routes['/api/test/get-evaluation/:id'] = { method: 'GET', handler: this.getTestEvaluation.bind(this) };
+        
+        console.log('API路由设置完成，共', Object.keys(this.routes).length, '个路由');
     }
 
     // 处理HTTP请求
@@ -184,7 +191,7 @@ class ApiService {
                 AND ${whereClause}
             `).get(...params);
 
-            // 4. 计算平均商家评分 - 基于evaluations表
+            // 4. 计算平均出击素质 - 基于evaluations表
             const merchantRatingStats = dbOperations.db.prepare(`
                 SELECT AVG(e.overall_score) as avgMerchantRating
                 FROM evaluations e
@@ -209,7 +216,7 @@ class ApiService {
                 completedOrders: orderStats.completedOrders || 0,  // 已完成订单
                 avgPrice: priceStats.avgPrice ? Math.round(priceStats.avgPrice) : 0,  // 平均订单价格
                 avgUserRating: userRatingStats.avgUserRating ? Math.round(userRatingStats.avgUserRating * 10) / 10 : 0,  // 平均用户评分
-                avgMerchantRating: merchantRatingStats.avgMerchantRating ? Math.round(merchantRatingStats.avgMerchantRating * 10) / 10 : 0,  // 平均商家评分
+                avgMerchantRating: merchantRatingStats.avgMerchantRating ? Math.round(merchantRatingStats.avgMerchantRating * 10) / 10 : 0,  // 平均出击素质
                 completionRate: Math.round(completionRate * 10) / 10  // 完成率
             };
             
@@ -626,13 +633,9 @@ class ApiService {
                 WHERE booking_session_id = ? AND evaluator_type = 'merchant'
             `).get(bookingSessionId);
             
-            // 必须状态为completed且有实际评分数据
-            if (evaluation && evaluation.status === 'completed') {
-                const hasDetailedScores = evaluation.detailed_scores && evaluation.detailed_scores !== 'null';
-                const hasOverallScore = evaluation.overall_score !== null;
-                return (hasDetailedScores || hasOverallScore) ? 'completed' : 'pending';
-            }
-            return 'pending';
+            // 商家评价：status为completed即视为已完成评价
+            // 包括简单评价（选择"不了👋"）和详细评价
+            return evaluation && evaluation.status === 'completed' ? 'completed' : 'pending';
         } catch (error) {
             return 'pending';
         }
@@ -661,6 +664,7 @@ class ApiService {
                         'overall_score', overall_score,
                         'detailed_scores', detailed_scores,
                         'comments', comments,
+                        'status', status,
                         'created_at', created_at
                     ) FROM evaluations 
                      WHERE booking_session_id = o.booking_session_id 
@@ -670,6 +674,7 @@ class ApiService {
                         'overall_score', overall_score,
                         'detailed_scores', detailed_scores,
                         'comments', comments,
+                        'status', status,
                         'created_at', created_at
                     ) FROM evaluations 
                      WHERE booking_session_id = o.booking_session_id 
@@ -750,11 +755,16 @@ class ApiService {
             try {
                 if (order.merchant_evaluation_data) {
                     const evalData = JSON.parse(order.merchant_evaluation_data);
+                    // 检查是否有实际评分数据
+                    const hasDetailedScores = evalData.detailed_scores && evalData.detailed_scores !== 'null';
+                    const hasOverallScore = evalData.overall_score !== null;
+                    
                     merchantEvaluation = {
                         overall_score: evalData.overall_score,
-                        scores: JSON.parse(evalData.detailed_scores || '{}'),
-                        comments: evalData.comments,
-                        created_at: formatTime(evalData.created_at)
+                        scores: hasDetailedScores ? JSON.parse(evalData.detailed_scores) : {},
+                        comments: evalData.comments || (hasDetailedScores ? null : `商家给出总体评分: ${evalData.overall_score}/10`),
+                        created_at: formatTime(evalData.created_at),
+                        is_simple_evaluation: !hasDetailedScores && hasOverallScore // 标记是否为简单评价（有总体评分但无详细评分）
                     };
                 }
             } catch (e) {
@@ -778,8 +788,8 @@ class ApiService {
                 
                 // 状态信息  
                 status: realStatus,
-                user_evaluation_status: order.user_course_status === 'completed' ? 'completed' : 'pending',
-                merchant_evaluation_status: order.merchant_course_status === 'completed' ? 'completed' : 'pending',
+                user_evaluation_status: this.getUserEvaluationStatus(order.booking_session_id),
+                merchant_evaluation_status: this.getMerchantEvaluationStatus(order.booking_session_id),
                 
                 // 时间信息
                 booking_time: order.booking_time, // 预约时间
@@ -1216,6 +1226,82 @@ class ApiService {
         } catch (error) {
             console.error('获取计数失败:', error);
             throw new Error('获取计数失败: ' + error.message);
+        }
+    }
+
+    // 测试端点 - 创建评价记录
+    async createTestEvaluation({ body }) {
+        try {
+            const { bookingSessionId, evaluatorType, evaluatorId, targetId } = body;
+            
+            // 创建评价记录
+            const evaluationId = dbOperations.db.prepare(`
+                INSERT INTO evaluations (
+                    booking_session_id, evaluator_type, evaluator_id, target_id, status
+                ) VALUES (?, ?, ?, ?, 'pending')
+            `).run(bookingSessionId, evaluatorType, evaluatorId, targetId).lastInsertRowid;
+            
+            return {
+                success: true,
+                evaluationId: evaluationId,
+                message: '测试评价记录创建成功'
+            };
+        } catch (error) {
+            throw new Error('创建测试评价失败: ' + error.message);
+        }
+    }
+
+    // 测试端点 - 更新评价
+    async updateTestEvaluation({ body }) {
+        try {
+            const { evaluationId, overallScore, detailScores, textComment, status } = body;
+            
+            console.log('=== 测试API调用updateEvaluation ===');
+            console.log('传入参数:', { evaluationId, overallScore, detailScores, textComment, status });
+            
+            const result = evaluationService.updateEvaluation(
+                evaluationId, 
+                overallScore || null, 
+                detailScores || null, 
+                textComment || null, 
+                status || null
+            );
+            
+            // 获取更新后的数据
+            const evaluation = dbOperations.db.prepare(`
+                SELECT * FROM evaluations WHERE id = ?
+            `).get(evaluationId);
+            
+            return {
+                success: true,
+                result: result,
+                evaluation: evaluation,
+                message: '评价更新成功'
+            };
+        } catch (error) {
+            throw new Error('更新测试评价失败: ' + error.message);
+        }
+    }
+
+    // 测试端点 - 获取评价数据
+    async getTestEvaluation({ params }) {
+        try {
+            const evaluationId = params.id;
+            
+            const evaluation = dbOperations.db.prepare(`
+                SELECT * FROM evaluations WHERE id = ?
+            `).get(evaluationId);
+            
+            if (!evaluation) {
+                throw new Error('评价记录不存在');
+            }
+            
+            return {
+                success: true,
+                data: evaluation
+            };
+        } catch (error) {
+            throw new Error('获取测试评价失败: ' + error.message);
         }
     }
 }

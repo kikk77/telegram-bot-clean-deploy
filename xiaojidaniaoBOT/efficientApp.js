@@ -12,14 +12,14 @@ if (!BOT_TOKEN) {
 
 // 导入高效服务
 const EfficientBotService = require('./services/efficientBotService');
-const HttpService = require('./services/httpService');
+const { createHttpServer } = require('./services/httpService');
 const { initTestData } = require('./utils/initData');
 const { initScheduler } = require('./services/schedulerService');
 // statsService将在数据库初始化后延迟加载
 
 // 全局服务实例
 let botService = null;
-let httpService = null;
+let httpServer = null;
 
 // 设置Webhook
 async function setupWebhook(bot) {
@@ -60,8 +60,7 @@ async function start() {
         const statsService = require('./services/statsService');
         
         // 创建并启动HTTP服务（包含优化的订单管理系统）
-        httpService = new HttpService(PORT);
-        httpService.start();
+        httpServer = createHttpServer();
         
         // 设置全局引用供webhook使用
         global.botService = botService;
@@ -111,8 +110,8 @@ async function gracefulShutdown() {
             await botService.stop();
         }
         
-        if (httpService) {
-            httpService.stop();
+        if (httpServer) {
+            httpServer.close();
         }
         
         console.log('✅ 高效机器人已安全关闭');

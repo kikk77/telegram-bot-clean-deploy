@@ -48,6 +48,17 @@ class EvaluationService {
     // 更新评价数据
     updateEvaluation(evaluationId, overallScore = null, detailScores = null, textComment = null, status = null) {
         try {
+            console.log('=== updateEvaluation 调试信息 ===');
+            console.log('evaluationId:', evaluationId);
+            console.log('overallScore:', overallScore, typeof overallScore);
+            console.log('detailScores:', detailScores);
+            console.log('textComment:', textComment);
+            console.log('status:', status);
+            
+            // 先获取当前评价数据
+            const currentEval = dbOperations.db.prepare('SELECT * FROM evaluations WHERE id = ?').get(evaluationId);
+            console.log('当前评价数据:', currentEval);
+            
             const now = Math.floor(Date.now() / 1000);
             let updateFields = ['updated_at = ?'];
             let values = [now];
@@ -55,28 +66,42 @@ class EvaluationService {
             if (overallScore !== null) {
                 updateFields.push('overall_score = ?');
                 values.push(overallScore);
+                console.log('将更新overall_score为:', overallScore);
+            } else {
+                console.log('overallScore为null，不更新overall_score字段');
             }
             
             if (detailScores !== null) {
                 updateFields.push('detail_scores = ?');
                 values.push(typeof detailScores === 'object' ? JSON.stringify(detailScores) : detailScores);
+                console.log('将更新detail_scores');
             }
             
             if (textComment !== null) {
                 updateFields.push('text_comment = ?');
                 values.push(textComment);
+                console.log('将更新text_comment');
             }
             
             if (status !== null) {
                 updateFields.push('status = ?');
                 values.push(status);
+                console.log('将更新status为:', status);
             }
             
             values.push(evaluationId);
             
-            const result = dbOperations.db.prepare(`
-                UPDATE evaluations SET ${updateFields.join(', ')} WHERE id = ?
-            `).run(...values);
+            const sql = `UPDATE evaluations SET ${updateFields.join(', ')} WHERE id = ?`;
+            console.log('执行SQL:', sql);
+            console.log('参数:', values);
+            
+            const result = dbOperations.db.prepare(sql).run(...values);
+            console.log('更新结果:', result);
+            
+            // 更新后再次查询确认
+            const updatedEval = dbOperations.db.prepare('SELECT * FROM evaluations WHERE id = ?').get(evaluationId);
+            console.log('更新后的评价数据:', updatedEval);
+            console.log('=== updateEvaluation 调试结束 ===');
             
             if (result.changes > 0) {
                 console.log(`评价更新成功: ID ${evaluationId}`);

@@ -1205,19 +1205,72 @@ class OptimizedOrdersManager {
         try {
             const evaluation = typeof evaluationData === 'string' ? JSON.parse(evaluationData) : evaluationData;
             
+            // 详细调试信息
+            console.log('渲染评价数据:', evaluation);
+            console.log('overall_score类型:', typeof evaluation.overall_score);
+            console.log('overall_score值:', evaluation.overall_score);
+            console.log('是否为简单评价:', evaluation.is_simple_evaluation);
+            
             let html = '';
             
-            // 总体评分 - 简化样式，避免嵌套
-            if (evaluation.overall_score) {
+            // 检查是否为简单评价
+            if (evaluation.is_simple_evaluation) {
                 html += `
                 <div class="info-item">
-                    <span class="info-label">总体评分</span>
+                    <span class="info-label">评价类型</span>
+                    <span class="info-value" style="color: #ff9800;">简单评价</span>
+                </div>`;
+                
+                // 显示总体评分（如果有）
+                if (evaluation.overall_score !== null && evaluation.overall_score !== undefined) {
+                    html += `
+                    <div class="info-item">
+                        <span class="info-label">出击素质</span>
+                        <span class="info-value price">${evaluation.overall_score}/10 ${this.renderStars(evaluation.overall_score)}</span>
+                    </div>`;
+                } else {
+                    console.warn('简单评价但overall_score为空:', evaluation.overall_score);
+                }
+                
+                html += `
+                <div class="info-item">
+                    <span class="info-label">评价内容</span>
+                    <span class="info-value">${evaluation.comments || '商家已完成简单评价'}</span>
+                </div>`;
+                
+                if (evaluation.created_at) {
+                    html += `
+                    <div class="info-item">
+                        <span class="info-label">评价时间</span>
+                        <span class="info-value">${new Date(evaluation.created_at).toLocaleString('zh-CN')}</span>
+                    </div>`;
+                }
+                
+                return html;
+            }
+            
+            // 总体评分 - 无论简单评价还是详细评价都要显示
+            if (evaluation.overall_score !== null && evaluation.overall_score !== undefined) {
+                console.log('添加出击素质显示:', evaluation.overall_score);
+                html += `
+                <div class="info-item">
+                    <span class="info-label">出击素质</span>
                     <span class="info-value price">${evaluation.overall_score}/10 ${this.renderStars(evaluation.overall_score)}</span>
                 </div>`;
+            } else {
+                console.log('overall_score不存在或为null:', evaluation.overall_score);
+                // 如果是已完成的评价但没有评分，显示提示信息
+                if (evaluation.comments || evaluation.scores) {
+                    html += `
+                    <div class="info-item">
+                        <span class="info-label">出击素质</span>
+                        <span class="info-value" style="color: #999;">暂无评分</span>
+                    </div>`;
+                }
             }
             
             // 详细评分 - 使用info-item格式
-            if (evaluation.scores) {
+            if (evaluation.scores && Object.keys(evaluation.scores).length > 0) {
                 Object.entries(evaluation.scores).forEach(([key, score]) => {
                     // 使用真实的中文标签映射
                     const labels = {
@@ -1242,7 +1295,10 @@ class OptimizedOrdersManager {
                         'skill': '专业技能',
                         'punctuality': '准时性',
                         'communication': '沟通能力',
-                        'value': '性价比'
+                        'value': '性价比',
+                        'length': '鸡鸡长度',
+                        'hardness': '硬度',
+                        'duration': '单次做爱时间'
                     };
                     
                     html += `
@@ -1254,7 +1310,7 @@ class OptimizedOrdersManager {
             }
             
             // 评价内容
-            if (evaluation.comments) {
+            if (evaluation.comments && !evaluation.is_simple_evaluation) {
                 html += `
                 <div class="info-item">
                     <span class="info-label">评价内容</span>
@@ -1262,10 +1318,20 @@ class OptimizedOrdersManager {
                 </div>`;
             }
             
+            // 评价时间
+            if (evaluation.created_at && !evaluation.is_simple_evaluation) {
+                html += `
+                <div class="info-item">
+                    <span class="info-label">评价时间</span>
+                    <span class="info-value">${new Date(evaluation.created_at).toLocaleString('zh-CN')}</span>
+                </div>`;
+            }
+            
             return html;
+            
         } catch (error) {
-            console.error('评价数据解析错误:', error);
-            return `<div class="info-item"><span class="info-label">评价数据</span><span class="info-value" style="color: #dc3545;">格式错误: ${error.message}</span></div>`;
+            console.error('渲染评价失败:', error);
+            return '<div class="info-item"><span class="info-value">评价数据解析失败</span></div>';
         }
     }
 

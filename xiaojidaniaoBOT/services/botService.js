@@ -9,6 +9,22 @@ let bot;
 try {
     bot = new TelegramBot(BOT_TOKEN, { polling: true });
     console.log('✅ Telegram Bot初始化成功');
+    
+    // 添加错误事件监听
+    bot.on('error', (error) => {
+        console.error('❌ Telegram Bot错误:', error.message);
+        if (error.code === 'EFATAL') {
+            console.log('⚠️ 检测到致命错误，但Bot将继续运行');
+        }
+    });
+    
+    bot.on('polling_error', (error) => {
+        console.error('❌ Telegram Bot轮询错误:', error.message);
+        if (error.message.includes('ENOTFOUND')) {
+            console.log('⚠️ 网络连接问题，Bot将自动重试连接');
+        }
+    });
+    
 } catch (error) {
     console.log('⚠️ Telegram Bot初始化失败，但应用将继续运行:', error.message);
     // 创建一个假的bot对象，避免后续代码报错

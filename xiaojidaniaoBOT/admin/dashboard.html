@@ -27,20 +27,73 @@
             <a href="orders.html" class="nav-item" target="_blank">📈 订单统计</a>
         </nav>
 
-        <!-- 统计卡片 -->
+        <!-- 8个核心订单指标（与订单页面一致） -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">📋</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="totalOrders">0</div>
+                    <div class="stat-label">总订单</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📅</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="bookedOrders">0</div>
+                    <div class="stat-label">已预约订单</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">⏳</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="incompleteOrders">0</div>
+                    <div class="stat-label">待处理订单</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="completedOrders">0</div>
+                    <div class="stat-label">已完成订单</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">💰</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="avgPrice">¥0</div>
+                    <div class="stat-label">平均订单价格</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">👤</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="avgUserRating">-</div>
+                    <div class="stat-label">平均用户评分</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">👩‍🏫</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="avgMerchantRating">-</div>
+                    <div class="stat-label">平均商家评分</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-content">
+                    <div class="stat-number" id="completionRate">0%</div>
+                    <div class="stat-label">完成率</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 基础系统数据 -->
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-icon">👥</div>
                 <div class="stat-content">
                     <div class="stat-number" id="totalMerchants">0</div>
                     <div class="stat-label">商家数量</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">📅</div>
-                <div class="stat-content">
-                    <div class="stat-number" id="totalBookings">0</div>
-                    <div class="stat-label">总预约数</div>
                 </div>
             </div>
             <div class="stat-card">
@@ -62,13 +115,6 @@
                 <div class="stat-content">
                     <div class="stat-number" id="totalRegions">0</div>
                     <div class="stat-label">地区数量</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">🔘</div>
-                <div class="stat-content">
-                    <div class="stat-number" id="totalClicks">0</div>
-                    <div class="stat-label">总点击数</div>
                 </div>
             </div>
         </div>

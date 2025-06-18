@@ -998,20 +998,34 @@
         // 加载统计数据
         async function loadStats() {
             try {
-                const stats = await apiRequest('/api/stats');
-                document.getElementById('totalOrders').textContent = stats.totalOrders || 0;
-                document.getElementById('bookedOrders').textContent = stats.bookedOrders || 0;
-                document.getElementById('incompleteOrders').textContent = stats.incompleteOrders || 0;
-                document.getElementById('completedOrders').textContent = stats.completedOrders || 0;
-                document.getElementById('avgPrice').textContent = stats.avgPrice || '¥0';
-                document.getElementById('avgUserRating').textContent = stats.avgUserRating || '-';
-                document.getElementById('avgMerchantRating').textContent = stats.avgMerchantRating || '-';
-                document.getElementById('completionRate').textContent = stats.completionRate || '0%';
-                document.getElementById('totalMerchants').textContent = stats.totalMerchants || 0;
-                document.getElementById('totalBindCodes').textContent = stats.totalBindCodes || 0;
-                document.getElementById('totalRegions').textContent = stats.totalRegions || 0;
-                document.getElementById('totalTemplates').textContent = stats.totalTemplates || 0;
-                document.getElementById('totalClicks').textContent = stats.totalClicks || 0;
+                console.log('开始加载统计数据...');
+                
+                // 获取8个核心订单指标
+                const orderStats = await apiRequest('/api/stats/optimized');
+                console.log('获取订单统计数据:', orderStats);
+                
+                // 获取基础系统数据
+                const basicStats = await apiRequest('/api/stats');
+                console.log('获取基础统计数据:', basicStats);
+                
+                // 更新8个核心订单指标
+                document.getElementById('totalOrders').textContent = orderStats.totalOrders || 0;
+                document.getElementById('bookedOrders').textContent = orderStats.bookedOrders || 0;
+                document.getElementById('incompleteOrders').textContent = orderStats.incompleteOrders || 0;
+                document.getElementById('completedOrders').textContent = orderStats.completedOrders || 0;
+                document.getElementById('avgPrice').textContent = orderStats.avgPrice ? `¥${orderStats.avgPrice}` : '¥0';
+                document.getElementById('avgUserRating').textContent = orderStats.avgUserRating > 0 ? `${orderStats.avgUserRating}/10` : '-';
+                document.getElementById('avgMerchantRating').textContent = orderStats.avgMerchantRating > 0 ? `${orderStats.avgMerchantRating}/10` : '-';
+                document.getElementById('completionRate').textContent = `${orderStats.completionRate || 0}%`;
+                
+                // 更新基础系统数据
+                document.getElementById('totalMerchants').textContent = basicStats.totalMerchants || 0;
+                document.getElementById('totalBindCodes').textContent = basicStats.totalBindCodes || 0;
+                document.getElementById('totalRegions').textContent = basicStats.totalRegions || 0;
+                document.getElementById('totalTemplates').textContent = basicStats.totalTemplates || 0;
+                document.getElementById('totalClicks').textContent = basicStats.totalClicks || 0;
+                
+                console.log('统计数据加载完成');
             } catch (error) {
                 console.error('加载统计数据失败:', error);
             }

@@ -41,6 +41,9 @@ class ApiService {
         this.routes.set('GET /api/rankings/merchants', this.getMerchantRankings.bind(this));
         this.routes.set('GET /api/rankings/users', this.getUserRankings.bind(this));
 
+        // 简单计数接口
+        this.routes.set('GET /api/simple-count/:table', this.getSimpleCount.bind(this));
+
         // 导出接口 (暂时禁用，后续实现)
         // this.routes.set('GET /api/export/orders', this.exportOrders.bind(this));
         // this.routes.set('GET /api/export/stats', this.exportStats.bind(this));
@@ -1140,6 +1143,37 @@ class ApiService {
             return { data: details };
         } catch (error) {
             throw new Error('获取评价详情失败: ' + error.message);
+        }
+    }
+
+    // 简单计数方法
+    async getSimpleCount({ params }) {
+        try {
+            const tableName = params.table;
+            
+            // 安全的表名映射
+            const tableMap = {
+                'merchants': 'merchants',
+                'message_templates': 'message_templates',
+                'bind_codes': 'bind_codes',
+                'regions': 'regions',
+                'orders': 'orders'
+            };
+            
+            const actualTable = tableMap[tableName];
+            if (!actualTable) {
+                throw new Error('无效的表名');
+            }
+            
+            const result = dbOperations.db.prepare(`SELECT COUNT(*) as count FROM ${actualTable}`).get();
+            
+            return {
+                success: true,
+                count: result.count || 0
+            };
+        } catch (error) {
+            console.error('获取计数失败:', error);
+            throw new Error('获取计数失败: ' + error.message);
         }
     }
 }

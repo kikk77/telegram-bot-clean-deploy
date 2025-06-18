@@ -414,6 +414,10 @@ async function processApiRequest(pathname, method, data) {
         const buttonStats = dbOperations.getButtons();
         const totalClicks = buttonStats.reduce((sum, btn) => sum + btn.click_count, 0);
         
+        // 获取实际数据库计数
+        const bindCodes = dbOperations.getAllBindCodes();
+        const regions = dbOperations.getAllRegions();
+        
         return {
             success: true,
             data: {
@@ -422,6 +426,8 @@ async function processApiRequest(pathname, method, data) {
                 totalTemplates: cacheData.messageTemplates.length,
                 totalTriggers: cacheData.triggerWords.length,
                 totalTasks: cacheData.scheduledTasks.length,
+                totalBindCodes: bindCodes.length,
+                totalRegions: regions.length,
                 totalClicks: totalClicks,
                 ...stats
             }
@@ -527,6 +533,22 @@ async function processApiRequest(pathname, method, data) {
             return result;
         } catch (error) {
             console.error('获取优化统计失败:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 简单计数API
+    if (pathname.startsWith('/api/simple-count/') && method === 'GET') {
+        try {
+            const tableName = pathname.split('/')[3];
+            const apiService = require('./apiService');
+            const result = await apiService.getSimpleCount({ params: { table: tableName } });
+            return result;
+        } catch (error) {
+            console.error('获取简单计数失败:', error);
             return {
                 success: false,
                 error: error.message

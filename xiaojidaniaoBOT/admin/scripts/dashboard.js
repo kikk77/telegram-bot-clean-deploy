@@ -26,13 +26,9 @@ class Dashboard {
 
     async loadAllData() {
         try {
-            await Promise.all([
-                this.loadStats(),
-                this.loadMerchantBookingStats(),
-                this.loadRecentBookings(),
-                this.loadMessageStats(),
-                this.loadButtonStats()
-            ]);
+            // 只加载核心统计数据，与订单页面保持一致
+            await this.loadStats();
+            console.log('仪表盘简化数据加载完成');
         } catch (error) {
             console.error('加载数据失败:', error);
             throw error;
@@ -41,46 +37,48 @@ class Dashboard {
 
     async loadStats() {
         try {
-            // 使用优化的统计API获取真实订单数据
-            const orderStatsResponse = await api.get('/api/stats/optimized');
-            const basicStatsResponse = await api.get('/api/stats');
+            console.log('开始加载仪表盘统计数据...');
             
-            // 处理不同的API返回格式
-            const orderStats = orderStatsResponse.data || orderStatsResponse;
-            const basicStats = basicStatsResponse.data || basicStatsResponse;
+            // 统一使用订单页面相同的API
+            const stats = await api.get('/api/stats/optimized');
             
-            console.log('订单统计数据:', orderStats);
-            console.log('基础统计数据:', basicStats);
+            console.log('仪表盘统计数据:', stats);
             
-            // 合并数据
+            // 并行获取简单计数
+            console.log('开始获取基础计数数据...');
+            const [merchantCount, templateCount, bindCodeCount, regionCount] = await Promise.all([
+                this.getSimpleCount('merchants'),
+                this.getSimpleCount('message_templates'),
+                this.getSimpleCount('bind_codes'),
+                this.getSimpleCount('regions')
+            ]);
+            
+            console.log('基础计数数据:', { merchantCount, templateCount, bindCodeCount, regionCount });
+            
+            // 直接使用订单页面相同的数据结构
             this.data.stats = {
-                // 订单相关数据（来自优化API）
-                totalOrders: orderStats.totalOrders || 0,
-                bookedOrders: orderStats.bookedOrders || 0,
-                incompleteOrders: orderStats.incompleteOrders || 0,
-                completedOrders: orderStats.completedOrders || 0,
-                avgPrice: orderStats.avgPrice || 0,
-                avgUserRating: orderStats.avgUserRating || 0,
-                avgMerchantRating: orderStats.avgMerchantRating || 0,
-                completionRate: orderStats.completionRate || 0,
+                // 8个核心订单指标（与订单页面完全一致）
+                totalOrders: stats.totalOrders || 0,
+                bookedOrders: stats.bookedOrders || 0,
+                incompleteOrders: stats.incompleteOrders || 0,
+                completedOrders: stats.completedOrders || 0,
+                avgPrice: stats.avgPrice || 0,
+                avgUserRating: stats.avgUserRating || 0,
+                avgMerchantRating: stats.avgMerchantRating || 0,
+                completionRate: stats.completionRate || 0,
                 
-                // 基础数据（来自基础API）
-                totalMerchants: basicStats.totalMerchants || 0,
-                totalTemplates: basicStats.totalTemplates || 0,
-                totalBindCodes: 35, // 固定值，已知有35个绑定码
-                totalRegions: 10, // 固定值，已知有10个地区
-                totalClicks: basicStats.totalClicks || 0,
-                
-                // 用户交互数据
-                total_interactions: basicStats.total_interactions || 0,
-                unique_users: basicStats.unique_users || 0,
-                active_chats: basicStats.active_chats || 0
+                // 简化的基础数据（直接从数据库计算）
+                totalMerchants: merchantCount,
+                totalTemplates: templateCount,
+                totalBindCodes: bindCodeCount,
+                totalRegions: regionCount
             };
             
-            console.log('合并后的统计数据:', this.data.stats);
+            console.log('仪表盘最终统计数据:', this.data.stats);
             this.renderStats();
         } catch (error) {
             console.error('加载统计数据失败:', error);
+            console.error('错误详情:', error.stack);
             this.renderStatsError();
         }
     }
@@ -136,7 +134,7 @@ class Dashboard {
     renderStats() {
         const stats = this.data.stats;
         
-        // 更新新的8个核心指标
+        // 更新8个核心订单指标（与订单页面完全一致）
         this.updateStatNumber('totalOrders', stats.totalOrders || 0);
         this.updateStatNumber('bookedOrders', stats.bookedOrders || 0);
         this.updateStatNumber('incompleteOrders', stats.incompleteOrders || 0);
@@ -146,18 +144,11 @@ class Dashboard {
         this.updateStatNumber('avgMerchantRating', stats.avgMerchantRating > 0 ? `${stats.avgMerchantRating}/10` : '-');
         this.updateStatNumber('completionRate', `${stats.completionRate || 0}%`);
         
-        // 更新基础数据 
+        // 更新基础系统数据
         this.updateStatNumber('totalMerchants', stats.totalMerchants || 0);
-        this.updateStatNumber('totalBookings', stats.totalOrders || 0); // 总订单数 (dashboard.html使用)
         this.updateStatNumber('totalTemplates', stats.totalTemplates || 0);
         this.updateStatNumber('totalBindCodes', stats.totalBindCodes || 0);
         this.updateStatNumber('totalRegions', stats.totalRegions || 0);
-        this.updateStatNumber('totalClicks', stats.totalClicks || 0);
-        
-        // 更新用户交互数据
-        this.updateStatNumber('totalInteractions', stats.total_interactions || 0);
-        this.updateStatNumber('uniqueUsers', stats.unique_users || 0);
-        this.updateStatNumber('activeChats', stats.active_chats || 0);
     }
 
     renderStatsError() {
@@ -309,8 +300,8 @@ class Dashboard {
     updateStatNumber(elementId, value) {
         const element = document.getElementById(elementId);
         if (element) {
-            // 添加数字动画效果
-            this.animateNumber(element, parseInt(element.textContent) || 0, value);
+            // 直接更新值，不使用动画（避免格式问题）
+            element.textContent = value;
         }
     }
 
@@ -395,6 +386,19 @@ class Dashboard {
             notify.success('数据刷新完成');
         } catch (error) {
             notify.error('刷新失败: ' + error.message);
+        }
+    }
+
+    // 简单的数据库计数方法
+    async getSimpleCount(tableName) {
+        try {
+            const response = await api.get(`/api/simple-count/${tableName}`);
+            console.log(`${tableName} API响应:`, response);
+            // simple-count API返回的格式: { success: true, count: 4 }
+            return response.count || 0;
+        } catch (error) {
+            console.warn(`获取${tableName}计数失败:`, error);
+            return 0;
         }
     }
 

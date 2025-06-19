@@ -488,7 +488,14 @@ async function handleBindProcess(userId, chatId, text, username) {
         default:
             // 不在绑定流程中，检查触发词
             if (chatId < 0) { // 群组消息
-                checkTriggerWords({ text, from: { id: userId, username }, chat: { id: chatId } }, chatId);
+                console.log(`群组消息 - chatId: ${chatId}, userId: ${userId}, text: "${text}"`);
+                console.log(`当前触发词数量: ${triggerWords.length}, 模板数量: ${messageTemplates.length}`);
+                checkTriggerWords({ 
+                    text, 
+                    from: { id: userId, username }, 
+                    chat: { id: chatId },
+                    message_id: Date.now() // 添加消息ID
+                }, chatId);
             }
             break;
     }
@@ -998,7 +1005,8 @@ function initBotHandlers() {
             
             setImmediate(() => {
                 try {
-                    const template = messageTemplates.find(t => t.id == templateId);
+                    // 从数据库获取模板，而不是依赖缓存
+                    const template = dbOperations.getMessageTemplateById(templateId);
                     if (template) {
                         bot.sendMessage(userId, `📞 ${template.content}`).catch(error => {
                             console.log(`无法发送消息给用户 ${userId}: ${error.message}`);
@@ -1006,9 +1014,19 @@ function initBotHandlers() {
                         
                         dbOperations.logInteraction(userId, query.from.username, query.from.first_name, query.from.last_name, null, templateId, 'template_click', chatId);
                         console.log(`用户 ${userId} 点击了模板按钮 ${templateId}`);
+                    } else {
+                        // 模板不存在，发送默认消息
+                        console.log(`模板 ${templateId} 不存在，发送默认联系消息`);
+                        bot.sendMessage(userId, `📞 感谢您的咨询，我们会尽快回复您！`).catch(error => {
+                            console.log(`无法发送消息给用户 ${userId}: ${error.message}`);
+                        });
                     }
                 } catch (error) {
                     console.error('处理模板按钮点击错误:', error);
+                    // 发送错误处理消息
+                    bot.sendMessage(userId, `📞 感谢您的咨询，我们会尽快回复您！`).catch(e => {
+                        console.log(`无法发送错误消息给用户 ${userId}: ${e.message}`);
+                    });
                 }
             });
             return;
@@ -1139,9 +1157,19 @@ function initBotHandlers() {
             return;
         }
         
-        // 如果没有匹配到任何处理逻辑，记录日志
+        // 如果没有匹配到任何处理逻辑，记录日志并发送默认响应
         else {
             console.log(`未处理的callback data: ${data}`);
+            // 对于未知的callback_data，发送默认联系信息
+            try {
+                if (data.includes('联系') || data.includes('contact')) {
+                    await bot.sendMessage(userId, `📞 感谢您的咨询，我们会尽快回复您！`);
+                } else {
+                    await bot.sendMessage(userId, `✅ 操作已处理`);
+                }
+            } catch (error) {
+                console.error('发送默认响应失败:', error);
+            }
         }
     }
 }
@@ -1464,6 +1492,35 @@ async function startMerchantEvaluation(userId, bookingSessionId) {
         const bookingSession = dbOperations.getBookingSession(bookingSessionId);
         if (!bookingSession) return;
         
+        // 检查用户评价是否已完成
+        const existingUserEval = dbOperations.db.prepare(`
+            SELECT status FROM evaluations 
+            WHERE booking_session_id = ? AND evaluator_type = 'user'
+        `).get(bookingSessionId);
+        
+        if (existingUserEval && existingUserEval.status === 'completed') {
+            // 用户已完成评价，商家不应再进行评价
+            await sendMessageWithDelete(userId, 
+                '⚠️ 该订单的评价流程已结束，无法继续评价。\n\n用户已完成评价并结束了订单流程。', 
+                {}, 'evaluation_ended'
+            );
+            return;
+        }
+        
+        // 检查商家是否已经评价过
+        const existingMerchantEval = dbOperations.db.prepare(`
+            SELECT status FROM evaluations 
+            WHERE booking_session_id = ? AND evaluator_type = 'merchant'
+        `).get(bookingSessionId);
+        
+        if (existingMerchantEval && existingMerchantEval.status === 'completed') {
+            await sendMessageWithDelete(userId, 
+                '✅ 您已完成对该订单的评价。', 
+                {}, 'already_evaluated'
+            );
+            return;
+        }
+        
         // 创建评价记录
         const evaluationId = dbOperations.createEvaluation(bookingSessionId, 'merchant', userId, bookingSession.user_id);
         const sessionId = dbOperations.createEvaluationSession(userId, evaluationId);
@@ -1763,6 +1820,19 @@ async function updateEvaluationSection(userId, evaluationId, evaluationType, use
         
         if (!messageId) {
             console.log(`未找到${sectionTitle}的消息ID，跳过更新`);
+            
+            // 检查评价是否已经完成
+            try {
+                const evaluation = dbOperations.getEvaluation(evaluationId);
+                if (evaluation && evaluation.status === 'completed') {
+                    // 评价已完成，向用户发送提示而不是报错
+                    console.log(`✅ 评价${evaluationId}已完成，无需继续更新UI`);
+                    return;
+                }
+            } catch (error) {
+                console.log('检查评价状态失败:', error.message);
+            }
+            
             return;
         }
         
@@ -1825,7 +1895,7 @@ async function updateEvaluationSection(userId, evaluationId, evaluationType, use
             ]);
         }
         
-        // 编辑消息
+        // 编辑消息 - 增加错误处理
         await bot.editMessageText(message, {
             chat_id: userId,
             message_id: messageId,
@@ -1833,7 +1903,12 @@ async function updateEvaluationSection(userId, evaluationId, evaluationType, use
         });
         
     } catch (error) {
-        console.log(`更新${isHardware ? '硬件' : '软件'}评价消息失败:`, error.message);
+        // 如果是"消息未修改"错误，静默处理（这是正常情况）
+        if (error.message.includes('message is not modified')) {
+            console.log(`✅ ${isHardware ? '硬件' : '软件'}评价消息无需更新（内容相同）`);
+        } else {
+            console.log(`更新${isHardware ? '硬件' : '软件'}评价消息失败:`, error.message);
+        }
     }
 }
 

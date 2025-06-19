@@ -373,7 +373,7 @@ async function processApiRequest(pathname, method, data) {
                         
                         options.reply_markup = {
                             inline_keyboard: [[
-                                { text: '联系', url: `https://t.me/xiaoji_daniao_bot?start=merchant_${merchant.id}` }
+                                { text: '联系', url: `https://t.me/Xiaojisystembot?start=merchant_${merchant.id}` }
                             ]]
                         };
                     } else {
@@ -431,7 +431,7 @@ async function processApiRequest(pathname, method, data) {
                     message = data.message || '🎯 点击下方按钮联系商家';
                     options.reply_markup = {
                         inline_keyboard: [[
-                            { text: '联系客服', url: 'https://t.me/xiaoji_daniao_bot' }
+                            { text: '联系客服', url: 'https://t.me/xiaoji57' }
                         ]]
                     };
                     }

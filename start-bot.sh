@@ -10,7 +10,7 @@ if [ -z "$BOT_TOKEN" ]; then
 fi
 
 # 进入应用目录
-cd xiaojidaniaoBOT
+cd xiaojisystemBOT
 
 # 检查Node.js
 if ! command -v node &> /dev/null; then

@@ -145,11 +145,11 @@ async function processApiRequest(pathname, method, data) {
             return { success: true, data: dbOperations.getAllBindCodes() };
         } else if (method === 'POST') {
             const result = dbOperations.createBindCode(data.description);
-            loadCacheData();
+            await loadCacheData();
             return { success: true, data: result };
         } else if (method === 'DELETE') {
             dbOperations.deleteBindCode(data.id);
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         }
     }
@@ -159,7 +159,7 @@ async function processApiRequest(pathname, method, data) {
         try {
             // 直接操作数据库，然后重新加载缓存
             dbOperations.deleteBindCode(data.id);
-            loadCacheData();
+            await loadCacheData();
             return { success: true, message: '绑定码已强制删除' };
         } catch (error) {
             return { success: false, error: error.message };
@@ -185,7 +185,7 @@ async function processApiRequest(pathname, method, data) {
                 }
             });
             
-            loadCacheData();
+            await loadCacheData();
             return { success: true, data: { deletedCount }, message: `已删除 ${deletedCount} 个测试绑定码` };
         } catch (error) {
             return { success: false, error: error.message };
@@ -198,15 +198,15 @@ async function processApiRequest(pathname, method, data) {
             return { success: true, data: dbOperations.getAllRegions() };
         } else if (method === 'POST') {
             const result = dbOperations.createRegion(data.name, data.sortOrder);
-            loadCacheData();
+            await loadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'PUT') {
             dbOperations.updateRegion(data.id, data.name, data.sortOrder);
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         } else if (method === 'DELETE') {
             dbOperations.deleteRegion(data.id);
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         }
     }
@@ -230,7 +230,7 @@ async function processApiRequest(pathname, method, data) {
         const merchantId = pathname.split('/')[3];
         try {
             dbOperations.deleteMerchant(merchantId);
-            loadCacheData();
+            await loadCacheData();
             return { success: true, message: '商家删除成功' };
         } catch (error) {
             console.error('删除商家失败:', error);
@@ -242,7 +242,7 @@ async function processApiRequest(pathname, method, data) {
     if (pathname.match(/^\/api\/merchants\/\d+\/reset$/) && method === 'POST') {
         const merchantId = pathname.split('/')[3];
         dbOperations.resetMerchantBind(merchantId);
-        loadCacheData();
+        await loadCacheData();
         return { success: true };
     }
 
@@ -262,7 +262,7 @@ async function processApiRequest(pathname, method, data) {
             dbOperations.updateMerchant(merchantId, data.teacherName, data.regionId, data.contact);
         }
         
-        loadCacheData();
+        await loadCacheData();
         return { success: true };
     }
 
@@ -270,7 +270,7 @@ async function processApiRequest(pathname, method, data) {
     if (pathname.match(/^\/api\/merchants\/\d+\/toggle-status$/) && method === 'POST') {
         const merchantId = pathname.split('/')[3];
         dbOperations.toggleMerchantStatus(merchantId);
-        loadCacheData();
+        await loadCacheData();
         return { success: true };
     }
 
@@ -280,11 +280,11 @@ async function processApiRequest(pathname, method, data) {
             return { success: true, data: dbOperations.getButtons() };
         } else if (method === 'POST') {
             const result = dbOperations.createButton(data.title, data.message, data.merchantId);
-            loadCacheData();
+            await loadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'DELETE') {
             dbOperations.deleteButton(data.id);
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         }
     }
@@ -297,17 +297,17 @@ async function processApiRequest(pathname, method, data) {
             const result = dbOperations.createMessageTemplate(
                 data.name, data.content, data.imageUrl, data.buttonsConfig
             );
-            loadCacheData();
+            await loadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'PUT') {
             dbOperations.updateMessageTemplate(
                 data.id, data.name, data.content, data.imageUrl, data.buttonsConfig
             );
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         } else if (method === 'DELETE') {
             dbOperations.deleteMessageTemplate(data.id);
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         }
     }
@@ -320,11 +320,11 @@ async function processApiRequest(pathname, method, data) {
             const result = dbOperations.createTriggerWord(
                 data.word, data.templateId, data.matchType, data.chatId
             );
-            loadCacheData();
+            await loadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'DELETE') {
             dbOperations.deleteTriggerWord(data.id);
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         }
     }
@@ -338,11 +338,11 @@ async function processApiRequest(pathname, method, data) {
                 data.name, data.templateId, data.chatId, data.scheduleType,
                 data.scheduleTime, data.sequenceOrder, data.sequenceDelay
             );
-            loadCacheData();
+            await loadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'DELETE') {
             dbOperations.deleteScheduledTask(data.id);
-            loadCacheData();
+            await loadCacheData();
             return { success: true };
         }
     }

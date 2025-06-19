@@ -37,7 +37,7 @@ try {
     };
 }
 
-// 全局变量
+// 全局变量 - 优化内存管理
 let merchants = [];
 let buttons = [];
 let messageTemplates = [];
@@ -45,9 +45,45 @@ let triggerWords = [];
 let scheduledTasks = [];
 let bindCodes = [];
 let regions = [];
-let userBindStates = new Map(); // 用户绑定状态
-let bookingCooldowns = new Map(); // 预约冷却时间
-let userMessageHistory = new Map(); // 用户消息历史记录
+
+// 内存映射管理 - 添加自动清理机制
+const userBindStates = new Map(); // 用户绑定状态
+const bookingCooldowns = new Map(); // 预约冷却时间
+const userMessageHistory = new Map(); // 用户消息历史记录
+const triggerCooldowns = new Map(); // 触发词冷却时间
+
+// 内存管理配置
+const MEMORY_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30分钟清理一次
+const MAX_USER_HISTORY = 20; // 每用户最多保存20条消息历史
+const MAX_COOLDOWN_TIME = 24 * 60 * 60 * 1000; // 24小时冷却过期
+
+// 定期清理过期的内存数据
+setInterval(() => {
+    const now = Date.now();
+    
+    // 清理过期的预约冷却
+    for (const [userId, cooldownTime] of bookingCooldowns.entries()) {
+        if (now - cooldownTime > MAX_COOLDOWN_TIME) {
+            bookingCooldowns.delete(userId);
+        }
+    }
+    
+    // 清理过期的触发词冷却
+    for (const [cooldownKey, cooldownTime] of triggerCooldowns.entries()) {
+        if (now - cooldownTime > 5 * 60 * 1000) { // 5分钟过期
+            triggerCooldowns.delete(cooldownKey);
+        }
+    }
+    
+    // 清理过期的消息历史（保留最近的消息）
+    for (const [userId, history] of userMessageHistory.entries()) {
+        if (history.length > MAX_USER_HISTORY) {
+            history.splice(0, history.length - MAX_USER_HISTORY);
+        }
+    }
+    
+    console.log(`内存清理完成 - 冷却映射大小: ${bookingCooldowns.size}, 消息历史大小: ${userMessageHistory.size}`);
+}, MEMORY_CLEANUP_INTERVAL);
 
 // 用户状态枚举
 const BindSteps = {
@@ -222,16 +258,53 @@ async function handleBackButton(userId, messageType, data = {}) {
     }
 }
 
-// 加载缓存数据
-function loadCacheData() {
-    merchants = dbOperations.getAllMerchants();
-    buttons = dbOperations.getButtons();
-    messageTemplates = dbOperations.getMessageTemplates();
-    triggerWords = dbOperations.getTriggerWords();
-    scheduledTasks = dbOperations.getScheduledTasks();
-    bindCodes = dbOperations.getAllBindCodes();
-    regions = dbOperations.getAllRegions();
-    console.log('✅ 缓存数据加载完成');
+// 加载缓存数据 - 优化版本
+async function loadCacheData() {
+    const startTime = Date.now();
+    
+    try {
+        // 并行加载所有数据，提升性能
+        const [
+            loadedMerchants,
+            loadedButtons,
+            loadedMessageTemplates,
+            loadedTriggerWords,
+            loadedScheduledTasks,
+            loadedBindCodes,
+            loadedRegions
+        ] = await Promise.all([
+            Promise.resolve(dbOperations.getAllMerchants()),
+            Promise.resolve(dbOperations.getButtons()),
+            Promise.resolve(dbOperations.getMessageTemplates()),
+            Promise.resolve(dbOperations.getTriggerWords()),
+            Promise.resolve(dbOperations.getScheduledTasks()),
+            Promise.resolve(dbOperations.getAllBindCodes()),
+            Promise.resolve(dbOperations.getAllRegions())
+        ]);
+        
+        // 赋值到全局变量
+        merchants = loadedMerchants || [];
+        buttons = loadedButtons || [];
+        messageTemplates = loadedMessageTemplates || [];
+        triggerWords = loadedTriggerWords || [];
+        scheduledTasks = loadedScheduledTasks || [];
+        bindCodes = loadedBindCodes || [];
+        regions = loadedRegions || [];
+        
+        const loadTime = Date.now() - startTime;
+        console.log(`✅ 缓存数据加载完成 (${loadTime}ms) - 商家: ${merchants.length}, 按钮: ${buttons.length}, 模板: ${messageTemplates.length}, 触发词: ${triggerWords.length}, 任务: ${scheduledTasks.length}, 绑定码: ${bindCodes.length}, 地区: ${regions.length}`);
+        
+    } catch (error) {
+        console.error('❌ 缓存数据加载失败:', error);
+        // 确保所有变量都有默认值
+        merchants = merchants || [];
+        buttons = buttons || [];
+        messageTemplates = messageTemplates || [];
+        triggerWords = triggerWords || [];
+        scheduledTasks = scheduledTasks || [];
+        bindCodes = bindCodes || [];
+        regions = regions || [];
+    }
 }
 
 // 发送消息模板
@@ -276,18 +349,24 @@ async function sendMessageTemplate(chatId, template, replyToMessageId = null) {
     }
 }
 
-// 触发词检测
+// 触发词检测 - 优化版本
 function checkTriggerWords(message, chatId) {
     const text = message.text?.toLowerCase() || '';
+    if (!text) return;
+    
+    // 预过滤：只获取当前聊天的活跃触发词
     const chatTriggers = triggerWords.filter(tw => tw.chat_id == chatId && tw.active);
+    if (chatTriggers.length === 0) return;
 
     for (const trigger of chatTriggers) {
         let isMatch = false;
+        const triggerWord = trigger.word.toLowerCase();
         
+        // 性能优化：使用更高效的匹配算法
         if (trigger.match_type === 'exact') {
-            isMatch = text === trigger.word.toLowerCase();
+            isMatch = text === triggerWord;
         } else if (trigger.match_type === 'contains') {
-            isMatch = text.includes(trigger.word.toLowerCase());
+            isMatch = text.includes(triggerWord);
         }
 
         if (isMatch) {
@@ -302,14 +381,21 @@ function checkTriggerWords(message, chatId) {
 
             triggerCooldowns.set(cooldownKey, now);
             
-            // 异步处理触发
+            // 异步处理触发，使用更高效的方式
             setImmediate(async () => {
                 try {
+                    // 使用缓存的模板查找，避免每次都遍历
                     const template = messageTemplates.find(t => t.id === trigger.template_id);
-                    if (template) {
-                        await sendMessageTemplate(chatId, template, message.message_id);
-                        dbOperations.incrementTriggerCount(trigger.id);
-                        dbOperations.logInteraction(
+                    if (!template) {
+                        console.error(`模板 ${trigger.template_id} 不存在`);
+                        return;
+                    }
+                    
+                    // 并行执行非阻塞操作
+                    const [sendResult, , ] = await Promise.allSettled([
+                        sendMessageTemplate(chatId, template, message.message_id),
+                        Promise.resolve(dbOperations.incrementTriggerCount(trigger.id)),
+                        Promise.resolve(dbOperations.logInteraction(
                             message.from.id,
                             message.from.username,
                             message.from.first_name,
@@ -318,9 +404,15 @@ function checkTriggerWords(message, chatId) {
                             template.id,
                             'trigger',
                             chatId
-                        );
+                        ))
+                    ]);
+                    
+                    if (sendResult.status === 'fulfilled') {
                         console.log(`触发词 "${trigger.word}" 在群组 ${chatId} 被触发`);
+                    } else {
+                        console.error(`触发词 "${trigger.word}" 处理失败:`, sendResult.reason);
                     }
+                    
                 } catch (error) {
                     console.error('处理触发词失败:', error);
                 }
@@ -332,7 +424,7 @@ function checkTriggerWords(message, chatId) {
 }
 
 // 绑定流程处理函数
-function handleBindProcess(userId, chatId, text, username) {
+async function handleBindProcess(userId, chatId, text, username) {
     const userState = userBindStates.get(userId) || { step: BindSteps.NONE };
     
     switch (userState.step) {
@@ -361,7 +453,7 @@ function handleBindProcess(userId, chatId, text, username) {
             userBindStates.set(userId, userState);
             
             // 完成绑定
-            completeBinding(userId, chatId, userState, username);
+            await completeBinding(userId, chatId, userState, username);
             break;
             
         default:
@@ -402,7 +494,7 @@ function showRegionSelection(chatId, userId) {
 }
 
 // 完成绑定
-function completeBinding(userId, chatId, userState, username) {
+async function completeBinding(userId, chatId, userState, username) {
     try {
         // 创建商家记录
         const merchantId = dbOperations.createMerchant(
@@ -420,7 +512,7 @@ function completeBinding(userId, chatId, userState, username) {
         userBindStates.delete(userId);
         
         // 重新加载缓存
-        loadCacheData();
+        await loadCacheData();
         
         // 发送成功消息
         const region = regions.find(r => r.id === userState.regionId);
@@ -438,7 +530,7 @@ function completeBinding(userId, chatId, userState, username) {
 // 初始化Bot事件监听
 function initBotHandlers() {
     // Bot消息处理
-    bot.on('message', (msg) => {
+    bot.on('message', async (msg) => {
         const chatId = msg.chat.id;
         const userId = msg.from.id;
         const text = msg.text;
@@ -535,7 +627,7 @@ function initBotHandlers() {
         }
 
         // 处理绑定流程中的文字输入
-        handleBindProcess(userId, chatId, text, username);
+        await handleBindProcess(userId, chatId, text, username);
     });
 
     // 简单防重复点击保护

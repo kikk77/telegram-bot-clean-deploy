@@ -18,7 +18,7 @@ const { initScheduler } = require('./services/schedulerService');
 const { createHttpServer } = require('./services/httpService');
 
 // 启动函数
-function start() {
+async function start() {
     console.log('🤖 Telegram营销机器人启动中...');
     
     // 初始化数据库
@@ -28,7 +28,7 @@ function start() {
     // initTestData();
     
     // 加载缓存数据
-    loadCacheData();
+    await loadCacheData();
     
     // 初始化Bot事件监听
     initBotHandlers();
@@ -59,4 +59,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // 启动应用
-start(); 
+start().catch(error => {
+    console.error('应用启动失败:', error);
+    process.exit(1);
+}); 

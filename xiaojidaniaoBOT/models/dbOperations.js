@@ -1,4 +1,4 @@
-const { db } = require('../config/database');
+const { db, cache, getPreparedStatement } = require('../config/database');
 
 // 数据库操作函数
 const dbOperations = {
@@ -42,14 +42,25 @@ const dbOperations = {
 
     // 地区操作
     createRegion(name, sortOrder = 0) {
-        const stmt = db.prepare('INSERT INTO regions (name, sort_order) VALUES (?, ?)');
+        const stmt = getPreparedStatement('INSERT INTO regions (name, sort_order) VALUES (?, ?)');
         const result = stmt.run(name, sortOrder);
+        
+        // 清理相关缓存
+        cache.set('all_regions', null);
+        cache.set('all_merchants', null);
+        
         return result.lastInsertRowid;
     },
 
     getAllRegions() {
-        const stmt = db.prepare('SELECT * FROM regions WHERE active = 1 ORDER BY sort_order, name');
-        return stmt.all();
+        const cacheKey = 'all_regions';
+        const cached = cache.get(cacheKey);
+        if (cached) return cached;
+        
+        const stmt = getPreparedStatement('SELECT * FROM regions WHERE active = 1 ORDER BY sort_order, name');
+        const result = stmt.all();
+        cache.set(cacheKey, result, 10 * 60 * 1000); // 10分钟缓存
+        return result;
     },
 
     getRegionById(id) {
@@ -69,11 +80,15 @@ const dbOperations = {
 
     // 商家操作
     createMerchant(teacherName, regionId, contact, bindCode, userId) {
-        const stmt = db.prepare(`
+        const stmt = getPreparedStatement(`
             INSERT INTO merchants (user_id, teacher_name, region_id, contact, bind_code, bind_step, status) 
             VALUES (?, ?, ?, ?, ?, 5, 'active')
         `);
         const result = stmt.run(userId, teacherName, regionId, contact, bindCode);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        
         return result.lastInsertRowid;
     },
 
@@ -88,13 +103,19 @@ const dbOperations = {
     },
 
     getAllMerchants() {
-        const stmt = db.prepare(`
+        const cacheKey = 'all_merchants';
+        const cached = cache.get(cacheKey);
+        if (cached) return cached;
+        
+        const stmt = getPreparedStatement(`
             SELECT m.*, r.name as region_name 
             FROM merchants m 
             LEFT JOIN regions r ON m.region_id = r.id 
             ORDER BY m.created_at DESC
         `);
-        return stmt.all();
+        const result = stmt.all();
+        cache.set(cacheKey, result, 2 * 60 * 1000); // 2分钟缓存
+        return result;
     },
 
     getMerchantById(id) {

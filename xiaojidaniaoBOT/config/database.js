@@ -3,7 +3,66 @@ const path = require('path');
 
 // 初始化数据库
 const dbPath = path.join(__dirname, '..', 'data', 'marketing_bot.db');
-const db = new Database(dbPath);
+
+// 数据库性能优化配置
+const db = new Database(dbPath, {
+    verbose: console.log,
+    fileMustExist: false
+});
+
+// 性能优化设置
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('cache_size = 1000');
+db.pragma('temp_store = memory');
+db.pragma('mmap_size = 268435456'); // 256MB
+
+// 内存缓存层
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
+const CACHE_CHECK_INTERVAL = 60 * 1000; // 每分钟清理一次过期缓存
+
+// 缓存管理函数
+function setCache(key, value, ttl = CACHE_TTL) {
+    cache.set(key, {
+        value,
+        expires: Date.now() + ttl
+    });
+}
+
+function getCache(key) {
+    const item = cache.get(key);
+    if (!item) return null;
+    
+    if (Date.now() > item.expires) {
+        cache.delete(key);
+        return null;
+    }
+    
+    return item.value;
+}
+
+function clearExpiredCache() {
+    const now = Date.now();
+    for (const [key, item] of cache.entries()) {
+        if (now > item.expires) {
+            cache.delete(key);
+        }
+    }
+}
+
+// 定期清理过期缓存
+setInterval(clearExpiredCache, CACHE_CHECK_INTERVAL);
+
+// 预编译语句缓存
+const preparedStatements = new Map();
+
+function getPreparedStatement(sql) {
+    if (!preparedStatements.has(sql)) {
+        preparedStatements.set(sql, db.prepare(sql));
+    }
+    return preparedStatements.get(sql);
+}
 
 // 创建数据库表
 function initDatabase() {
@@ -275,5 +334,12 @@ function initDatabase() {
 
 module.exports = {
     db,
-    initDatabase
+    initDatabase,
+    cache: {
+        set: setCache,
+        get: getCache,
+        clear: () => cache.clear(),
+        size: () => cache.size
+    },
+    getPreparedStatement
 }; 

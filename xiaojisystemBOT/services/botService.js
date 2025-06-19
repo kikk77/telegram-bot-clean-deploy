@@ -2309,11 +2309,7 @@ async function handleUserEvaluationConfirm(userId, data, query) {
                 inline_keyboard: [
                     [
                         { text: '实名播报', callback_data: `broadcast_real_${evaluationId}` },
-                        { text: '匿名播报', callback_data: `broadcast_anon_${evaluationId}` },
-                        { text: '不播报', callback_data: `broadcast_no_${evaluationId}` }
-                    ],
-                    [
-                        { text: '⬅️ 返回', callback_data: `back_broadcast_choice_${evaluationId}` }
+                        { text: '匿名播报', callback_data: `broadcast_anon_${evaluationId}` }
                     ]
                 ]
             };
@@ -2790,22 +2786,203 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
 // 处理播报选择
 async function handleBroadcastChoice(userId, data, query) {
     try {
-        if (data.startsWith('broadcast_no_')) {
-            await sendMessageWithoutDelete(userId, '感谢您的评价！记录已保存。', {}, 'broadcast_complete');
-            
-        } else if (data.startsWith('broadcast_real_')) {
+        if (data.startsWith('broadcast_real_')) {
             const evaluationId = data.replace('broadcast_real_', '');
-            // 这里可以实现实名播报逻辑
-            await sendMessageWithoutDelete(userId, '实名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_real');
+            await handleRealBroadcast(userId, evaluationId, query);
             
         } else if (data.startsWith('broadcast_anon_')) {
             const evaluationId = data.replace('broadcast_anon_', '');
-            // 这里可以实现匿名播报逻辑
-            await sendMessageWithoutDelete(userId, '匿名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_anon');
+            await handleAnonymousBroadcast(userId, evaluationId, query);
         }
         
     } catch (error) {
         console.error('处理播报选择失败:', error);
+    }
+}
+
+// 处理实名播报
+async function handleRealBroadcast(userId, evaluationId, query) {
+    try {
+        console.log(`=== 开始实名播报调试 ===`);
+        console.log(`userId: ${userId}, evaluationId: ${evaluationId}`);
+        
+        // 获取评价信息
+        const evaluation = dbOperations.getEvaluation(evaluationId);
+        console.log(`获取评价信息:`, evaluation);
+        if (!evaluation) {
+            console.log(`评价信息不存在 - evaluationId: ${evaluationId}`);
+            await sendMessageWithoutDelete(userId, '评价信息不存在，播报失败。', {}, 'broadcast_error');
+            return;
+        }
+
+        // 获取预约会话信息
+        const bookingSession = dbOperations.getBookingSession(evaluation.booking_session_id);
+        console.log(`获取预约会话信息:`, bookingSession);
+        if (!bookingSession) {
+            console.log(`预约信息不存在 - booking_session_id: ${evaluation.booking_session_id}`);
+            await sendMessageWithoutDelete(userId, '预约信息不存在，播报失败。', {}, 'broadcast_error');
+            return;
+        }
+
+        // 获取商家信息
+        const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+        console.log(`获取商家信息:`, merchant);
+        if (!merchant) {
+            console.log(`商家信息不存在 - merchant_id: ${bookingSession.merchant_id}`);
+            await sendMessageWithoutDelete(userId, '商家信息不存在，播报失败。', {}, 'broadcast_error');
+            return;
+        }
+
+        // 获取用户信息
+        const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+        const teacherName = merchant.teacher_name || '未知老师';
+        console.log(`用户信息: ${username}, 老师名称: ${teacherName}`);
+
+        // 构建实名播报消息
+        const broadcastMessage = `🎉 恭喜小鸡的勇士：用户（${username}）出击了 #${teacherName} 老师！
+🐤 小鸡出征！咯咯哒咯咯哒～`;
+        console.log(`播报消息内容:`, broadcastMessage);
+
+        // 发送到群组播报
+        const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1002793326688';
+        console.log(`目标群组ID: ${GROUP_CHAT_ID}`);
+        
+        try {
+            console.log(`正在发送消息到群组...`);
+            const sentMessage = await bot.sendMessage(GROUP_CHAT_ID, broadcastMessage);
+            console.log(`消息发送成功, message_id: ${sentMessage.message_id}`);
+            
+            // 置顶播报消息
+            try {
+                console.log(`正在置顶消息...`);
+                await bot.pinChatMessage(GROUP_CHAT_ID, sentMessage.message_id);
+                console.log(`播报消息已置顶: ${sentMessage.message_id}`);
+            } catch (pinError) {
+                console.log(`置顶消息失败: ${pinError.message}`);
+                // 置顶失败不影响播报成功
+            }
+            
+            // 给用户发送播报成功确认
+            await sendMessageWithoutDelete(userId, '✅ 实名播报成功！您的出击记录已在群内公布。', {}, 'broadcast_success');
+            console.log(`=== 实名播报成功 ===`);
+            
+        } catch (groupError) {
+            console.error('群组播报失败:', groupError);
+            console.error('错误详情:', {
+                message: groupError.message,
+                code: groupError.code,
+                response: groupError.response?.body
+            });
+            
+            // 检查具体错误类型并给出更详细的错误信息
+            let errorMessage = '❌ 播报失败，请联系管理员。';
+            if (groupError.message.includes('chat not found')) {
+                errorMessage = '❌ 播报失败：群组未找到，请检查群组ID配置。';
+            } else if (groupError.message.includes('not enough rights')) {
+                errorMessage = '❌ 播报失败：机器人没有发送消息权限，请联系群组管理员。';
+            } else if (groupError.message.includes('bot was blocked')) {
+                errorMessage = '❌ 播报失败：机器人被群组封禁，请联系群组管理员。';
+            }
+            
+            await sendMessageWithoutDelete(userId, errorMessage, {}, 'broadcast_error');
+        }
+        
+    } catch (error) {
+        console.error('处理实名播报失败:', error);
+        console.error('错误堆栈:', error.stack);
+        await sendMessageWithoutDelete(userId, '❌ 播报失败，请联系管理员。', {}, 'broadcast_error');
+    }
+}
+
+// 处理匿名播报
+async function handleAnonymousBroadcast(userId, evaluationId, query) {
+    try {
+        console.log(`=== 开始匿名播报调试 ===`);
+        console.log(`userId: ${userId}, evaluationId: ${evaluationId}`);
+        
+        // 获取评价信息
+        const evaluation = dbOperations.getEvaluation(evaluationId);
+        console.log(`获取评价信息:`, evaluation);
+        if (!evaluation) {
+            console.log(`评价信息不存在 - evaluationId: ${evaluationId}`);
+            await sendMessageWithoutDelete(userId, '评价信息不存在，播报失败。', {}, 'broadcast_error');
+            return;
+        }
+
+        // 获取预约会话信息
+        const bookingSession = dbOperations.getBookingSession(evaluation.booking_session_id);
+        console.log(`获取预约会话信息:`, bookingSession);
+        if (!bookingSession) {
+            console.log(`预约信息不存在 - booking_session_id: ${evaluation.booking_session_id}`);
+            await sendMessageWithoutDelete(userId, '预约信息不存在，播报失败。', {}, 'broadcast_error');
+            return;
+        }
+
+        // 获取商家信息
+        const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+        console.log(`获取商家信息:`, merchant);
+        if (!merchant) {
+            console.log(`商家信息不存在 - merchant_id: ${bookingSession.merchant_id}`);
+            await sendMessageWithoutDelete(userId, '商家信息不存在，播报失败。', {}, 'broadcast_error');
+            return;
+        }
+
+        const teacherName = merchant.teacher_name || '未知老师';
+        console.log(`老师名称: ${teacherName}`);
+
+        // 构建匿名播报消息
+        const broadcastMessage = `🎉 恭喜小鸡的勇士：隐藏用户 出击了 #${teacherName} 老师！
+🐤 小鸡出征！咯咯哒咯咯哒～`;
+        console.log(`播报消息内容:`, broadcastMessage);
+
+        // 发送到群组播报
+        const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1002793326688';
+        console.log(`目标群组ID: ${GROUP_CHAT_ID}`);
+        
+        try {
+            console.log(`正在发送消息到群组...`);
+            const sentMessage = await bot.sendMessage(GROUP_CHAT_ID, broadcastMessage);
+            console.log(`消息发送成功, message_id: ${sentMessage.message_id}`);
+            
+            // 置顶播报消息
+            try {
+                console.log(`正在置顶消息...`);
+                await bot.pinChatMessage(GROUP_CHAT_ID, sentMessage.message_id);
+                console.log(`播报消息已置顶: ${sentMessage.message_id}`);
+            } catch (pinError) {
+                console.log(`置顶消息失败: ${pinError.message}`);
+                // 置顶失败不影响播报成功
+            }
+            
+            // 给用户发送播报成功确认
+            await sendMessageWithoutDelete(userId, '✅ 匿名播报成功！您的出击记录已在群内公布。', {}, 'broadcast_success');
+            console.log(`=== 匿名播报成功 ===`);
+            
+        } catch (groupError) {
+            console.error('群组播报失败:', groupError);
+            console.error('错误详情:', {
+                message: groupError.message,
+                code: groupError.code,
+                response: groupError.response?.body
+            });
+            
+            // 检查具体错误类型并给出更详细的错误信息
+            let errorMessage = '❌ 播报失败，请联系管理员。';
+            if (groupError.message.includes('chat not found')) {
+                errorMessage = '❌ 播报失败：群组未找到，请检查群组ID配置。';
+            } else if (groupError.message.includes('not enough rights')) {
+                errorMessage = '❌ 播报失败：机器人没有发送消息权限，请联系群组管理员。';
+            } else if (groupError.message.includes('bot was blocked')) {
+                errorMessage = '❌ 播报失败：机器人被群组封禁，请联系群组管理员。';
+            }
+            
+            await sendMessageWithoutDelete(userId, errorMessage, {}, 'broadcast_error');
+        }
+        
+    } catch (error) {
+        console.error('处理匿名播报失败:', error);
+        console.error('错误堆栈:', error.stack);
+        await sendMessageWithoutDelete(userId, '❌ 播报失败，请联系管理员。', {}, 'broadcast_error');
     }
 }
 

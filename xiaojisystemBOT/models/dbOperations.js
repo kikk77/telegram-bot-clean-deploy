@@ -644,6 +644,16 @@ const dbOperations = {
         return stmt.get(userId);
     },
 
+    getEvaluationSessionByUserAndState(userId, state) {
+        const stmt = db.prepare('SELECT * FROM evaluation_sessions WHERE user_id = ? AND current_step = ? ORDER BY created_at DESC LIMIT 1');
+        return stmt.get(userId, state);
+    },
+
+    deleteEvaluationSession(id) {
+        const stmt = db.prepare('DELETE FROM evaluation_sessions WHERE id = ?');
+        return stmt.run(id);
+    },
+
     // 订单管理
     createOrder(orderData) {
         const stmt = db.prepare(`

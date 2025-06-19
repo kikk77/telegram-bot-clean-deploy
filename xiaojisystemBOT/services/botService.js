@@ -486,9 +486,28 @@ async function handleBindProcess(userId, chatId, text, username) {
             break;
             
         default:
-            // 检查是否在用户文字评价状态
-            const userEvalSession = dbOperations.getEvaluationSessionByUserAndState(userId, 'user_text_comment');
-            if (userEvalSession && chatId > 0) { // 只处理私聊消息
+            // 检查是否在用户文字评价状态（新系统：检查内存状态，旧系统：检查数据库会话）
+            let isUserTextComment = false;
+            let userEvalSession = null;
+            
+            // 检查新系统：内存状态中是否刚完成12项评价且正在等待文字输入
+            const userState = userEvaluationStates.get(userId);
+            if (userState && userState.completedCount === 12 && chatId > 0) {
+                // 用户已完成12项评价，任何文本输入都认为是文字评价
+                console.log(`检测到新系统用户文字评价输入`);
+                isUserTextComment = true;
+            }
+            
+            // 检查旧系统：数据库会话状态
+            if (!isUserTextComment) {
+                userEvalSession = dbOperations.getEvaluationSessionByUserAndState(userId, 'user_text_comment');
+                if (userEvalSession && chatId > 0) {
+                    console.log(`检测到旧系统用户文字评价输入`);
+                    isUserTextComment = true;
+                }
+            }
+            
+            if (isUserTextComment) {
                 // 处理用户文字评价输入
                 await handleUserTextCommentInput(userId, text, userEvalSession);
                 return;
@@ -2156,7 +2175,12 @@ async function handleEvaluationSubmit(userId, data, query) {
             return;
         }
         
-        // 删除评价消息（在显示确认页面前删除）- 删除两条消息
+        // 先保存12项评价数据到数据库
+        const scores = userState.scores;
+        dbOperations.updateEvaluation(evaluationId, null, scores, null, 'completed');
+        console.log(`📝 12项评价数据已保存到数据库: ${evaluationId}`, scores);
+        
+        // 删除评价消息
         if (userState.messageId) {
             try {
                 await bot.deleteMessage(userId, userState.messageId);
@@ -2175,8 +2199,8 @@ async function handleEvaluationSubmit(userId, data, query) {
             }
         }
         
-        // 显示评价总结确认页面
-        await showEvaluationSummary(userId, evaluationId, userState.scores);
+        // 显示用户文字评价步骤
+        await showUserTextCommentStep(userId, evaluationId, userState.scores);
         
     } catch (error) {
         console.error('处理评价提交失败:', error);
@@ -2238,9 +2262,11 @@ function getScoreKeyboard(step, evaluationId) {
 // 显示用户文字评价步骤
 async function showUserTextCommentStep(userId, evaluationId, scores) {
     try {
-        const message = `额外点评（额外输入文字点评，任何都行）：
+        const message = `✅ 您的12项评价已提交成功！
 
-请输入您的额外点评，或直接点击提交按钮继续评价确认。`;
+额外点评（额外输入文字点评，任何都行）：
+
+请输入您的额外点评，或直接点击按钮完成。`;
         
         const keyboard = {
             inline_keyboard: [
@@ -2248,7 +2274,7 @@ async function showUserTextCommentStep(userId, evaluationId, scores) {
                     { text: '跳过文字评价📋', callback_data: `user_text_skip_${evaluationId}` }
                 ],
                 [
-                    { text: '⬅️ 返回', callback_data: `back_user_text_comment_${evaluationId}` }
+                    { text: '提交文字报告📝', callback_data: `user_text_submit_${evaluationId}` }
                 ]
             ]
         };
@@ -2472,30 +2498,55 @@ async function handleUserTextCommentInput(userId, text, evalSession) {
     try {
         console.log(`=== 用户文字评价输入调试 ===`);
         console.log(`用户 ${userId} 输入文字评价: "${text}"`);
-        console.log(`评价会话ID: ${evalSession.id}`);
         
-        // 获取评价ID
-        const evaluationId = evalSession.evaluation_id;
+        // 获取用户状态（优先使用内存状态，新系统）
+        let userState = userEvaluationStates.get(userId);
+        let evaluationId;
+        let scores;
         
-        // 获取当前评分数据
-        let tempData = {};
-        try {
-            tempData = JSON.parse(evalSession.temp_data || '{}');
-        } catch (e) {
-            tempData = {};
+        if (userState) {
+            // 新系统：使用内存状态
+            console.log(`使用新系统内存状态`);
+            evaluationId = userState.evaluationId;
+            scores = userState.scores;
+            
+            // 保存文字评价到内存状态
+            scores.textComment = text;
+            userEvaluationStates.set(userId, userState);
+            
+        } else {
+            // 旧系统：使用数据库会话
+            console.log(`使用旧系统数据库会话，会话ID: ${evalSession.id}`);
+            evaluationId = evalSession.evaluation_id;
+            
+            // 获取当前评分数据
+            let tempData = {};
+            try {
+                tempData = JSON.parse(evalSession.temp_data || '{}');
+            } catch (e) {
+                tempData = {};
+            }
+            
+            // 保存文字评价
+            tempData.textComment = text;
+            scores = tempData;
+            
+            // 更新评价会话为总结状态
+            dbOperations.updateEvaluationSession(evalSession.id, 'evaluation_summary', tempData);
         }
         
-        // 保存文字评价
-        tempData.textComment = text;
-        
         console.log(`保存文字评价: "${text}"`);
-        console.log(`更新后的tempData:`, tempData);
+        console.log(`更新后的scores:`, scores);
         
-        // 更新评价会话为总结状态
-        dbOperations.updateEvaluationSession(evalSession.id, 'evaluation_summary', tempData);
+        // 更新数据库中的文字评价
+        if (userState) {
+            // 新系统：更新数据库评价记录
+            dbOperations.updateEvaluation(evaluationId, null, scores, text, 'completed');
+            console.log(`📝 文字评价已更新到数据库: "${text}"`);
+        }
         
-        // 显示评价总结页面
-        await showEvaluationSummary(userId, evaluationId, tempData);
+        // 直接进入播报选择阶段
+        await showBroadcastChoice(userId, evaluationId);
         
         console.log(`=== 用户文字评价输入调试结束 ===`);
         
@@ -2509,38 +2560,37 @@ async function handleUserTextCommentInput(userId, text, evalSession) {
 async function handleUserTextComment(userId, data, query) {
     try {
         if (data.startsWith('user_text_skip_')) {
-            // 跳过文字评价，直接进入总结页面
+            // 跳过文字评价，进入播报选择
             const evaluationId = data.replace('user_text_skip_', '');
-            const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+            console.log(`用户${userId}跳过文字评价，直接进入播报选择`);
             
-            if (evalSession) {
-                const scores = JSON.parse(evalSession.temp_data || '{}');
-                
-                // 更新会话状态为总结页面
-                dbOperations.updateEvaluationSession(evalSession.id, 'evaluation_summary', evalSession.temp_data);
-                
-                // 显示评价总结
-                await showEvaluationSummary(userId, evaluationId, scores);
-            }
+            // 直接进入播报选择阶段
+            await showBroadcastChoice(userId, evaluationId);
             
-        } else if (data.startsWith('back_user_text_comment_')) {
-            // 返回到最后一个评价项目
-            const evaluationId = data.replace('back_user_text_comment_', '');
-            const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+        } else if (data.startsWith('user_text_submit_')) {
+            // 提交文字报告
+            const evaluationId = data.replace('user_text_submit_', '');
             
-            if (evalSession) {
-                const lastStep = 'initiative'; // 最后一个评价项目
-                const lastMessage = getSoftwareMessage(lastStep);
-                const lastKeyboard = getScoreKeyboard(lastStep, evaluationId);
+            // 检查用户是否有内存状态和文字评价
+            const userState = userEvaluationStates.get(userId);
+            if (userState && userState.scores && userState.scores.textComment) {
+                // 用户有文字评价，提交并进入播报选择
+                console.log(`用户${userId}提交文字报告: "${userState.scores.textComment}"`);
                 
-                // 更新评价会话到最后一个评价步骤
-                dbOperations.updateEvaluationSession(evalSession.id, 'software_initiative', evalSession.temp_data);
+                // 更新数据库中的文字评价
+                dbOperations.updateEvaluation(evaluationId, null, userState.scores, userState.scores.textComment, 'completed');
+                console.log(`📝 文字评价已更新到数据库: "${userState.scores.textComment}"`);
                 
-                await sendMessageWithoutDelete(userId, lastMessage, { 
-                    reply_markup: lastKeyboard 
-                }, 'user_evaluation', {
-                    evaluationId,
-                    step: lastStep
+                // 直接进入播报选择阶段
+                await showBroadcastChoice(userId, evaluationId);
+            } else {
+                // 用户还没有输入文字内容
+                console.log(`用户${userId}点击提交文字报告，但没有输入文字内容`);
+                
+                // 提示用户需要输入文字内容
+                await bot.answerCallbackQuery(query.id, {
+                    text: '请先输入您的文字评价内容，然后再点击提交',
+                    show_alert: true
                 });
             }
         }
@@ -2984,6 +3034,34 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
         
     } catch (error) {
         console.error('处理详细评价确认失败:', error);
+    }
+}
+
+// 显示播报选择
+async function showBroadcastChoice(userId, evaluationId) {
+    try {
+        const message = `🎉 恭喜您完成一次评价～ 
+经管理员审核后为您添加积分，等级会自动更新！
+————————————————
+是否在大群播报本次出击记录？`;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '实名播报', callback_data: `broadcast_real_${evaluationId}` },
+                    { text: '匿名播报', callback_data: `broadcast_anon_${evaluationId}` }
+                ]
+            ]
+        };
+        
+        await sendMessageWithoutDelete(userId, message, { 
+            reply_markup: keyboard 
+        }, 'broadcast_choice', {
+            evaluationId
+        });
+        
+    } catch (error) {
+        console.error('显示播报选择失败:', error);
     }
 }
 

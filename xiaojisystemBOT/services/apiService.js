@@ -1,6 +1,7 @@
 const orderService = require('./orderService');
 const evaluationService = require('./evaluationService');
 const dbOperations = require('../models/dbOperations');
+const { db } = require('../config/database');
 // statsService将在需要时延迟加载
 
 class ApiService {
@@ -133,7 +134,7 @@ class ApiService {
             const params = whereConditions.params;
 
             // 1. 基础订单统计 - 使用与订单列表一致的状态判断逻辑
-            const orderStats = dbOperations.db.prepare(`
+            const orderStats = db.prepare(`
                 SELECT 
                     COUNT(*) as totalOrders,
                     SUM(CASE 
@@ -157,7 +158,7 @@ class ApiService {
             `).get(...params);
 
             // 2. 计算平均订单价格 - 根据课程内容和商家价格设置
-            const priceStats = dbOperations.db.prepare(`
+            const priceStats = db.prepare(`
                 SELECT 
                     AVG(
                         CASE 
@@ -178,7 +179,7 @@ class ApiService {
             `).get(...params);
 
             // 3. 计算平均用户评分 - 基于evaluations表
-            const userRatingStats = dbOperations.db.prepare(`
+            const userRatingStats = db.prepare(`
                 SELECT AVG(e.overall_score) as avgUserRating
                 FROM evaluations e
                 INNER JOIN orders o ON e.booking_session_id = o.booking_session_id
@@ -192,7 +193,7 @@ class ApiService {
             `).get(...params);
 
             // 4. 计算平均出击素质 - 基于evaluations表
-            const merchantRatingStats = dbOperations.db.prepare(`
+            const merchantRatingStats = db.prepare(`
                 SELECT AVG(e.overall_score) as avgMerchantRating
                 FROM evaluations e
                 INNER JOIN orders o ON e.booking_session_id = o.booking_session_id
@@ -269,7 +270,7 @@ class ApiService {
             const whereClause = whereConditions.conditions.join(' AND ');
             const params = whereConditions.params;
 
-            const metrics = dbOperations.db.prepare(`
+            const metrics = db.prepare(`
                 SELECT 
                     COUNT(*) as totalOrders,
                     SUM(CASE 
@@ -291,7 +292,7 @@ class ApiService {
             `).get(...params);
 
             // 获取平均评分
-            const avgRatingResult = dbOperations.db.prepare(`
+            const avgRatingResult = db.prepare(`
                 SELECT 
                     AVG(CAST(json_extract(o.user_evaluation, '$.overall_score') AS REAL)) as avgUserRating,
                     AVG(CAST(json_extract(o.merchant_evaluation, '$.overall_score') AS REAL)) as avgMerchantRating
@@ -341,7 +342,7 @@ class ApiService {
             const whereConditions = this.buildWhereConditions(filters);
             const whereClause = whereConditions.conditions.join(' AND ');
 
-            const trendData = dbOperations.db.prepare(`
+            const trendData = db.prepare(`
                 SELECT 
                     ${groupBy} as period,
                     COUNT(*) as orderCount,
@@ -377,7 +378,7 @@ class ApiService {
             const whereConditions = this.buildWhereConditions(filters);
             const whereClause = whereConditions.conditions.join(' AND ');
 
-            const regionData = dbOperations.db.prepare(`
+            const regionData = db.prepare(`
                 SELECT 
                     COALESCE(r.name, '未知地区') as regionName,
                     COUNT(o.id) as orderCount
@@ -409,7 +410,7 @@ class ApiService {
             const whereConditions = this.buildWhereConditions(filters);
             const whereClause = whereConditions.conditions.join(' AND ');
 
-            const priceData = dbOperations.db.prepare(`
+            const priceData = db.prepare(`
                 SELECT 
                     CASE 
                         WHEN CAST(o.price AS REAL) < 500 THEN '0-500'
@@ -451,7 +452,7 @@ class ApiService {
             const whereConditions = this.buildWhereConditions(filters);
             const whereClause = whereConditions.conditions.join(' AND ');
 
-            const statusData = dbOperations.db.prepare(`
+            const statusData = db.prepare(`
                 SELECT 
                     CASE 
                         WHEN bs.user_course_status = 'completed' THEN 'completed'
@@ -503,7 +504,7 @@ class ApiService {
             const params = whereConditions.params;
 
             // 获取真实订单数据，关联商家和地区信息，包含评价状态
-            const rawOrders = dbOperations.db.prepare(`
+            const rawOrders = db.prepare(`
                 SELECT 
                     o.*,
                     m.id as merchant_id,
@@ -579,7 +580,7 @@ class ApiService {
             });
 
             // 获取总数
-            const total = dbOperations.db.prepare(`
+            const total = db.prepare(`
                 SELECT COUNT(*) as count 
                 FROM orders o
                 LEFT JOIN merchants m ON o.merchant_id = m.id
@@ -606,8 +607,7 @@ class ApiService {
     // 获取用户评价状态
     getUserEvaluationStatus(bookingSessionId) {
         try {
-            const dbOperations = require('../models/dbOperations');
-            const evaluation = dbOperations.db.prepare(`
+            const evaluation = db.prepare(`
                 SELECT status, detailed_scores, overall_score FROM evaluations 
                 WHERE booking_session_id = ? AND evaluator_type = 'user'
             `).get(bookingSessionId);
@@ -627,8 +627,7 @@ class ApiService {
     // 获取商家评价状态
     getMerchantEvaluationStatus(bookingSessionId) {
         try {
-            const dbOperations = require('../models/dbOperations');
-            const evaluation = dbOperations.db.prepare(`
+            const evaluation = db.prepare(`
                 SELECT status, detailed_scores, overall_score FROM evaluations 
                 WHERE booking_session_id = ? AND evaluator_type = 'merchant'
             `).get(bookingSessionId);
@@ -646,7 +645,7 @@ class ApiService {
         try {
             const orderId = params.id;
             
-            const order = dbOperations.db.prepare(`
+            const order = db.prepare(`
                 SELECT 
                     o.*,
                     m.id as merchant_id,
@@ -762,7 +761,7 @@ class ApiService {
                     merchantEvaluation = {
                         overall_score: evalData.overall_score,
                         scores: hasDetailedScores ? JSON.parse(evalData.detailed_scores) : {},
-                        comments: evalData.comments || (hasDetailedScores ? null : `商家给出总体评分: ${evalData.overall_score}/10`),
+                        comments: evalData.comments, // 只使用数据库中的comments，不自动生成
                         created_at: formatTime(evalData.created_at),
                         is_simple_evaluation: !hasDetailedScores && hasOverallScore // 标记是否为简单评价（有总体评分但无详细评分）
                     };
@@ -817,7 +816,7 @@ class ApiService {
     // 获取地区列表
     async getRegions() {
         try {
-            const regions = dbOperations.db.prepare(`
+            const regions = db.prepare(`
                 SELECT id, name FROM regions WHERE active = 1 ORDER BY sort_order, name
             `).all();
 
@@ -830,7 +829,7 @@ class ApiService {
     // 获取商家列表
     async getMerchants() {
         try {
-            const merchants = dbOperations.db.prepare(`
+            const merchants = db.prepare(`
                 SELECT 
                     m.id,
                     m.teacher_name,
@@ -889,7 +888,7 @@ class ApiService {
 
             const whereClause = whereConditions.join(' AND ');
 
-            const rankings = dbOperations.db.prepare(`
+            const rankings = db.prepare(`
                 SELECT 
                     m.id,
                     m.teacher_name,
@@ -935,7 +934,7 @@ class ApiService {
     // 获取用户排名
     async getUserRankings({ query }) {
         try {
-            const rankings = dbOperations.db.prepare(`
+            const rankings = db.prepare(`
                 SELECT 
                     u.id,
                     u.name,
@@ -1217,7 +1216,7 @@ class ApiService {
                 throw new Error('无效的表名');
             }
             
-            const result = dbOperations.db.prepare(`SELECT COUNT(*) as count FROM ${actualTable}`).get();
+            const result = db.prepare(`SELECT COUNT(*) as count FROM ${actualTable}`).get();
             
             return {
                 success: true,
@@ -1235,7 +1234,7 @@ class ApiService {
             const { bookingSessionId, evaluatorType, evaluatorId, targetId } = body;
             
             // 创建评价记录
-            const evaluationId = dbOperations.db.prepare(`
+            const evaluationId = db.prepare(`
                 INSERT INTO evaluations (
                     booking_session_id, evaluator_type, evaluator_id, target_id, status
                 ) VALUES (?, ?, ?, ?, 'pending')
@@ -1268,7 +1267,7 @@ class ApiService {
             );
             
             // 获取更新后的数据
-            const evaluation = dbOperations.db.prepare(`
+            const evaluation = db.prepare(`
                 SELECT * FROM evaluations WHERE id = ?
             `).get(evaluationId);
             
@@ -1288,7 +1287,7 @@ class ApiService {
         try {
             const evaluationId = params.id;
             
-            const evaluation = dbOperations.db.prepare(`
+            const evaluation = db.prepare(`
                 SELECT * FROM evaluations WHERE id = ?
             `).get(evaluationId);
             

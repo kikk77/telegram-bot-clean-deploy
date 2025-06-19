@@ -590,11 +590,11 @@ const dbOperations = {
             values.push(overallScore);
         }
         
-        if (detailedScores !== null && detailedScores !== undefined) {
+                if (detailedScores !== null && detailedScores !== undefined) {
             updateFields.push('detailed_scores = ?');
             values.push(typeof detailedScores === 'object' ? JSON.stringify(detailedScores) : detailedScores);
         }
-        
+
         if (comments !== null && comments !== undefined) {
             updateFields.push('comments = ?');
             values.push(comments);

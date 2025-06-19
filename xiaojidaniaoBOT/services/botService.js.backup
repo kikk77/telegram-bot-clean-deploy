@@ -1,6 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const dbOperations = require('../models/dbOperations');
 const evaluationService = require('./evaluationService');
+const { clickProtection } = require('../utils/clickProtection');
 
 // 环境变量
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -48,16 +49,25 @@ let regions = [];
 
 // 内存映射管理 - 添加自动清理机制
 const userBindStates = new Map(); // 用户绑定状态
+const bookingCooldowns = new Map(); // 预约冷却时间
 const userMessageHistory = new Map(); // 用户消息历史记录
 const triggerCooldowns = new Map(); // 触发词冷却时间
 
 // 内存管理配置
 const MEMORY_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30分钟清理一次
 const MAX_USER_HISTORY = 20; // 每用户最多保存20条消息历史
+const MAX_COOLDOWN_TIME = 24 * 60 * 60 * 1000; // 24小时冷却过期
 
 // 定期清理过期的内存数据
 setInterval(() => {
     const now = Date.now();
+    
+    // 清理过期的预约冷却
+    for (const [userId, cooldownTime] of bookingCooldowns.entries()) {
+        if (now - cooldownTime > MAX_COOLDOWN_TIME) {
+            bookingCooldowns.delete(userId);
+        }
+    }
     
     // 清理过期的触发词冷却
     for (const [cooldownKey, cooldownTime] of triggerCooldowns.entries()) {
@@ -73,7 +83,7 @@ setInterval(() => {
         }
     }
     
-    console.log(`内存清理完成 - 消息历史大小: ${userMessageHistory.size}`);
+    console.log(`内存清理完成 - 冷却映射大小: ${bookingCooldowns.size}, 消息历史大小: ${userMessageHistory.size}`);
 }, MEMORY_CLEANUP_INTERVAL);
 
 // 用户状态枚举
@@ -137,7 +147,7 @@ async function clearUserConversation(userId) {
     }
 }
 
-// 删除上一条消息并发送新消息
+// 删除上一条消息并发送新消息 - 使用安全删除机制
 async function sendMessageWithDelete(chatId, text, options = {}, messageType = 'general', data = {}) {
     try {
         // 获取用户的最后一条消息
@@ -152,49 +162,9 @@ async function sendMessageWithDelete(chatId, text, options = {}, messageType = '
         // 安全删除上一条消息（延迟200ms确保新消息已发送）
         if (lastMessage && lastMessage.messageId) {
             setTimeout(async () => {
-                try {
-                    await bot.deleteMessage(chatId, lastMessage.messageId);
-                    console.log(`✅ 消息删除成功: ${chatId}_${lastMessage.messageId}`);
-                } catch (error) {
-                    // 只有在不是"消息不存在"错误时才记录
-                    if (!error.message.includes('message to delete not found')) {
-                        console.log(`⚠️ 消息删除失败: ${chatId}_${lastMessage.messageId} - ${error.message}`);
-                    }
-                }
+                await safeDeleteMessage(chatId, lastMessage.messageId, `sendMessageWithDelete-${messageType}`);
             }, 200);
         }
-        
-        return sentMessage;
-        
-    } catch (error) {
-        console.error('发送消息失败:', error);
-        throw error;
-    }
-}
-
-// 立即删除当前消息并发送新消息的丝滑版本
-async function sendMessageWithImmediateDelete(chatId, text, options = {}, messageType = 'general', data = {}) {
-    try {
-        // 获取用户的最后一条消息
-        const lastMessage = getLastMessage(chatId);
-        
-        // 立即删除上一条消息（提升用户体验）
-        if (lastMessage && lastMessage.messageId) {
-            try {
-                await bot.deleteMessage(chatId, lastMessage.messageId);
-                console.log(`✅ 消息立即删除成功: ${chatId}_${lastMessage.messageId}`);
-            } catch (error) {
-                if (!error.message.includes('message to delete not found')) {
-                    console.log(`⚠️ 消息立即删除失败: ${chatId}_${lastMessage.messageId} - ${error.message}`);
-                }
-            }
-        }
-        
-        // 发送新消息
-        const sentMessage = await bot.sendMessage(chatId, text, options);
-        
-        // 记录新消息
-        addMessageToHistory(chatId, sentMessage.message_id, messageType, data);
         
         return sentMessage;
         
@@ -659,37 +629,10 @@ function initBotHandlers() {
         await handleBindProcess(userId, chatId, text, username);
     });
 
-    // 高效防重复点击机制 - 基于操作去重
-    const userLastActions = new Map(); // 存储用户最近的操作：userId_actionType -> timestamp
+    // 简单防重复点击保护
+    const recentQueries = new Set();
     
-    // 定期清理过期操作记录（5分钟清理一次，清理超过30秒的记录）
-    setInterval(() => {
-        const now = Date.now();
-        for (const [key, timestamp] of userLastActions.entries()) {
-            if (now - timestamp > 30000) { // 30秒过期
-                userLastActions.delete(key);
-            }
-        }
-    }, 5 * 60 * 1000);
-    
-    // 提取操作类型的函数 - 用于防重复处理
-    function extractActionType(data) {
-        // 提取操作的核心类型，忽略具体参数
-        if (data.startsWith('attack_')) return 'attack';
-        if (data.startsWith('book_')) return `book_${data.split('_')[1]}`; // book_p, book_pp, book_other
-        if (data.startsWith('course_completed_')) return 'course_completed';
-        if (data.startsWith('course_incomplete_')) return 'course_incomplete';
-        if (data.startsWith('eval_score_')) return 'eval_score';
-        if (data.startsWith('user_eval_') && data.includes('_confirm_')) return 'user_eval_confirm';
-        if (data.startsWith('broadcast_')) return `broadcast_${data.split('_')[1]}`; // broadcast_real, broadcast_anon, broadcast_no
-        if (data.startsWith('detail_') && data.includes('_confirm_')) return 'detail_confirm';
-        
-        // 对于其他操作，使用前缀作为类型
-        const prefix = data.split('_')[0];
-        return prefix || data;
-    }
-    
-    // 处理按钮点击 - 高效防重复机制
+    // 处理按钮点击 - 增强的防重复点击保护
     bot.on('callback_query', async (query) => {
         const chatId = query.message.chat.id;
         const userId = query.from.id;
@@ -697,54 +640,23 @@ function initBotHandlers() {
         const queryId = query.id;
         
         try {
-            // 1. 立即响应callback query（必须 - 确保Loading立即消失）
-            await bot.answerCallbackQuery(queryId);
+            // 1. 检查是否为重复点击
+            if (isCallbackQueryDuplicate(query)) {
+                // 对于重复点击，立即响应但不处理业务逻辑
+                await safeAnswerCallbackQuery(queryId, { 
+                    text: '请勿重复点击按钮',
+                    show_alert: false
+                });
+                return;
+            }
             
-            // 2. 将所有业务逻辑移到异步处理（不阻塞callback响应）
-            setImmediate(async () => {
-                try {
-                    // 防重复处理 - 提取操作类型
-                    const actionType = extractActionType(data);
-                    const actionKey = `${userId}_${actionType}`;
-                    const now = Date.now();
-                    const lastActionTime = userLastActions.get(actionKey) || 0;
-                    
-                    // 检查是否为重复操作（3秒内的相同操作视为重复）
-                    if (now - lastActionTime < 3000) {
-                        console.log(`🛡️ 后台拦截重复操作: ${actionKey} (${data})`);
-                        return; // 静默拦截，用户端已经得到响应
-                    }
-                    
-                    // 记录本次操作
-                    userLastActions.set(actionKey, now);
-                    
-                    // 立即删除消息（提升用户体验）- 仅对评价相关按钮
-                    if (data.includes('eval_') || data.includes('broadcast_') || data.includes('score_') || data.includes('detail_')) {
-                        try {
-                            await bot.deleteMessage(chatId, query.message.message_id);
-                            console.log(`✅ 立即删除按钮消息成功: ${chatId}_${query.message.message_id}`);
-                        } catch (error) {
-                            if (!error.message.includes('message to delete not found')) {
-                                console.log(`⚠️ 立即删除按钮消息失败: ${chatId}_${query.message.message_id} - ${error.message}`);
-                            }
-                        }
-                    }
-                    
-                    // 异步处理业务逻辑
-                    await handleAsyncCallbackLogic(chatId, userId, data, query);
-                    
-                } catch (error) {
-                    console.error('异步处理callback逻辑失败:', error);
-                }
-            });
+            // 2. 锁定当前query处理
+            lockCallbackQuery(queryId);
             
-        } catch (error) {
-            console.error('处理callback_query失败:', error);
-        }
-    });
-    
-    // 异步处理callback业务逻辑
-    async function handleAsyncCallbackLogic(chatId, userId, data, query) {
+            // 3. 记录用户操作
+            recordUserAction(userId, data);
+
+        // 处理按钮点击
         if (data.startsWith('attack_')) {
             const merchantId = data.replace('attack_', '');
             
@@ -775,15 +687,32 @@ function initBotHandlers() {
             const bookType = parts[1]; // p, pp, other
             const merchantId = parts[2];
             
-            // 先缓存用户信息，避免重复获取
-            const userName = query.from.first_name || '';
-            const userLastName = query.from.last_name || '';
-            const fullName = `${userName} ${userLastName}`.trim() || '未设置名称';
-            const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+            // 检查防重复点击机制（30分钟内同一用户对同一商家只能点击一次）
+            const cooldownKey = `${userId}_${merchantId}`;
+            const lastBookingTime = bookingCooldowns.get(cooldownKey) || 0;
+            const now = Date.now();
+            const cooldownPeriod = 30 * 60 * 1000; // 30分钟
             
-            // 异步获取商家信息，避免阻塞
+            if (now - lastBookingTime < cooldownPeriod) {
+                // 显示重复预约提示 - 通过发送新消息而不是重复应答callback
+                try {
+                    await bot.sendMessage(chatId, `🐤鸡总，咱已经预约过了哦～\n请点击联系方式直接私聊老师。`);
+                } catch (error) {
+                    console.error('发送重复预约提示失败:', error);
+                }
+                return;
+            }
+            
             const merchant = dbOperations.getMerchantById(merchantId);
             if (merchant) {
+                // 记录本次点击时间
+                bookingCooldowns.set(cooldownKey, now);
+                
+                // 获取用户信息
+                const userName = query.from.first_name || '';
+                const userLastName = query.from.last_name || '';
+                const fullName = `${userName} ${userLastName}`.trim() || '未设置名称';
+                const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
                 
                 // 确定预约类型的中文描述
                 let bookTypeText = '';
@@ -797,6 +726,25 @@ function initBotHandlers() {
                     case 'other':
                         bookTypeText = '其他时长';
                         break;
+                }
+                
+                // 创建预约会话
+                const bookingSessionId = dbOperations.createBookingSession(userId, merchantId, bookType);
+                
+                // 发送通知给商家
+                if (merchant.user_id) {
+                    const merchantNotification = `老师您好，
+用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您预约${bookTypeText}课程
+请及时关注私聊信息。
+————————————————————————
+🐤小鸡出征！请尽力服务好我们的勇士～
+如遇任何问题，请群内联系小鸡管理员。`;
+                    
+                    bot.sendMessage(merchant.user_id, merchantNotification).catch(error => {
+                        console.log(`无法发送通知给商家 ${merchant.user_id}: ${error.message}`);
+                    });
+                    
+                    console.log(`已通知商家 ${merchant.user_id}，用户 ${fullName} (${username}) 预约了 ${bookTypeText}`);
                 }
                 
                 // 生成联系方式链接
@@ -815,42 +763,14 @@ function initBotHandlers() {
                 
                 await bot.sendMessage(chatId, finalMessage, contactOptions);
                 
-                // 后台异步处理（不阻塞用户体验）
-                setImmediate(async () => {
-                    try {
-                        // 创建预约会话
-                        const bookingSessionId = dbOperations.createBookingSession(userId, merchantId, bookType);
-                        
-                        // 发送通知给商家（异步）
-                        if (merchant.user_id) {
-                            const merchantNotification = `老师您好，
-用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您预约${bookTypeText}课程
-请及时关注私聊信息。
-————————————————————————
-🐤小鸡出征！请尽力服务好我们的勇士～
-如遇任何问题，请群内联系小鸡管理员。`;
-                            
-                            bot.sendMessage(merchant.user_id, merchantNotification).catch(error => {
-                                console.log(`无法发送通知给商家 ${merchant.user_id}: ${error.message}`);
-                            });
-                            
-                            console.log(`已通知商家 ${merchant.user_id}，用户 ${fullName} (${username}) 预约了 ${bookTypeText}`);
-                        }
-                        
-                        // 记录交互（异步）
-                        dbOperations.logInteraction(userId, query.from.username, query.from.first_name, query.from.last_name, null, null, `book_${bookType}`, chatId);
-                        
-                        // 延迟2秒发送约课成功确认消息
-                        setTimeout(async () => {
-                            await sendBookingSuccessCheck(userId, bookingSessionId, merchant, bookType, fullName, username);
-                        }, 2000);
-                        
-                        console.log(`用户 ${userId} ${fullName} (${username}) 预约了商家 ${merchantId} (${bookType})`);
-                        
-                    } catch (error) {
-                        console.error('后台处理预约流程失败:', error);
-                    }
-                });
+                // 延迟2秒发送约课成功确认消息
+                setTimeout(async () => {
+                    await sendBookingSuccessCheck(userId, bookingSessionId, merchant, bookType, fullName, username);
+                }, 2000);
+                
+                // 记录交互
+                dbOperations.logInteraction(userId, query.from.username, query.from.first_name, query.from.last_name, null, null, `book_${bookType}`, chatId);
+                console.log(`用户 ${userId} ${fullName} (${username}) 预约了商家 ${merchantId} (${bookType})`);
             }
             return;
         }
@@ -1110,18 +1030,24 @@ function initBotHandlers() {
             return;
         }
         
-        // 处理播报选择
-        else if (data.startsWith('broadcast_')) {
-            console.log(`路由到播报选择处理: ${data}`);
-            await handleBroadcastChoice(userId, data, query);
-            return;
-        }
-        
         // 如果没有匹配到任何处理逻辑，记录日志
         else {
             console.log(`未处理的callback data: ${data}`);
+            // 对于未处理的callback，仍然需要响应以避免超时
+            await safeAnswerCallbackQuery(queryId, { 
+                text: '操作已处理',
+                show_alert: false 
+            });
         }
-    }
+        
+    } catch (error) {
+        console.error('处理callback_query失败:', error);
+        // 确保即使出错也要响应callback_query
+        await safeAnswerCallbackQuery(queryId, { 
+            text: '处理失败，请重试',
+            show_alert: false 
+        });
+    });
 }
 
 // 发送预约确认消息
@@ -1217,7 +1143,7 @@ async function handleCourseFlow(userId, data, query) {
                 console.log(`${isUser ? '用户' : '商家'} ${userId} 确认课程完成，预约会话 ${bookingSessionId}`);
                 
             } else {
-                console.log('预约信息不存在');
+                bot.answerCallbackQuery(query.id, { text: '预约信息不存在' });
             }
             
         } else if (data.startsWith('course_incomplete_')) {
@@ -1231,6 +1157,7 @@ async function handleCourseFlow(userId, data, query) {
                 
                 if (isUser) {
                     dbOperations.updateUserCourseStatus(bookingSessionId, 'incomplete');
+                    bot.answerCallbackQuery(query.id, { text: '课程未完成' });
                     
                     await sendMessageWithoutDelete(userId, '课程未完成，是否重新预约？', {
                         reply_markup: {
@@ -1245,6 +1172,7 @@ async function handleCourseFlow(userId, data, query) {
                     
                 } else if (isMerchant) {
                     dbOperations.updateMerchantCourseStatus(bookingSessionId, 'incomplete');
+                    bot.answerCallbackQuery(query.id, { text: '课程未完成' });
                     
                     await sendMessageWithoutDelete(userId, '您已标记课程未完成', {}, 'course_incomplete_merchant');
                 }
@@ -1252,11 +1180,12 @@ async function handleCourseFlow(userId, data, query) {
                 console.log(`${isUser ? '用户' : '商家'} ${userId} 标记课程未完成，预约会话 ${bookingSessionId}`);
                 
             } else {
-                console.log('预约信息不存在');
+                bot.answerCallbackQuery(query.id, { text: '预约信息不存在' });
             }
         }
     } catch (error) {
         console.error('处理课程完成流程失败:', error);
+        bot.answerCallbackQuery(query.id, { text: '处理失败，请重试' });
     }
 }
 
@@ -1301,6 +1230,7 @@ async function sendRebookingQuestionToUser(userId, bookingSessionId) {
 async function handleRebookFlow(userId, data, query) {
     try {
         if (data.startsWith('rebook_no_')) {
+            bot.answerCallbackQuery(query.id, { text: '已选择不重新预约' });
             
             // 清空本轮对话历史
             await clearUserConversation(userId);
@@ -1315,6 +1245,7 @@ async function handleRebookFlow(userId, data, query) {
             const bookingSession = dbOperations.getBookingSession(bookingSessionId);
             
             if (bookingSession) {
+                bot.answerCallbackQuery(query.id, { text: '正在重新预约' });
                 await sendMessageWithoutDelete(userId, '正在为您重新安排预约...', {}, 'rebook_processing');
                 
                 const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
@@ -1348,11 +1279,12 @@ async function handleRebookFlow(userId, data, query) {
                     sendCourseCompletionCheck(bookingSession.user_id, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
                 }, 2000);
             } else {
-                console.log('预约信息不存在');
+                bot.answerCallbackQuery(query.id, { text: '预约信息不存在' });
             }
         }
     } catch (error) {
         console.error('处理重新预约流程失败:', error);
+        bot.answerCallbackQuery(query.id, { text: '处理失败，请重试' });
     }
 }
 
@@ -1363,61 +1295,78 @@ async function handleRebookFlow(userId, data, query) {
 async function handleEvaluationFlow(userId, data, query) {
     try {
         if (data.startsWith('evaluate_user_')) {
+            bot.answerCallbackQuery(query.id, { text: '开始评价勇士' });
             const bookingSessionId = data.replace('evaluate_user_', '');
             startMerchantEvaluation(userId, bookingSessionId);
             
         } else if (data.startsWith('evaluate_teacher_')) {
+            bot.answerCallbackQuery(query.id, { text: '开始评价老师' });
             const bookingSessionId = data.replace('evaluate_teacher_', '');
             startUserEvaluation(userId, bookingSessionId);
             
         } else if (data.startsWith('eval_score_')) {
             // 处理商家评价勇士的总体评分
+            bot.answerCallbackQuery(query.id);
             handleMerchantScoring(userId, data, query);
             
         } else if (data.startsWith('user_eval_')) {
             // 处理用户评价老师
             if (data.includes('_confirm_')) {
+                bot.answerCallbackQuery(query.id, { text: '评价已确认' });
                 handleUserEvaluationConfirm(userId, data, query);
             } else if (data.includes('_restart_')) {
+                bot.answerCallbackQuery(query.id, { text: '重新开始评价' });
                 handleUserEvaluationRestart(userId, data, query);
             } else if (data.includes('_back_')) {
+                bot.answerCallbackQuery(query.id, { text: '返回上一步' });
                 handleUserEvaluationBack(userId, data, query);
             } else {
+                bot.answerCallbackQuery(query.id);
                 handleUserScoring(userId, data, query);
             }
         } else if (data.startsWith('eval_confirm_') || data.startsWith('eval_modify_')) {
             // 处理商家评价确认
+            bot.answerCallbackQuery(query.id);
             handleMerchantEvaluationConfirm(userId, data, query);
         } else if (data.startsWith('detailed_eval_')) {
             // 处理详细评价
             console.log(`处理详细评价回调: ${data}, 用户: ${userId}`);
+            bot.answerCallbackQuery(query.id);
             handleDetailedEvaluation(userId, data, query);
             return;
         } else if (data.startsWith('broadcast_')) {
             // 处理播报选择
+            bot.answerCallbackQuery(query.id);
             handleBroadcastChoice(userId, data, query);
         } else if (data.startsWith('detail_')) {
             // 处理详细评价评分
             if (data.includes('_confirm_') || data.includes('_restart_')) {
+                bot.answerCallbackQuery(query.id);
                 handleDetailedEvaluationConfirm(userId, data, query);
             } else {
+                bot.answerCallbackQuery(query.id);
                 handleDetailedEvaluationScoring(userId, data, query);
             }
         } else if (data.startsWith('merchant_detail_eval_')) {
             // 处理商家详细评价
             if (data.includes('_confirm_') || data.includes('_restart_')) {
+                bot.answerCallbackQuery(query.id, { text: '详细评价已确认' });
                 handleMerchantDetailEvaluationConfirm(userId, data, query);
             } else if (data.includes('_back_')) {
+                bot.answerCallbackQuery(query.id, { text: '返回上一步' });
                 handleMerchantDetailEvaluationBack(userId, data, query);
             } else {
+                bot.answerCallbackQuery(query.id);
                 handleMerchantDetailEvaluationScoring(userId, data, query);
             }
         } else {
             // 处理其他未匹配的评价相关回调
             console.log(`评价流程中未处理的callback data: ${data}`);
+            bot.answerCallbackQuery(query.id, { text: '操作完成' });
         }
     } catch (error) {
         console.error('处理评价流程失败:', error);
+        bot.answerCallbackQuery(query.id, { text: '处理失败，请重试' });
     }
 }
 
@@ -1713,7 +1662,7 @@ async function showEvaluationSummary(userId, evaluationId, scores) {
             ]
         };
         
-        await sendMessageWithoutDelete(userId, summary, { 
+        await sendMessageWithDelete(userId, summary, { 
             reply_markup: keyboard 
         }, 'user_evaluation_summary', {
             evaluationId,
@@ -1756,7 +1705,7 @@ async function handleUserEvaluationConfirm(userId, data, query) {
                 ]
             };
             
-            await sendMessageWithoutDelete(userId, message, { 
+            await sendMessageWithDelete(userId, message, { 
                 reply_markup: keyboard 
             }, 'user_evaluation_complete', {
                 evaluationId
@@ -1782,7 +1731,7 @@ async function handleUserEvaluationRestart(userId, data, query) {
             const message = `硬件评价\n\n颜值：`;
             const keyboard = getScoreKeyboard('appearance', evaluationId);
             
-            await sendMessageWithoutDelete(userId, message, { 
+            await sendMessageWithDelete(userId, message, { 
                 reply_markup: keyboard 
             }, 'user_evaluation', {
                 evaluationId,
@@ -1862,7 +1811,7 @@ async function handleUserEvaluationBack(userId, data, query) {
             // 更新评价会话到上一步
             dbOperations.updateEvaluationSession(evalSession.id, prevStep, evalSession.temp_data);
             
-            await sendMessageWithoutDelete(userId, prevMessage, { 
+            await sendMessageWithDelete(userId, prevMessage, { 
                 reply_markup: prevKeyboard 
             }, 'user_evaluation', {
                 evaluationId,
@@ -2229,17 +2178,17 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
 async function handleBroadcastChoice(userId, data, query) {
     try {
         if (data.startsWith('broadcast_no_')) {
-            await sendMessageWithoutDelete(userId, '感谢您的评价！记录已保存。', {}, 'broadcast_complete');
+            await sendMessageWithDelete(userId, '感谢您的评价！记录已保存。', {}, 'broadcast_complete');
             
         } else if (data.startsWith('broadcast_real_')) {
             const evaluationId = data.replace('broadcast_real_', '');
             // 这里可以实现实名播报逻辑
-            await sendMessageWithoutDelete(userId, '实名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_real');
+            await sendMessageWithDelete(userId, '实名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_real');
             
         } else if (data.startsWith('broadcast_anon_')) {
             const evaluationId = data.replace('broadcast_anon_', '');
             // 这里可以实现匿名播报逻辑
-            await sendMessageWithoutDelete(userId, '匿名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_anon');
+            await sendMessageWithDelete(userId, '匿名播报功能正在开发中，感谢您的评价！', {}, 'broadcast_anon');
         }
         
     } catch (error) {
@@ -2828,6 +2777,7 @@ async function handleBookingSuccessFlow(userId, data, query) {
             const bookingSession = dbOperations.getBookingSession(bookingSessionId);
             
             if (bookingSession) {
+                bot.answerCallbackQuery(query.id, { text: '约课成功确认' });
                 
                 // 创建后台订单数据
                 const orderId = await createOrderData(bookingSession, userId, query);
@@ -2846,11 +2796,13 @@ async function handleBookingSuccessFlow(userId, data, query) {
                 console.log(`用户 ${userId} 确认约课成功，预约会话 ${bookingSessionId}，订单ID ${orderId}`);
                 
             } else {
-                console.log('预约信息不存在');
+                bot.answerCallbackQuery(query.id, { text: '预约信息不存在' });
             }
             
         } else if (data.startsWith('booking_failed_')) {
             const bookingSessionId = data.replace('booking_failed_', '');
+            
+            bot.answerCallbackQuery(query.id, { text: '约课未成功' });
             
             // 清空本轮对话历史
             await clearUserConversation(userId);
@@ -2862,6 +2814,7 @@ async function handleBookingSuccessFlow(userId, data, query) {
         }
     } catch (error) {
         console.error('处理约课成功确认流程失败:', error);
+        bot.answerCallbackQuery(query.id, { text: '处理失败，请重试' });
     }
 }
 
@@ -2921,6 +2874,107 @@ async function createOrderData(bookingSession, userId, query) {
     } catch (error) {
         console.error('创建订单数据失败:', error);
         throw error;
+    }
+}
+
+// 防重复点击机制 - 更强健的版本
+const callbackQueryLocks = new Map(); // 存储正在处理的callback query
+const userActionCooldowns = new Map(); // 用户操作冷却期
+const messageDeleteAttempts = new Map(); // 消息删除尝试记录
+
+// 防重复点击保护
+function isCallbackQueryDuplicate(query) {
+    const queryId = query.id;
+    const userId = query.from.id;
+    const data = query.data;
+    
+    // 1. 检查相同query ID是否正在处理
+    if (callbackQueryLocks.has(queryId)) {
+        console.log(`🛡️ 重复query ID被拦截: ${queryId}`);
+        return true;
+    }
+    
+    // 2. 检查用户在短时间内是否有相同操作
+    const actionKey = `${userId}_${data}`;
+    const lastActionTime = userActionCooldowns.get(actionKey) || 0;
+    const now = Date.now();
+    const cooldownPeriod = 1000; // 1秒冷却期
+    
+    if (now - lastActionTime < cooldownPeriod) {
+        console.log(`🛡️ 用户操作冷却期内被拦截: ${actionKey}`);
+        return true;
+    }
+    
+    // 3. 对于预约相关操作，检查更长的冷却期
+    if (data.startsWith('book_') || data.startsWith('attack_')) {
+        const bookingKey = `booking_${userId}_${data}`;
+        const lastBookingTime = userActionCooldowns.get(bookingKey) || 0;
+        const bookingCooldown = 2000; // 2秒预约冷却期
+        
+        if (now - lastBookingTime < bookingCooldown) {
+            console.log(`🛡️ 预约操作冷却期内被拦截: ${bookingKey}`);
+            return true;
+        }
+        
+        // 记录预约操作时间
+        userActionCooldowns.set(bookingKey, now);
+        setTimeout(() => userActionCooldowns.delete(bookingKey), bookingCooldown);
+    }
+    
+    return false;
+}
+
+// 锁定callback query处理
+function lockCallbackQuery(queryId, timeoutMs = 5000) {
+    callbackQueryLocks.set(queryId, Date.now());
+    setTimeout(() => callbackQueryLocks.delete(queryId), timeoutMs);
+}
+
+// 记录用户操作
+function recordUserAction(userId, data) {
+    const actionKey = `${userId}_${data}`;
+    userActionCooldowns.set(actionKey, Date.now());
+    setTimeout(() => userActionCooldowns.delete(actionKey), 1000);
+}
+
+// 安全删除消息 - 防止重复删除错误
+async function safeDeleteMessage(chatId, messageId, context = '') {
+    const deleteKey = `${chatId}_${messageId}`;
+    
+    // 检查是否已经尝试删除过这条消息
+    if (messageDeleteAttempts.has(deleteKey)) {
+        console.log(`🛡️ 消息删除跳过(已尝试): ${deleteKey} ${context}`);
+        return false;
+    }
+    
+    try {
+        // 标记为正在删除
+        messageDeleteAttempts.set(deleteKey, Date.now());
+        
+        await bot.deleteMessage(chatId, messageId);
+        console.log(`✅ 消息删除成功: ${deleteKey} ${context}`);
+        
+        // 5秒后清理记录
+        setTimeout(() => messageDeleteAttempts.delete(deleteKey), 5000);
+        return true;
+        
+    } catch (error) {
+        console.log(`⚠️ 消息删除失败: ${deleteKey} ${context} - ${error.message}`);
+        
+        // 立即清理记录，因为可能消息已经不存在了
+        messageDeleteAttempts.delete(deleteKey);
+        return false;
+    }
+}
+
+// 安全的callback query响应
+async function safeAnswerCallbackQuery(queryId, options = {}) {
+    try {
+        await bot.answerCallbackQuery(queryId, options);
+        return true;
+    } catch (error) {
+        console.error(`⚠️ 响应callback query失败 ${queryId}:`, error.message);
+        return false;
     }
 }
 

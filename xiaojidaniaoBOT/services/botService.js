@@ -680,6 +680,9 @@ function initBotHandlers() {
         if (data.startsWith('course_completed_')) return 'course_completed';
         if (data.startsWith('course_incomplete_')) return 'course_incomplete';
         if (data.startsWith('eval_score_')) return 'eval_score';
+        if (data.startsWith('eval_info_')) return 'eval_info';
+        if (data === 'eval_incomplete') return 'eval_ui_click';
+        if (data.startsWith('eval_submit_')) return 'eval_submit';
         if (data.startsWith('user_eval_') && data.includes('_confirm_')) return 'user_eval_confirm';
         if (data.startsWith('broadcast_')) return `broadcast_${data.split('_')[1]}`; // broadcast_real, broadcast_anon, broadcast_no
         if (data.startsWith('detail_') && data.includes('_confirm_')) return 'detail_confirm';
@@ -700,20 +703,34 @@ function initBotHandlers() {
             // 1. 立即响应callback query（必须 - 确保Loading立即消失）
             await bot.answerCallbackQuery(queryId);
             
-            // 2. 立即删除消息（提升用户体验）- 删除所有按钮消息
-            try {
-                await bot.deleteMessage(chatId, query.message.message_id);
-                console.log(`✅ 立即删除按钮消息成功: ${chatId}_${query.message.message_id}`);
-            } catch (error) {
-                if (!error.message.includes('message to delete not found')) {
-                    console.log(`⚠️ 立即删除按钮消息失败: ${chatId}_${query.message.message_id} - ${error.message}`);
+            // 2. 根据callback类型决定是否删除消息
+            const isEvaluationClick = data.startsWith('eval_score_') || 
+                                    data.startsWith('eval_info_') || 
+                                    data === 'eval_incomplete' ||
+                                    data.startsWith('eval_submit_');
+            
+            if (!isEvaluationClick) {
+                // 非评价系统的按钮点击才删除消息
+                try {
+                    await bot.deleteMessage(chatId, query.message.message_id);
+                    console.log(`✅ 立即删除按钮消息成功: ${chatId}_${query.message.message_id}`);
+                } catch (error) {
+                    if (!error.message.includes('message to delete not found')) {
+                        console.log(`⚠️ 立即删除按钮消息失败: ${chatId}_${query.message.message_id} - ${error.message}`);
+                    }
                 }
             }
             
             // 3. 将所有业务逻辑移到异步处理（不阻塞callback响应）
             setImmediate(async () => {
                 try {
-                    // 后台防重复处理 - 提取操作类型
+                    // 评价系统完全跳过防重复检查，直接处理
+                    if (isEvaluationClick) {
+                        await handleAsyncCallbackLogic(chatId, userId, data, query);
+                        return;
+                    }
+                    
+                    // 非评价系统才进行防重复处理
                     const actionType = extractActionType(data);
                     const actionKey = `${userId}_${actionType}`;
                     const now = Date.now();
@@ -1101,8 +1118,15 @@ function initBotHandlers() {
             return;
         }
         
-        // 处理评价流程
+        // 处理评价流程 - 分离UI更新和业务逻辑
         else if (data.startsWith('evaluate_') || data.startsWith('eval_') || data.startsWith('user_eval_') || data.startsWith('merchant_detail_eval_')) {
+            // 评分按钮 - 最小化处理，即时UI反馈
+            if (data.startsWith('eval_score_')) {
+                await handleMinimalEvalScoring(userId, data, query);
+                return;
+            }
+            
+            // 其他评价相关按钮走正常流程
             console.log(`路由到评价流程处理: ${data}`);
             await handleEvaluationFlow(userId, data, query);
             return;
@@ -1369,11 +1393,25 @@ async function handleEvaluationFlow(userId, data, query) {
             startUserEvaluation(userId, bookingSessionId);
             
         } else if (data.startsWith('eval_score_')) {
-            // 处理商家评价勇士的总体评分
-            handleMerchantScoring(userId, data, query);
+            // 处理评分 - 需要区分商家评分和用户评分
+            if (data.split('_').length === 4) {
+                // 商家评价勇士的总体评分 eval_score_X_evaluationId
+                handleMerchantScoring(userId, data, query);
+            } else {
+                // 用户评价项目评分 eval_score_type_X_evaluationId
+                handleUserScoring(userId, data, query);
+            }
+            
+        } else if (data.startsWith('eval_submit_')) {
+            // 处理评价提交
+            handleEvaluationSubmit(userId, data, query);
+            
+        } else if (data === 'eval_incomplete' || data.startsWith('eval_info_')) {
+            // 处理无效按钮点击
+            handleInvalidEvaluationClick(userId, data, query);
             
         } else if (data.startsWith('user_eval_')) {
-            // 处理用户评价老师
+            // 处理用户评价老师（兼容旧版本）
             if (data.includes('_confirm_')) {
                 handleUserEvaluationConfirm(userId, data, query);
             } else if (data.includes('_restart_')) {
@@ -1381,6 +1419,7 @@ async function handleEvaluationFlow(userId, data, query) {
             } else if (data.includes('_back_')) {
                 handleUserEvaluationBack(userId, data, query);
             } else {
+                // 旧版本的评分处理
                 handleUserScoring(userId, data, query);
             }
         } else if (data.startsWith('eval_confirm_') || data.startsWith('eval_modify_')) {
@@ -1501,6 +1540,9 @@ async function handleMerchantScoring(userId, data, query) {
 }
 
 // 开始用户评价老师流程
+// 用于存储用户评价状态的内存映射
+const userEvaluationStates = new Map();
+
 async function startUserEvaluation(userId, bookingSessionId) {
     try {
         const bookingSession = dbOperations.getBookingSession(bookingSessionId);
@@ -1510,44 +1552,332 @@ async function startUserEvaluation(userId, bookingSessionId) {
         const evaluationId = dbOperations.createEvaluation(bookingSessionId, 'user', userId, bookingSession.merchant_id);
         const sessionId = dbOperations.createEvaluationSession(userId, evaluationId);
         
-        // 开始硬件评价 - 颜值
-        const message = `硬件评价\n\n颜值：`;
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    { text: '0', callback_data: `user_eval_appearance_0_${evaluationId}` },
-                    { text: '1', callback_data: `user_eval_appearance_1_${evaluationId}` },
-                    { text: '2', callback_data: `user_eval_appearance_2_${evaluationId}` },
-                    { text: '3', callback_data: `user_eval_appearance_3_${evaluationId}` },
-                    { text: '4', callback_data: `user_eval_appearance_4_${evaluationId}` }
-                ],
-                [
-                    { text: '5', callback_data: `user_eval_appearance_5_${evaluationId}` },
-                    { text: '6', callback_data: `user_eval_appearance_6_${evaluationId}` },
-                    { text: '7', callback_data: `user_eval_appearance_7_${evaluationId}` },
-                    { text: '8', callback_data: `user_eval_appearance_8_${evaluationId}` },
-                    { text: '9', callback_data: `user_eval_appearance_9_${evaluationId}` },
-                    { text: '10', callback_data: `user_eval_appearance_10_${evaluationId}` }
-                ],
-                [
-                    { text: '⬅️ 返回', callback_data: `back_user_eval_${evaluationId}` }
-                ]
-            ]
-        };
-        
-        await sendMessageWithDelete(userId, message, { 
-            reply_markup: keyboard 
-        }, 'user_evaluation', {
+        // 初始化用户评价状态
+        userEvaluationStates.set(userId, {
             evaluationId,
-            bookingSessionId,
-            step: 'appearance'
+            sessionId,
+            scores: {},
+            completedCount: 0,
+            messageId: null
         });
         
-        // 更新评价会话状态
-        dbOperations.updateEvaluationSession(sessionId, 'hardware_appearance', {});
+        // 发送一次性评价界面
+        await sendComprehensiveEvaluationForm(userId, evaluationId);
         
     } catch (error) {
         console.error('开始用户评价流程失败:', error);
+    }
+}
+
+// 发送一次性评价表单
+async function sendComprehensiveEvaluationForm(userId, evaluationId, messageId = null) {
+    try {
+        // 硬件评价项目（6项）
+        const hardwareItems = [
+            { key: 'appearance', name: '颜值' },
+            { key: 'breasts', name: '咪咪' },
+            { key: 'waist', name: '腰腹' },
+            { key: 'legs', name: '腿型' },
+            { key: 'feet', name: '脚型' },
+            { key: 'tightness', name: '松紧' }
+        ];
+        
+        // 软件评价项目（6项）
+        const softwareItems = [
+            { key: 'temperament', name: '气质' },
+            { key: 'environment', name: '环境' },
+            { key: 'sexiness', name: '骚气' },
+            { key: 'attitude', name: '态度' },
+            { key: 'voice', name: '叫声' },
+            { key: 'initiative', name: '主动' }
+        ];
+        
+        const userState = userEvaluationStates.get(userId) || { scores: {}, completedCount: 0, messageId: null };
+        
+        // 发送第一条消息：硬件评价
+        await sendEvaluationSection(userId, evaluationId, hardwareItems, userState, '🔧 硬件评价', '📋 请根据您的体验进行老师综合评价：\n🫶 这会对老师的数据有帮助\n\n');
+        
+        // 发送第二条消息：软件评价 - 同样包含说明文字保持UI一致
+        await sendEvaluationSection(userId, evaluationId, softwareItems, userState, '💎 软件评价', '📋 请根据您的体验进行老师综合评价：\n🫶 这会对老师的数据有帮助\n\n');
+        
+    } catch (error) {
+        console.error('发送综合评价表单失败:', error);
+    }
+}
+
+// 发送单个评价板块的函数
+async function sendEvaluationSection(userId, evaluationId, items, userState, sectionTitle, headerText = '') {
+    try {
+        // 构建消息文本
+        const message = `${headerText}${sectionTitle}：
+
+💡 点击下方按钮评分（1-10分）：`;
+        
+        // 构建键盘布局
+        const keyboard = {
+            inline_keyboard: []
+        };
+        
+        // 为每个评价项目创建三行布局：标题行 + 1-5分行 + 6-10分行
+        items.forEach(item => {
+            const currentScore = userState.scores[item.key];
+            
+            // 第一行：显示评价项目名称和当前评分状态
+            const titleRow = [{
+                text: currentScore ? `${item.name} ✅${currentScore}分` : `${item.name} (未评分)`,
+                callback_data: `eval_info_${item.key}`
+            }];
+            keyboard.inline_keyboard.push(titleRow);
+            
+            // 第二行：1-5分评分按钮
+            const scoreRow1 = [];
+            for (let i = 1; i <= 5; i++) {
+                scoreRow1.push({
+                    text: currentScore === i ? `✅${i}` : `${i}`,
+                    callback_data: `eval_score_${item.key}_${i}_${evaluationId}`
+                });
+            }
+            keyboard.inline_keyboard.push(scoreRow1);
+            
+            // 第三行：6-10分评分按钮
+            const scoreRow2 = [];
+            for (let i = 6; i <= 10; i++) {
+                scoreRow2.push({
+                    text: currentScore === i ? `✅${i}` : `${i}`,
+                    callback_data: `eval_score_${item.key}_${i}_${evaluationId}`
+                });
+            }
+            keyboard.inline_keyboard.push(scoreRow2);
+        });
+        
+        // 在软件评价消息中添加提交和返回按钮
+        if (sectionTitle.includes('软件')) {
+            // 添加提交按钮
+            if (userState.completedCount === 12) {
+                keyboard.inline_keyboard.push([
+                    { text: '🎉 提交完整评价', callback_data: `eval_submit_${evaluationId}` }
+                ]);
+            } else {
+                keyboard.inline_keyboard.push([
+                    { text: `⏳ 请完成所有评价 (${userState.completedCount}/12)`, callback_data: 'eval_incomplete' }
+                ]);
+            }
+            
+            keyboard.inline_keyboard.push([
+                { text: '⬅️ 返回', callback_data: `back_user_eval_${evaluationId}` }
+            ]);
+        }
+        
+        // 发送消息
+        const sentMessage = await bot.sendMessage(userId, message, { reply_markup: keyboard });
+        
+        // 如果是硬件评价（第一条消息），保存messageId到userState
+        if (sectionTitle.includes('硬件')) {
+            userState.messageId = sentMessage.message_id;
+            userState.softwareMessageId = null; // 重置软件消息ID
+            userEvaluationStates.set(userId, userState);
+        } else {
+            // 软件评价消息，保存软件消息ID
+            userState.softwareMessageId = sentMessage.message_id;
+            userEvaluationStates.set(userId, userState);
+        }
+        
+        // 记录消息历史
+        addMessageToHistory(userId, sentMessage.message_id, 'comprehensive_evaluation', {
+            evaluationId,
+            step: sectionTitle.includes('硬件') ? 'hardware_form' : 'software_form'
+        });
+        
+    } catch (error) {
+        console.error(`发送${sectionTitle}失败:`, error);
+    }
+}
+
+// 最小化评分处理 - 仅UI反馈
+async function handleMinimalEvalScoring(userId, data, query) {
+    try {
+        const parts = data.split('_');
+        if (parts.length >= 4) {
+            const evaluationType = parts[2];
+            const score = parseInt(parts[3]);
+            const evaluationId = parts[4];
+            
+            // 获取或创建用户状态
+            let userState = userEvaluationStates.get(userId);
+            if (!userState) {
+                userState = { scores: {}, completedCount: 0, messageId: null };
+                userEvaluationStates.set(userId, userState);
+            }
+            
+            // 检查是否为新评分
+            const wasNew = userState.scores[evaluationType] === undefined;
+            
+            // 更新评分（仅内存）
+            userState.scores[evaluationType] = score;
+            
+            // 更新计数
+            if (wasNew) {
+                userState.completedCount++;
+            }
+            
+            // 更新状态
+            userEvaluationStates.set(userId, userState);
+            
+            // 即时UI更新 - 确定是硬件还是软件项目
+            const hardwareKeys = ['appearance', 'breasts', 'waist', 'legs', 'feet', 'tightness'];
+            const isHardware = hardwareKeys.includes(evaluationType);
+            
+            await updateEvaluationSection(userId, evaluationId, evaluationType, userState, isHardware);
+        }
+    } catch (error) {
+        // 静默处理错误，不影响用户体验
+    }
+}
+
+// 更新特定评价板块的函数
+async function updateEvaluationSection(userId, evaluationId, evaluationType, userState, isHardware) {
+    try {
+        // 确定要更新的项目列表和消息ID
+        const hardwareItems = [
+            { key: 'appearance', name: '颜值' },
+            { key: 'breasts', name: '咪咪' },
+            { key: 'waist', name: '腰腹' },
+            { key: 'legs', name: '腿型' },
+            { key: 'feet', name: '脚型' },
+            { key: 'tightness', name: '松紧' }
+        ];
+        
+        const softwareItems = [
+            { key: 'temperament', name: '气质' },
+            { key: 'environment', name: '环境' },
+            { key: 'sexiness', name: '骚气' },
+            { key: 'attitude', name: '态度' },
+            { key: 'voice', name: '叫声' },
+            { key: 'initiative', name: '主动' }
+        ];
+        
+        const items = isHardware ? hardwareItems : softwareItems;
+        const sectionTitle = isHardware ? '🔧 硬件评价' : '💎 软件评价';
+        const headerText = '📋 请根据您的体验进行老师综合评价：\n🫶 这会对老师的数据有帮助\n\n'; // 两条消息都使用相同的说明文字
+        const messageId = isHardware ? userState.messageId : userState.softwareMessageId;
+        
+        if (!messageId) {
+            console.log(`未找到${sectionTitle}的消息ID，跳过更新`);
+            return;
+        }
+        
+        // 构建消息文本
+        const message = `${headerText}${sectionTitle}：
+
+💡 点击下方按钮评分（1-10分）：`;
+        
+        // 构建键盘布局
+        const keyboard = {
+            inline_keyboard: []
+        };
+        
+        // 为每个评价项目创建三行布局
+        items.forEach(item => {
+            const currentScore = userState.scores[item.key];
+            
+            // 标题行
+            const titleRow = [{
+                text: currentScore ? `${item.name} ✅${currentScore}分` : `${item.name} (未评分)`,
+                callback_data: `eval_info_${item.key}`
+            }];
+            keyboard.inline_keyboard.push(titleRow);
+            
+            // 1-5分行
+            const scoreRow1 = [];
+            for (let i = 1; i <= 5; i++) {
+                scoreRow1.push({
+                    text: currentScore === i ? `✅${i}` : `${i}`,
+                    callback_data: `eval_score_${item.key}_${i}_${evaluationId}`
+                });
+            }
+            keyboard.inline_keyboard.push(scoreRow1);
+            
+            // 6-10分行
+            const scoreRow2 = [];
+            for (let i = 6; i <= 10; i++) {
+                scoreRow2.push({
+                    text: currentScore === i ? `✅${i}` : `${i}`,
+                    callback_data: `eval_score_${item.key}_${i}_${evaluationId}`
+                });
+            }
+            keyboard.inline_keyboard.push(scoreRow2);
+        });
+        
+        // 在软件评价消息中添加提交和返回按钮
+        if (!isHardware) {
+            if (userState.completedCount === 12) {
+                keyboard.inline_keyboard.push([
+                    { text: '🎉 提交完整评价', callback_data: `eval_submit_${evaluationId}` }
+                ]);
+            } else {
+                keyboard.inline_keyboard.push([
+                    { text: `⏳ 请完成所有评价 (${userState.completedCount}/12)`, callback_data: 'eval_incomplete' }
+                ]);
+            }
+            
+            keyboard.inline_keyboard.push([
+                { text: '⬅️ 返回', callback_data: `back_user_eval_${evaluationId}` }
+            ]);
+        }
+        
+        // 编辑消息
+        await bot.editMessageText(message, {
+            chat_id: userId,
+            message_id: messageId,
+            reply_markup: keyboard
+        });
+        
+    } catch (error) {
+        console.log(`更新${isHardware ? '硬件' : '软件'}评价消息失败:`, error.message);
+    }
+}
+
+// 处理用户评分 - 仅UI更新版本
+async function handleUserScoringUIOnly(userId, data, query) {
+    try {
+        const parts = data.split('_');
+        
+        // 新格式: eval_score_type_X_evaluationId
+        if (data.startsWith('eval_score_')) {
+            const evaluationType = parts[2]; // appearance, tightness, etc.
+            const score = parseInt(parts[3]);
+            const evaluationId = parts[4];
+            
+            // 更新用户评价状态 - 仅内存操作
+            let userState = userEvaluationStates.get(userId);
+            if (!userState) {
+                // 如果状态不存在，创建新状态
+                userState = { scores: {}, completedCount: 0, messageId: null };
+                userEvaluationStates.set(userId, userState);
+            }
+            
+            // 检查是否是新评分
+            const wasNew = userState.scores[evaluationType] === undefined;
+            
+            // 保存评分到内存
+            userState.scores[evaluationType] = score;
+            
+            // 更新完成计数
+            if (wasNew) {
+                userState.completedCount++;
+            }
+            
+            // 更新状态
+            userEvaluationStates.set(userId, userState);
+            
+            // 仅更新UI，不进行数据库操作
+            await sendComprehensiveEvaluationForm(userId, evaluationId, userState.messageId);
+            
+            console.log(`✅ 纯UI更新完成: ${evaluationType}=${score}, 进度${userState.completedCount}/12`);
+        }
+        
+    } catch (error) {
+        console.error('纯UI评分更新失败:', error);
     }
 }
 
@@ -1555,76 +1885,171 @@ async function startUserEvaluation(userId, bookingSessionId) {
 async function handleUserScoring(userId, data, query) {
     try {
         const parts = data.split('_');
-        const evaluationType = parts[2]; // appearance, tightness, etc.
-        const score = parseInt(parts[3]);
-        const evaluationId = parts[4];
         
-        // 获取评价会话
-        const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
-        if (!evalSession) return;
-        
-        let tempData = {};
-        try {
-            tempData = JSON.parse(evalSession.temp_data || '{}');
-        } catch (e) {
-            tempData = {};
-        }
-        
-        // 保存当前评分
-        tempData[evaluationType] = score;
-        
-        // 定义评价流程顺序
-        const hardwareSteps = ['appearance', 'tightness', 'feet', 'legs', 'waist', 'breasts'];
-        const softwareSteps = ['temperament', 'environment', 'sexiness', 'attitude', 'voice', 'initiative'];
-        
-        let nextStep = null;
-        let nextMessage = '';
-        let nextKeyboard = null;
-        
-        // 确定下一步
-        if (hardwareSteps.includes(evaluationType)) {
-            const currentIndex = hardwareSteps.indexOf(evaluationType);
-            if (currentIndex < hardwareSteps.length - 1) {
-                // 继续硬件评价
-                nextStep = hardwareSteps[currentIndex + 1];
-                nextMessage = getHardwareMessage(nextStep);
-                nextKeyboard = getScoreKeyboard(nextStep, evaluationId);
-            } else {
-                // 硬件评价完成，开始软件评价
-                nextStep = softwareSteps[0];
-                nextMessage = getSoftwareMessage(nextStep);
-                nextKeyboard = getScoreKeyboard(nextStep, evaluationId);
-            }
-        } else if (softwareSteps.includes(evaluationType)) {
-            const currentIndex = softwareSteps.indexOf(evaluationType);
-            if (currentIndex < softwareSteps.length - 1) {
-                // 继续软件评价
-                nextStep = softwareSteps[currentIndex + 1];
-                nextMessage = getSoftwareMessage(nextStep);
-                nextKeyboard = getScoreKeyboard(nextStep, evaluationId);
-            } else {
-                // 所有评价完成，更新会话状态为总结页面，然后显示确认页面
-                dbOperations.updateEvaluationSession(evalSession.id, 'evaluation_summary', tempData);
-                showEvaluationSummary(userId, evaluationId, tempData);
+        // 判断数据格式
+        if (data.startsWith('eval_score_')) {
+            // 新格式: eval_score_type_X_evaluationId
+            const evaluationType = parts[2]; // appearance, tightness, etc.
+            const score = parseInt(parts[3]);
+            const evaluationId = parts[4];
+            
+            // 更新用户评价状态
+            let userState = userEvaluationStates.get(userId);
+            if (!userState) {
+                console.error('用户评价状态丢失');
                 return;
             }
-        }
-        
-        // 更新评价会话
-        dbOperations.updateEvaluationSession(evalSession.id, nextStep, tempData);
-        
-        // 发送下一个评价项目
-        if (nextMessage && nextKeyboard) {
-            await sendMessageWithDelete(userId, nextMessage, { 
-                reply_markup: nextKeyboard 
-            }, 'user_evaluation', {
-                evaluationId,
-                step: nextStep
-            });
+            
+            // 检查是否是新评分
+            const wasNew = userState.scores[evaluationType] === undefined;
+            
+            // 保存评分
+            userState.scores[evaluationType] = score;
+            
+            // 更新完成计数
+            if (wasNew) {
+                userState.completedCount++;
+            }
+            
+            // 更新状态
+            userEvaluationStates.set(userId, userState);
+            
+            // 注意：这里不再立即更新数据库，只在最终提交时才写入
+            // 中间步骤只更新内存状态，提升用户体验
+            
+            // 编辑当前消息，不发送新消息
+            await sendComprehensiveEvaluationForm(userId, evaluationId, userState.messageId);
+            
+        } else if (data.startsWith('user_eval_')) {
+            // 兼容旧格式: user_eval_type_X_evaluationId
+            const evaluationType = parts[2]; // appearance, tightness, etc.
+            const score = parseInt(parts[3]);
+            const evaluationId = parts[4];
+            
+            // 获取评价会话
+            const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+            if (!evalSession) return;
+            
+            let tempData = {};
+            try {
+                tempData = JSON.parse(evalSession.temp_data || '{}');
+            } catch (e) {
+                tempData = {};
+            }
+            
+            // 保存当前评分
+            tempData[evaluationType] = score;
+            
+            // 定义评价流程顺序
+            const hardwareSteps = ['appearance', 'tightness', 'feet', 'legs', 'waist', 'breasts'];
+            const softwareSteps = ['temperament', 'environment', 'sexiness', 'attitude', 'voice', 'initiative'];
+            
+            let nextStep = null;
+            let nextMessage = '';
+            let nextKeyboard = null;
+            
+            // 确定下一步
+            if (hardwareSteps.includes(evaluationType)) {
+                const currentIndex = hardwareSteps.indexOf(evaluationType);
+                if (currentIndex < hardwareSteps.length - 1) {
+                    // 继续硬件评价
+                    nextStep = hardwareSteps[currentIndex + 1];
+                    nextMessage = getHardwareMessage(nextStep);
+                    nextKeyboard = getScoreKeyboard(nextStep, evaluationId);
+                } else {
+                    // 硬件评价完成，开始软件评价
+                    nextStep = softwareSteps[0];
+                    nextMessage = getSoftwareMessage(nextStep);
+                    nextKeyboard = getScoreKeyboard(nextStep, evaluationId);
+                }
+            } else if (softwareSteps.includes(evaluationType)) {
+                const currentIndex = softwareSteps.indexOf(evaluationType);
+                if (currentIndex < softwareSteps.length - 1) {
+                    // 继续软件评价
+                    nextStep = softwareSteps[currentIndex + 1];
+                    nextMessage = getSoftwareMessage(nextStep);
+                    nextKeyboard = getScoreKeyboard(nextStep, evaluationId);
+                } else {
+                    // 所有评价完成，更新会话状态为总结页面，然后显示确认页面
+                    dbOperations.updateEvaluationSession(evalSession.id, 'evaluation_summary', tempData);
+                    showEvaluationSummary(userId, evaluationId, tempData);
+                    return;
+                }
+            }
+            
+            // 更新评价会话
+            dbOperations.updateEvaluationSession(evalSession.id, nextStep, tempData);
+            
+            // 发送下一个评价项目
+            if (nextMessage && nextKeyboard) {
+                await sendMessageWithDelete(userId, nextMessage, { 
+                    reply_markup: nextKeyboard 
+                }, 'user_evaluation', {
+                    evaluationId,
+                    step: nextStep
+                });
+            }
         }
         
     } catch (error) {
         console.error('处理用户评分失败:', error);
+    }
+}
+
+// 处理无效按钮点击
+async function handleInvalidEvaluationClick(userId, data, query) {
+    try {
+        if (data === 'eval_incomplete') {
+            await bot.answerCallbackQuery(query.id, {
+                text: '请完成所有12项评价后再提交！',
+                show_alert: true
+            });
+        } else if (data.startsWith('eval_info_')) {
+            await bot.answerCallbackQuery(query.id, {
+                text: '请点击右侧数字按钮进行评分',
+                show_alert: false
+            });
+        }
+    } catch (error) {
+        console.error('处理无效评价点击失败:', error);
+    }
+}
+
+// 处理评价提交
+async function handleEvaluationSubmit(userId, data, query) {
+    try {
+        const evaluationId = data.replace('eval_submit_', '');
+        const userState = userEvaluationStates.get(userId);
+        
+        if (!userState || userState.completedCount < 12) {
+            await bot.sendMessage(userId, '请完成所有12项评价后再提交！');
+            return;
+        }
+        
+        // 删除评价消息（在显示确认页面前删除）- 删除两条消息
+        if (userState.messageId) {
+            try {
+                await bot.deleteMessage(userId, userState.messageId);
+                console.log(`🗑️ 已删除硬件评价消息: ${userState.messageId}`);
+            } catch (error) {
+                console.log('删除硬件评价消息失败:', error.message);
+            }
+        }
+        
+        if (userState.softwareMessageId) {
+            try {
+                await bot.deleteMessage(userId, userState.softwareMessageId);
+                console.log(`🗑️ 已删除软件评价消息: ${userState.softwareMessageId}`);
+            } catch (error) {
+                console.log('删除软件评价消息失败:', error.message);
+            }
+        }
+        
+        // 显示评价总结确认页面
+        await showEvaluationSummary(userId, evaluationId, userState.scores);
+        
+    } catch (error) {
+        console.error('处理评价提交失败:', error);
     }
 }
 
@@ -1683,30 +2108,28 @@ function getScoreKeyboard(step, evaluationId) {
 // 显示评价总结
 async function showEvaluationSummary(userId, evaluationId, scores) {
     try {
-        const summary = `是否确认该老师参数
+        const summary = `评价完成，请确认评分结果：
 
-颜值：${scores.appearance || 0}
-松紧：${scores.tightness || 0}
-脚型：${scores.feet || 0}
-腿型：${scores.legs || 0}
-腰腹：${scores.waist || 0}
-咪咪：${scores.breasts || 0}
-——————
-气质：${scores.temperament || 0}
-环境：${scores.environment || 0}
-骚气：${scores.sexiness || 0}
-态度：${scores.attitude || 0}
-叫声：${scores.voice || 0}
-主动：${scores.initiative || 0}`;
+硬件评价
+颜值：${String(scores.appearance || 0).padStart(2, ' ')}分  松紧：${String(scores.tightness || 0).padStart(2, ' ')}分
+脚型：${String(scores.feet || 0).padStart(2, ' ')}分  腿型：${String(scores.legs || 0).padStart(2, ' ')}分  
+腰腹：${String(scores.waist || 0).padStart(2, ' ')}分  咪咪：${String(scores.breasts || 0).padStart(2, ' ')}分
+
+软件评价  
+气质：${String(scores.temperament || 0).padStart(2, ' ')}分  环境：${String(scores.environment || 0).padStart(2, ' ')}分
+骚气：${String(scores.sexiness || 0).padStart(2, ' ')}分  态度：${String(scores.attitude || 0).padStart(2, ' ')}分
+叫声：${String(scores.voice || 0).padStart(2, ' ')}分  主动：${String(scores.initiative || 0).padStart(2, ' ')}分
+
+请点击下方按钮提交你的最终评价。`;
 
         const keyboard = {
             inline_keyboard: [
                 [
-                    { text: '确认✅', callback_data: `user_eval_confirm_${evaluationId}` },
-                    { text: '重评✍️', callback_data: `user_eval_restart_${evaluationId}` }
+                    { text: '✅ 确认提交', callback_data: `user_eval_confirm_${evaluationId}` },
+                    { text: '✏️ 重新评价', callback_data: `user_eval_restart_${evaluationId}` }
                 ],
                 [
-                    { text: '⬅️ 返回', callback_data: `back_user_eval_${evaluationId}` }
+                    { text: '⬅️ 返回修改', callback_data: `back_user_eval_${evaluationId}` }
                 ]
             ]
         };
@@ -1727,13 +2150,43 @@ async function showEvaluationSummary(userId, evaluationId, scores) {
 async function handleUserEvaluationConfirm(userId, data, query) {
     try {
         const evaluationId = data.replace('user_eval_confirm_', '');
-        const evalSession = dbOperations.getEvaluationSession(userId, evaluationId);
+        const userState = userEvaluationStates.get(userId);
         
-        if (evalSession) {
-            const scores = JSON.parse(evalSession.temp_data || '{}');
+        if (userState && userState.scores) {
+            // 从内存中获取完整评分数据，而不是从数据库session
+            const scores = userState.scores;
             
-            // 保存评价到数据库
+            // 确保所有评分都存在
+            if (Object.keys(scores).length < 12) {
+                await bot.sendMessage(userId, '评价数据不完整，请重新评价！');
+                return;
+            }
+            
+            // 只在这里进行一次数据库写入
             dbOperations.updateEvaluation(evaluationId, null, scores, null, 'completed');
+            console.log(`📝 评价数据已保存到数据库: ${evaluationId}`, scores);
+            
+            // 删除评价消息（如果存在messageId）- 删除两条消息
+            if (userState.messageId) {
+                try {
+                    await bot.deleteMessage(userId, userState.messageId);
+                    console.log(`🗑️ 已删除硬件评价消息: ${userState.messageId}`);
+                } catch (error) {
+                    console.log('删除硬件评价消息失败:', error.message);
+                }
+            }
+            
+            if (userState.softwareMessageId) {
+                try {
+                    await bot.deleteMessage(userId, userState.softwareMessageId);
+                    console.log(`🗑️ 已删除软件评价消息: ${userState.softwareMessageId}`);
+                } catch (error) {
+                    console.log('删除软件评价消息失败:', error.message);
+                }
+            }
+            
+            // 清理内存状态
+            userEvaluationStates.delete(userId);
             
             // 发送完成消息
             const message = `🎉 恭喜您完成一次评价～ 

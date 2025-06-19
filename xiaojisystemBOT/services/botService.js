@@ -694,6 +694,14 @@ function initBotHandlers() {
         if (data.startsWith('broadcast_')) return `broadcast_${data.split('_')[1]}`; // broadcast_real, broadcast_anon, broadcast_no
         if (data.startsWith('detail_') && data.includes('_confirm_')) return 'detail_confirm';
         
+        // 特殊处理商家详细评价，让每个步骤有独立的动作类型
+        if (data.startsWith('merchant_detail_eval_')) {
+            const parts = data.split('_');
+            if (parts.length >= 4) {
+                return `merchant_detail_eval_${parts[3]}`; // 根据评价类型区分
+            }
+        }
+        
         // 对于其他操作，使用前缀作为类型
         const prefix = data.split('_')[0];
         return prefix || data;
@@ -1138,10 +1146,19 @@ function initBotHandlers() {
         
         // 处理评价流程 - 分离UI更新和业务逻辑
         else if (data.startsWith('evaluate_') || data.startsWith('eval_') || data.startsWith('user_eval_') || data.startsWith('merchant_detail_eval_')) {
-            // 评分按钮 - 最小化处理，即时UI反馈
+            // 评分按钮 - 需要区分商家评价和用户评价
             if (data.startsWith('eval_score_')) {
-                await handleMinimalEvalScoring(userId, data, query);
-                return;
+                const parts = data.split('_');
+                if (parts.length === 5) {
+                    // 用户评价项目评分 eval_score_type_X_evaluationId - 最小化处理，即时UI反馈
+                    await handleMinimalEvalScoring(userId, data, query);
+                    return;
+                } else {
+                    // 其他eval_score格式（如商家评价）走正常评价流程
+                    console.log(`路由到评价流程处理: ${data}`);
+                    await handleEvaluationFlow(userId, data, query);
+                    return;
+                }
             }
             
             // 其他评价相关按钮走正常流程
@@ -1422,12 +1439,15 @@ async function handleEvaluationFlow(userId, data, query) {
             
         } else if (data.startsWith('eval_score_')) {
             // 处理评分 - 需要区分商家评分和用户评分
-            if (data.split('_').length === 4) {
+            const parts = data.split('_');
+            if (parts.length === 4) {
                 // 商家评价勇士的总体评分 eval_score_X_evaluationId
                 handleMerchantScoring(userId, data, query);
-            } else {
+            } else if (parts.length === 5) {
                 // 用户评价项目评分 eval_score_type_X_evaluationId
                 handleUserScoring(userId, data, query);
+            } else {
+                console.log(`未识别的eval_score格式: ${data}, 部分数: ${parts.length}`);
             }
             
         } else if (data.startsWith('eval_submit_')) {
@@ -1739,11 +1759,27 @@ async function sendEvaluationSection(userId, evaluationId, items, userState, sec
 // 最小化评分处理 - 仅UI反馈
 async function handleMinimalEvalScoring(userId, data, query) {
     try {
+        console.log(`[DEBUG] handleMinimalEvalScoring被调用 - data: ${data}`);
         const parts = data.split('_');
+        console.log(`[DEBUG] handleMinimalEvalScoring - parts:`, parts, `length: ${parts.length}`);
+        
         if (parts.length >= 4) {
             const evaluationType = parts[2];
             const score = parseInt(parts[3]);
             const evaluationId = parts[4];
+            
+            console.log(`[DEBUG] handleMinimalEvalScoring - 解析结果: evaluationType: ${evaluationType}, score: ${score}, evaluationId: ${evaluationId}`);
+            
+            // 检查这是否是商家评价 - 如果是则不应该调用这个函数
+            try {
+                const evaluation = dbOperations.getEvaluation(evaluationId);
+                if (evaluation && evaluation.evaluator_type === 'merchant') {
+                    console.log(`商家评价${evaluationId}不应该调用handleMinimalEvalScoring，跳过`);
+                    return;
+                }
+            } catch (error) {
+                // 静默处理检查失败的情况
+            }
             
             // 获取或创建用户状态
             let userState = userEvaluationStates.get(userId);
@@ -1770,6 +1806,7 @@ async function handleMinimalEvalScoring(userId, data, query) {
             const hardwareKeys = ['appearance', 'breasts', 'waist', 'legs', 'feet', 'tightness'];
             const isHardware = hardwareKeys.includes(evaluationType);
             
+            console.log(`[DEBUG] handleMinimalEvalScoring 调用 updateEvaluationSection - userId: ${userId}, evaluationId: ${evaluationId}, evaluationType: ${evaluationType}`);
             await updateEvaluationSection(userId, evaluationId, evaluationType, userState, isHardware);
         }
     } catch (error) {
@@ -1780,6 +1817,20 @@ async function handleMinimalEvalScoring(userId, data, query) {
 // 更新特定评价板块的函数
 async function updateEvaluationSection(userId, evaluationId, evaluationType, userState, isHardware) {
     try {
+        // 首先检查这是否是商家评价 - 如果是则直接跳过，因为商家评价不使用这个更新机制
+        const evaluation = dbOperations.getEvaluation(evaluationId);
+        console.log(`[DEBUG] updateEvaluationSection - evaluationId: ${evaluationId}, evaluation:`, evaluation);
+        
+        if (evaluation && evaluation.evaluator_type === 'merchant') {
+            console.log(`商家评价${evaluationId}不需要UI更新，跳过`);
+            return;
+        }
+        
+        if (!evaluation) {
+            console.log(`[WARNING] 找不到evaluationId ${evaluationId}的评价记录，跳过更新`);
+            return;
+        }
+        
         // 确定要更新的项目列表和消息ID
         const hardwareItems = [
             { key: 'appearance', name: '颜值' },
@@ -1809,7 +1860,6 @@ async function updateEvaluationSection(userId, evaluationId, evaluationType, use
             
             // 检查评价是否已经完成，如果完成则静默跳过
             try {
-                const evaluation = dbOperations.getEvaluation(evaluationId);
                 if (evaluation && evaluation.status === 'completed') {
                     console.log(`✅ 评价${evaluationId}已完成，跳过UI更新`);
                     return;
@@ -1944,6 +1994,7 @@ async function handleUserScoringUIOnly(userId, data, query) {
 // 处理用户评分
 async function handleUserScoring(userId, data, query) {
     try {
+        console.log(`[DEBUG] handleUserScoring被调用 - userId: ${userId}, data: ${data}`);
         const parts = data.split('_');
         
         // 判断数据格式
@@ -2687,7 +2738,7 @@ async function handleDetailedEvaluationConfirm(userId, data, query) {
                 evaluationService.updateEvaluation(evaluationId, null, detailScores, '详细评价已完成', 'completed');
                 
                 // 发送完成消息
-                await sendMessageWithDelete(userId, '🎉 详细评价提交成功！\n\n感谢您的耐心评价，这将帮助我们提供更好的服务。', {}, 'detailed_evaluation_complete');
+                await sendMessageWithDelete(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！', {}, 'detailed_evaluation_complete');
             }
             
         } else if (data.startsWith('detail_restart_')) {
@@ -2956,7 +3007,7 @@ async function handleMerchantDetailEvaluationConfirm(userId, data, query) {
             evaluationService.updateEvaluation(evaluationId, existingOverallScore, detailScores, '详细评价已完成', 'completed');
             
             // 发送完成消息
-            bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n感谢您的耐心评价，这将帮助我们提供更好的服务。');
+            bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
         }
         
     } catch (error) {

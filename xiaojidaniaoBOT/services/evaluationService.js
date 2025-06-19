@@ -59,9 +59,9 @@ class EvaluationService {
             const currentEval = dbOperations.db.prepare('SELECT * FROM evaluations WHERE id = ?').get(evaluationId);
             console.log('当前评价数据:', currentEval);
             
-            const now = Math.floor(Date.now() / 1000);
-            let updateFields = ['updated_at = ?'];
-            let values = [now];
+            // 修复：移除不存在的updated_at字段，使用正确的字段名
+            let updateFields = [];
+            let values = [];
             
             if (overallScore !== null) {
                 updateFields.push('overall_score = ?');
@@ -72,15 +72,15 @@ class EvaluationService {
             }
             
             if (detailScores !== null) {
-                updateFields.push('detail_scores = ?');
+                updateFields.push('detailed_scores = ?'); // 修复：使用正确的字段名detailed_scores
                 values.push(typeof detailScores === 'object' ? JSON.stringify(detailScores) : detailScores);
-                console.log('将更新detail_scores');
+                console.log('将更新detailed_scores');
             }
             
             if (textComment !== null) {
-                updateFields.push('text_comment = ?');
+                updateFields.push('comments = ?'); // 修复：使用正确的字段名comments
                 values.push(textComment);
-                console.log('将更新text_comment');
+                console.log('将更新comments');
             }
             
             if (status !== null) {
@@ -89,11 +89,17 @@ class EvaluationService {
                 console.log('将更新status为:', status);
             }
             
+            // 如果没有字段需要更新，直接返回
+            if (updateFields.length === 0) {
+                console.log('没有字段需要更新');
+                return true;
+            }
+            
             values.push(evaluationId);
             
             const sql = `UPDATE evaluations SET ${updateFields.join(', ')} WHERE id = ?`;
-            console.log('执行SQL:', sql);
-            console.log('参数:', values);
+                    // console.log('执行SQL:', sql); // 调试时可启用
+        // console.log('参数:', values); // 调试时可启用
             
             const result = dbOperations.db.prepare(sql).run(...values);
             console.log('更新结果:', result);

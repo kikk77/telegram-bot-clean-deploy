@@ -1257,7 +1257,7 @@ class ApiService {
             const { evaluationId, overallScore, detailScores, textComment, status } = body;
             
             console.log('=== 测试API调用updateEvaluation ===');
-            console.log('传入参数:', { evaluationId, overallScore, detailScores, textComment, status });
+            // console.log('传入参数:', { evaluationId, overallScore, detailScores, textComment, status }); // 调试时可启用
             
             const result = evaluationService.updateEvaluation(
                 evaluationId, 

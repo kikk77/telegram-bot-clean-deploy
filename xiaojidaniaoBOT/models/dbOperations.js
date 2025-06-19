@@ -581,8 +581,40 @@ const dbOperations = {
     },
 
     updateEvaluation(id, overallScore, detailedScores, comments, status) {
-        const stmt = db.prepare('UPDATE evaluations SET overall_score = ?, detailed_scores = ?, comments = ?, status = ? WHERE id = ?');
-        return stmt.run(overallScore, JSON.stringify(detailedScores), comments, status, id);
+        // 构建动态更新语句，只更新非null的字段
+        let updateFields = [];
+        let values = [];
+        
+        if (overallScore !== null && overallScore !== undefined) {
+            updateFields.push('overall_score = ?');
+            values.push(overallScore);
+        }
+        
+        if (detailedScores !== null && detailedScores !== undefined) {
+            updateFields.push('detailed_scores = ?');
+            values.push(typeof detailedScores === 'object' ? JSON.stringify(detailedScores) : detailedScores);
+        }
+        
+        if (comments !== null && comments !== undefined) {
+            updateFields.push('comments = ?');
+            values.push(comments);
+        }
+        
+        if (status !== null && status !== undefined) {
+            updateFields.push('status = ?');
+            values.push(status);
+        }
+        
+        if (updateFields.length === 0) {
+            console.log('updateEvaluation: 没有字段需要更新');
+            return { changes: 0 };
+        }
+        
+        values.push(id);
+        const sql = `UPDATE evaluations SET ${updateFields.join(', ')} WHERE id = ?`;
+        
+        const stmt = getPreparedStatement(sql);
+        return stmt.run(...values);
     },
 
     getEvaluation(id) {

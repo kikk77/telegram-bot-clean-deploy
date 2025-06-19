@@ -6,7 +6,6 @@ const dbPath = path.join(__dirname, '..', 'data', 'marketing_bot.db');
 
 // 数据库性能优化配置
 const db = new Database(dbPath, {
-    verbose: console.log,
     fileMustExist: false
 });
 

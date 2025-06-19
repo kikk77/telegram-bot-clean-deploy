@@ -201,38 +201,45 @@ class ClickProtection {
     
     /**
      * 包装callback query处理器，自动应用防护机制
+     * 遵循"立刻删除消息"然后"后台防重复检查"的流程
      */
     wrapCallbackQueryHandler(bot, originalHandler) {
         return async (query) => {
             const queryId = query.id;
+            const chatId = query.message.chat.id;
             
             try {
-                // 检查是否为重复点击
-                if (this.isCallbackQueryDuplicate(query)) {
-                    // 对于重复点击，立即响应但不处理业务逻辑
-                    await this.safeAnswerCallbackQuery(bot, queryId, { 
-                        text: '请勿重复点击按钮',
-                        show_alert: false
-                    });
-                    return;
-                }
+                // 1. 立即响应callback query
+                await this.safeAnswerCallbackQuery(bot, queryId);
                 
-                // 锁定当前query处理
-                this.lockCallbackQuery(queryId);
+                // 2. 立即删除消息
+                await this.safeDeleteMessage(bot, chatId, query.message.message_id, 'callback_click');
                 
-                // 记录用户操作
-                this.recordUserAction(query.from.id, query.data);
-                
-                // 调用原始处理器
-                await originalHandler(query);
+                // 3. 后台异步处理防重复检查和业务逻辑
+                setImmediate(async () => {
+                    try {
+                        // 检查是否为重复点击
+                        if (this.isCallbackQueryDuplicate(query)) {
+                            console.log(`🛡️ 后台拦截重复点击: ${query.from.id}_${query.data}`);
+                            return; // 静默拦截，用户端已经得到响应且消息已删除
+                        }
+                        
+                        // 锁定当前query处理
+                        this.lockCallbackQuery(queryId);
+                        
+                        // 记录用户操作
+                        this.recordUserAction(query.from.id, query.data);
+                        
+                        // 调用原始处理器
+                        await originalHandler(query);
+                        
+                    } catch (error) {
+                        console.error('后台处理callback逻辑失败:', error);
+                    }
+                });
                 
             } catch (error) {
                 console.error('处理callback_query失败:', error);
-                // 确保即使出错也要响应callback_query
-                await this.safeAnswerCallbackQuery(bot, queryId, { 
-                    text: '处理失败，请重试',
-                    show_alert: false 
-                });
             }
         };
     }

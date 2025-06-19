@@ -700,10 +700,20 @@ function initBotHandlers() {
             // 1. 立即响应callback query（必须 - 确保Loading立即消失）
             await bot.answerCallbackQuery(queryId);
             
-            // 2. 将所有业务逻辑移到异步处理（不阻塞callback响应）
+            // 2. 立即删除消息（提升用户体验）- 删除所有按钮消息
+            try {
+                await bot.deleteMessage(chatId, query.message.message_id);
+                console.log(`✅ 立即删除按钮消息成功: ${chatId}_${query.message.message_id}`);
+            } catch (error) {
+                if (!error.message.includes('message to delete not found')) {
+                    console.log(`⚠️ 立即删除按钮消息失败: ${chatId}_${query.message.message_id} - ${error.message}`);
+                }
+            }
+            
+            // 3. 将所有业务逻辑移到异步处理（不阻塞callback响应）
             setImmediate(async () => {
                 try {
-                    // 防重复处理 - 提取操作类型
+                    // 后台防重复处理 - 提取操作类型
                     const actionType = extractActionType(data);
                     const actionKey = `${userId}_${actionType}`;
                     const now = Date.now();
@@ -712,23 +722,11 @@ function initBotHandlers() {
                     // 检查是否为重复操作（3秒内的相同操作视为重复）
                     if (now - lastActionTime < 3000) {
                         console.log(`🛡️ 后台拦截重复操作: ${actionKey} (${data})`);
-                        return; // 静默拦截，用户端已经得到响应
+                        return; // 静默拦截，用户端已经得到响应且消息已删除
                     }
                     
                     // 记录本次操作
                     userLastActions.set(actionKey, now);
-                    
-                    // 立即删除消息（提升用户体验）- 仅对评价相关按钮
-                    if (data.includes('eval_') || data.includes('broadcast_') || data.includes('score_') || data.includes('detail_')) {
-                        try {
-                            await bot.deleteMessage(chatId, query.message.message_id);
-                            console.log(`✅ 立即删除按钮消息成功: ${chatId}_${query.message.message_id}`);
-                        } catch (error) {
-                            if (!error.message.includes('message to delete not found')) {
-                                console.log(`⚠️ 立即删除按钮消息失败: ${chatId}_${query.message.message_id} - ${error.message}`);
-                            }
-                        }
-                    }
                     
                     // 异步处理业务逻辑
                     await handleAsyncCallbackLogic(chatId, userId, data, query);

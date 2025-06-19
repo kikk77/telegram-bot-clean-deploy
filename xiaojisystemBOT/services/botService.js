@@ -1492,21 +1492,7 @@ async function startMerchantEvaluation(userId, bookingSessionId) {
         const bookingSession = dbOperations.getBookingSession(bookingSessionId);
         if (!bookingSession) return;
         
-        // 检查用户评价是否已完成
-        const existingUserEval = dbOperations.db.prepare(`
-            SELECT status FROM evaluations 
-            WHERE booking_session_id = ? AND evaluator_type = 'user'
-        `).get(bookingSessionId);
-        
-        if (existingUserEval && existingUserEval.status === 'completed') {
-            // 用户已完成评价，商家不应再进行评价
-            await sendMessageWithDelete(userId, 
-                '⚠️ 该订单的评价流程已结束，无法继续评价。\n\n用户已完成评价并结束了订单流程。', 
-                {}, 'evaluation_ended'
-            );
-            return;
-        }
-        
+
         // 检查商家是否已经评价过
         const existingMerchantEval = dbOperations.db.prepare(`
             SELECT status FROM evaluations 
@@ -1821,16 +1807,15 @@ async function updateEvaluationSection(userId, evaluationId, evaluationType, use
         if (!messageId) {
             console.log(`未找到${sectionTitle}的消息ID，跳过更新`);
             
-            // 检查评价是否已经完成
+            // 检查评价是否已经完成，如果完成则静默跳过
             try {
                 const evaluation = dbOperations.getEvaluation(evaluationId);
                 if (evaluation && evaluation.status === 'completed') {
-                    // 评价已完成，向用户发送提示而不是报错
-                    console.log(`✅ 评价${evaluationId}已完成，无需继续更新UI`);
+                    console.log(`✅ 评价${evaluationId}已完成，跳过UI更新`);
                     return;
                 }
             } catch (error) {
-                console.log('检查评价状态失败:', error.message);
+                // 静默处理检查失败的情况
             }
             
             return;

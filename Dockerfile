@@ -5,7 +5,7 @@ FROM node:18-alpine
 WORKDIR /app
 
 # 安装系统依赖
-RUN apk add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++ curl
 
 # 复制package.json和package-lock.json
 COPY package*.json ./
@@ -26,9 +26,9 @@ USER node
 # 暴露端口
 EXPOSE 3000
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+# 健康检查 - 使用curl代替wget，更可靠
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
 
 # 启动应用
 CMD ["npm", "start"] 

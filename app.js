@@ -15,9 +15,34 @@ const { loadCacheData, initBotHandlers, bot } = require('./services/botService')
 const { initScheduler } = require('./services/schedulerService');
 const { createHttpServer } = require('./services/httpService');
 
+// 创建独立的健康检查服务
+const http = require('http');
+const PORT_HEALTH = process.env.PORT_HEALTH || 3001;
+
+const healthServer = http.createServer((req, res) => {
+    if (req.url === '/health') {
+        console.log(`🩺 独立健康检查请求 - ${new Date().toISOString()}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            environment: process.env.NODE_ENV || 'development'
+        }));
+    } else {
+        res.writeHead(404);
+        res.end('Not Found');
+    }
+});
+
 // 启动函数
 async function start() {
     console.log('🤖 Telegram营销机器人启动中...');
+    
+    // 启动健康检查服务
+    healthServer.listen(PORT_HEALTH, () => {
+        console.log(`🩺 健康检查服务启动在端口 ${PORT_HEALTH}`);
+    });
     
     // 初始化数据库
     initDatabase();

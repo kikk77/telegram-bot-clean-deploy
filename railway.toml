@@ -1,12 +1,14 @@
 [build]
-builder = "dockerfile"
+builder = "nixpacks"
+watchPatterns = ["app.js", "services/**", "models/**"]
+buildCommand = "npm install"
 
 [deploy]
 startCommand = "npm start"
-restartPolicyType = "always"
-restartPolicyMaxRetries = 10
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 100
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
 
 # Volume配置 - 数据持久化
 [[deploy.volumes]]
@@ -14,5 +16,16 @@ mountPath = "/app/data"
 name = "telegram-bot-data"
 
 [env]
-NODE_ENV = "production"
+NODE_ENV = "production" 
 PORT = "3000"  # Production环境端口 
+
+[[ports]]
+port = 3000
+internal = false 
+
+[[ports]]
+port = 3001
+internal = false
+
+[variables]
+PORT_HEALTH = "3001" 

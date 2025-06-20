@@ -34,11 +34,11 @@ const db = new Database(dbPath, {
 
 // 性能优化设置 - 添加错误处理
 try {
-    db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = NORMAL');
-    db.pragma('cache_size = 1000');
-    db.pragma('temp_store = memory');
-    db.pragma('mmap_size = 268435456'); // 256MB
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('cache_size = 1000');
+db.pragma('temp_store = memory');
+db.pragma('mmap_size = 268435456'); // 256MB
     console.log('✅ 数据库性能优化设置完成');
 } catch (error) {
     console.warn('⚠️ 数据库性能优化设置失败，使用默认设置:', error.message);

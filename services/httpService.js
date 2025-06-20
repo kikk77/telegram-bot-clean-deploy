@@ -72,13 +72,29 @@ function createHttpServer() {
 
         // 健康检查端点
         if (pathname === '/health' && method === 'GET') {
-            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify({ 
-                success: true, 
-                status: 'healthy',
+            console.log(`🩺 健康检查请求 - ${new Date().toISOString()}`);
+            
+            // 检查关键服务状态
+            const dbStatus = checkDatabaseConnection();
+            const botStatus = checkBotStatus();
+            
+            const healthStatus = {
+                success: dbStatus.connected && botStatus.connected,
+                status: dbStatus.connected && botStatus.connected ? 'healthy' : 'unhealthy',
                 timestamp: new Date().toISOString(),
-                uptime: process.uptime()
-            }));
+                uptime: process.uptime(),
+                services: {
+                    database: dbStatus,
+                    telegram_bot: botStatus
+                },
+                environment: process.env.NODE_ENV || 'development'
+            };
+            
+            const statusCode = healthStatus.success ? 200 : 503;
+            console.log(`🩺 健康检查响应 - 状态: ${healthStatus.status} (${statusCode})`);
+            
+            res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(healthStatus));
             return;
         }
 
@@ -177,8 +193,6 @@ async function processApiRequest(pathname, method, data) {
             return { success: false, error: error.message };
         }
     }
-
-
 
     // 地区管理API
     if (pathname === '/api/regions') {
@@ -352,8 +366,6 @@ async function processApiRequest(pathname, method, data) {
             return { success: true };
         }
     }
-
-
 
     // 统计数据API
     if (pathname === '/api/stats' && method === 'GET') {
@@ -782,10 +794,110 @@ function processWebhookUpdate(update) {
     }
 }
 
+// 检查数据库连接状态
+function checkDatabaseConnection() {
+    try {
+        const { db } = require('../config/database');
+        // 执行简单查询测试连接
+        const result = db.prepare('SELECT 1 as test').get();
+        return {
+            connected: result && result.test === 1,
+            error: null
+        };
+    } catch (error) {
+        console.error('数据库连接检查失败:', error);
+        return {
+            connected: false,
+            error: error.message
+        };
+    }
+}
+
+// 检查机器人状态
+function checkBotStatus() {
+    try {
+        // 检查bot实例是否存在且已初始化
+        if (!bot || !bot.token) {
+            return {
+                connected: false,
+                error: 'Bot未初始化'
+            };
+        }
+        
+        // 检查bot是否正在运行
+        return {
+            connected: true,
+            token_prefix: bot.token.substring(0, 5) + '...',
+            webhook_info: bot.hasOpenWebHook ? 'active' : 'inactive'
+        };
+    } catch (error) {
+        console.error('Bot状态检查失败:', error);
+        return {
+            connected: false,
+            error: error.message
+        };
+    }
+}
+
+// 发送消息到群组
+async function sendMessageToGroup(groupId, message, options = {}) {
+    try {
+        if (!bot) {
+            throw new Error('Bot实例未初始化');
+        }
+        
+        const sendOptions = {
+            parse_mode: 'HTML',
+            ...options
+        };
+        
+        const result = await bot.sendMessage(groupId, message, sendOptions);
+        return {
+            success: true,
+            messageId: result.message_id,
+            chatId: result.chat.id
+        };
+    } catch (error) {
+        console.error('发送群组消息失败:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// 发送消息到用户
+async function sendMessageToUser(userId, message, options = {}) {
+    try {
+        if (!bot) {
+            throw new Error('Bot实例未初始化');
+        }
+        
+        const sendOptions = {
+            parse_mode: 'HTML',
+            ...options
+        };
+        
+        const result = await bot.sendMessage(userId, message, sendOptions);
+        return {
+            success: true,
+            messageId: result.message_id,
+            chatId: result.chat.id
+        };
+    } catch (error) {
+        console.error('发送用户消息失败:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
 module.exports = {
     createHttpServer,
-    handleApiRequest,
     processApiRequest,
-    handleWebhookRequest,
-    processWebhookUpdate
+    sendMessageToGroup,
+    sendMessageToUser,
+    checkDatabaseConnection,
+    checkBotStatus
 }; 

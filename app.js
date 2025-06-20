@@ -1,14 +1,12 @@
 // 加载环境变量
 require('dotenv').config();
 
-// 环境变量检查
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const PORT = process.env.PORT || 3000;
+// 导入环境配置
+const { config, validateConfig, displayConfig } = require('./config/environment');
 
-if (!BOT_TOKEN) {
-    console.error('错误: 请设置 BOT_TOKEN 环境变量');
-    process.exit(1);
-}
+// 验证和显示配置
+validateConfig();
+displayConfig();
 
 // 导入模块
 const { initDatabase } = require('./config/database');

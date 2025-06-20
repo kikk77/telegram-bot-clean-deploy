@@ -14,4 +14,5 @@ mountPath = "/app/data"
 name = "telegram-bot-data"
 
 [env]
-NODE_ENV = "production" 
+NODE_ENV = "production"
+PORT = "3000"  # Production环境端口 

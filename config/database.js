@@ -1,12 +1,19 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// 数据库路径配置 - 支持Railway Volume
-const isProduction = process.env.NODE_ENV === 'production';
-const dataDir = isProduction ? '/app/data' : path.join(__dirname, '..', 'data');
-const dbPath = path.join(dataDir, 'marketing_bot.db');
+// 数据库路径配置 - 支持多环境和Railway Volume
+const nodeEnv = process.env.NODE_ENV || 'development';
+const isProduction = nodeEnv === 'production';
+const isStaging = nodeEnv === 'staging';
+const isDeployment = isProduction || isStaging;
 
-console.log(`📊 数据库环境: ${isProduction ? '生产环境' : '开发环境'}`);
+// 数据库文件名根据环境区分
+const dbFileName = isStaging ? 'marketing_bot_staging.db' : 'marketing_bot.db';
+const dataDir = isDeployment ? '/app/data' : path.join(__dirname, '..', 'data');
+const dbPath = path.join(dataDir, dbFileName);
+
+console.log(`📊 数据库环境: ${nodeEnv}`);
+console.log(`🏷️ 数据库文件: ${dbFileName}`);
 console.log(`📂 数据库路径: ${dbPath}`);
 
 // 确保data目录存在

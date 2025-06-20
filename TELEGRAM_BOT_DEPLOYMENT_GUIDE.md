@@ -354,6 +354,95 @@ if (!fs.existsSync(dataDir)) {
    管理后台 → 群组推送 → 私聊跳转 → 预约功能
 ```
 
+## Railway多环境部署
+
+### 环境架构
+项目支持三个环境：
+- **Development** (开发): 本地开发环境，端口3000
+- **Staging** (测试): Railway测试环境，端口3001  
+- **Production** (生产): Railway生产环境，端口3000
+
+### 环境配置对比
+| 环境 | 端口 | 数据库文件 | 日志级别 | 测试模式 |
+|------|------|------------|----------|----------|
+| Development | 3000 | marketing_bot_dev.db | debug | ✅ |
+| Staging | 3001 | marketing_bot_staging.db | info | ❌ |
+| Production | 3000 | marketing_bot.db | warn | ❌ |
+
+### 多环境部署工具
+```bash
+# 查看部署帮助
+npm run deploy:help
+
+# 设置环境配置
+npm run setup:staging
+npm run setup:production
+
+# 部署到指定环境
+npm run deploy:staging
+npm run deploy:production
+
+# 查看环境状态
+npm run status:staging
+npm run status:production
+```
+
+### Railway项目设置
+在Railway中需要创建两个独立的项目：
+
+#### 1. Staging环境项目
+- **项目名**: telegram-bot-staging
+- **配置文件**: railway-staging.toml
+- **分支**: staging
+- **Volume**: telegram-bot-staging-data
+- **环境变量**:
+  ```
+  NODE_ENV=staging
+  PORT=3001
+  BOT_TOKEN=your_staging_bot_token
+  BOT_USERNAME=your_staging_bot_username
+  GROUP_CHAT_ID=your_staging_group_id
+  ```
+
+#### 2. Production环境项目  
+- **项目名**: telegram-bot-production
+- **配置文件**: railway.toml
+- **分支**: main
+- **Volume**: telegram-bot-data
+- **环境变量**:
+  ```
+  NODE_ENV=production
+  PORT=3000
+  BOT_TOKEN=your_production_bot_token
+  BOT_USERNAME=your_production_bot_username
+  GROUP_CHAT_ID=your_production_group_id
+  ```
+
+### 测试Bot设置
+根据Telegram文档建议，为staging环境创建专门的测试Bot：
+
+1. **创建测试Bot**：向@BotFather发送命令创建新Bot
+2. **获取测试Token**：记录测试Bot的Token
+3. **创建测试群组**：建立专门的测试群组
+4. **配置域名**：为staging环境配置独立域名
+
+### 部署工作流
+```bash
+# 1. 功能开发 (development分支)
+git checkout development
+# 开发和测试新功能
+
+# 2. 部署到staging测试
+git checkout staging
+git merge development
+npm run deploy:staging
+
+# 3. 测试验证通过后部署到production
+git checkout main  
+git merge staging
+npm run deploy:production
+```
+
 ## 部署步骤
 
 ### 1. 本地开发

@@ -24,7 +24,7 @@ xiaojisystemBOT/
 │   ├── start.sh            # Linux启动脚本
 │   ├── quick-deploy.sh     # Linux一键部署
 │   ├── quick-deploy.bat    # Windows一键部署
-│   └── railway.json        # Railway部署配置
+│   └── railway.toml        # Railway部署配置
 ├── logs/                    # 日志文件
 ├── models/                  # 数据模型
 │   └── databaseSchema.js    # 数据库架构

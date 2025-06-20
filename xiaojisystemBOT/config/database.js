@@ -4,17 +4,29 @@ const path = require('path');
 // 初始化数据库
 const dbPath = path.join(__dirname, '..', 'data', 'marketing_bot.db');
 
+// 确保data目录存在
+const fs = require('fs');
+const dataDir = path.dirname(dbPath);
+if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+}
+
 // 数据库性能优化配置
 const db = new Database(dbPath, {
     fileMustExist: false
 });
 
-// 性能优化设置
+// 性能优化设置 - 添加错误处理
+try {
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.pragma('cache_size = 1000');
 db.pragma('temp_store = memory');
 db.pragma('mmap_size = 268435456'); // 256MB
+    console.log('✅ 数据库性能优化设置完成');
+} catch (error) {
+    console.warn('⚠️ 数据库性能优化设置失败，使用默认设置:', error.message);
+}
 
 // 内存缓存层
 const cache = new Map();

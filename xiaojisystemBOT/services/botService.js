@@ -491,8 +491,8 @@ async function handleBindProcess(userId, chatId, text, username) {
             let userEvalSession = null;
             
             // 检查新系统：内存状态中是否刚完成12项评价且正在等待文字输入
-            const userState = userEvaluationStates.get(userId);
-            if (userState && userState.completedCount === 12 && chatId > 0) {
+            const userEvalState = userEvaluationStates.get(userId);
+            if (userEvalState && userEvalState.completedCount === 12 && chatId > 0) {
                 // 用户已完成12项评价，任何文本输入都认为是文字评价
                 console.log(`检测到新系统用户文字评价输入`);
                 isUserTextComment = true;
@@ -620,6 +620,11 @@ function initBotHandlers() {
                 console.log(`查询到商家信息:`, merchant);
                 
                 if (merchant) {
+                    // 检查商家状态
+                    if (merchant.status !== 'active') {
+                        bot.sendMessage(chatId, '😔 抱歉，目前老师已下线，请看看其他老师吧～\n\n您可以使用 /start 命令重新查看可用的老师列表。');
+                        return;
+                    }
                     // 发送商家信息（不包含联系方式）
                     const merchantInfo = `地区：#${merchant.region_name || 'xx'}              艺名：${merchant.teacher_name || '未填写'}\n` +
                                        `优点：${merchant.advantages || '未填写'}\n` +
@@ -849,6 +854,11 @@ function initBotHandlers() {
             // 异步获取商家信息，避免阻塞
             const merchant = dbOperations.getMerchantById(merchantId);
             if (merchant) {
+                // 检查商家状态
+                if (merchant.status !== 'active') {
+                    await bot.sendMessage(chatId, '😔 抱歉，目前老师已下线，请看看其他老师吧～\n\n您可以使用 /start 命令重新查看可用的老师列表。');
+                    return;
+                }
                 
                 // 确定预约类型的中文描述
                 let bookTypeText = '';
@@ -1797,16 +1807,14 @@ async function sendEvaluationSection(userId, evaluationId, items, userState, sec
 // 最小化评分处理 - 仅UI反馈
 async function handleMinimalEvalScoring(userId, data, query) {
     try {
-        console.log(`[DEBUG] handleMinimalEvalScoring被调用 - data: ${data}`);
         const parts = data.split('_');
-        console.log(`[DEBUG] handleMinimalEvalScoring - parts:`, parts, `length: ${parts.length}`);
         
         if (parts.length >= 4) {
             const evaluationType = parts[2];
             const score = parseInt(parts[3]);
             const evaluationId = parts[4];
             
-            console.log(`[DEBUG] handleMinimalEvalScoring - 解析结果: evaluationType: ${evaluationType}, score: ${score}, evaluationId: ${evaluationId}`);
+
             
             // 检查这是否是商家评价 - 如果是则不应该调用这个函数
             try {
@@ -1844,7 +1852,7 @@ async function handleMinimalEvalScoring(userId, data, query) {
             const hardwareKeys = ['appearance', 'breasts', 'waist', 'legs', 'feet', 'tightness'];
             const isHardware = hardwareKeys.includes(evaluationType);
             
-            console.log(`[DEBUG] handleMinimalEvalScoring 调用 updateEvaluationSection - userId: ${userId}, evaluationId: ${evaluationId}, evaluationType: ${evaluationType}`);
+
             await updateEvaluationSection(userId, evaluationId, evaluationType, userState, isHardware);
         }
     } catch (error) {
@@ -1857,7 +1865,7 @@ async function updateEvaluationSection(userId, evaluationId, evaluationType, use
     try {
         // 首先检查这是否是商家评价 - 如果是则直接跳过，因为商家评价不使用这个更新机制
         const evaluation = dbOperations.getEvaluation(evaluationId);
-        console.log(`[DEBUG] updateEvaluationSection - evaluationId: ${evaluationId}, evaluation:`, evaluation);
+
         
         if (evaluation && evaluation.evaluator_type === 'merchant') {
             console.log(`商家评价${evaluationId}不需要UI更新，跳过`);
@@ -2032,7 +2040,7 @@ async function handleUserScoringUIOnly(userId, data, query) {
 // 处理用户评分
 async function handleUserScoring(userId, data, query) {
     try {
-        console.log(`[DEBUG] handleUserScoring被调用 - userId: ${userId}, data: ${data}`);
+
         const parts = data.split('_');
         
         // 判断数据格式

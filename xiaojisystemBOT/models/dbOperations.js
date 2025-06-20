@@ -1,4 +1,4 @@
-const { db, cache, getPreparedStatement } = require('../config/database');
+const { db, cache } = require('../config/database');
 
 // 数据库操作函数
 const dbOperations = {
@@ -42,7 +42,7 @@ const dbOperations = {
 
     // 地区操作
     createRegion(name, sortOrder = 0) {
-        const stmt = getPreparedStatement('INSERT INTO regions (name, sort_order) VALUES (?, ?)');
+        const stmt = db.prepare('INSERT INTO regions (name, sort_order) VALUES (?, ?)');
         const result = stmt.run(name, sortOrder);
         
         // 清理相关缓存
@@ -57,7 +57,7 @@ const dbOperations = {
         const cached = cache.get(cacheKey);
         if (cached) return cached;
         
-        const stmt = getPreparedStatement('SELECT * FROM regions WHERE active = 1 ORDER BY sort_order, name');
+        const stmt = db.prepare('SELECT * FROM regions WHERE active = 1 ORDER BY sort_order, name');
         const result = stmt.all();
         cache.set(cacheKey, result, 10 * 60 * 1000); // 10分钟缓存
         return result;
@@ -70,17 +70,45 @@ const dbOperations = {
 
     updateRegion(id, name, sortOrder) {
         const stmt = db.prepare('UPDATE regions SET name = ?, sort_order = ? WHERE id = ?');
-        return stmt.run(name, sortOrder, id);
+        const result = stmt.run(name, sortOrder, id);
+        
+        // 清理相关缓存
+        cache.set('all_regions', null);
+        cache.set('all_merchants', null);
+        
+        return result;
+    },
+
+    // 检查地区删除前的相关数据
+    checkRegionDependencies(id) {
+        const merchants = db.prepare('SELECT COUNT(*) as count FROM merchants WHERE region_id = ?').get(id);
+        
+        return {
+            merchants: merchants.count,
+            total: merchants.count
+        };
     },
 
     deleteRegion(id) {
+        // 检查是否有商家绑定到此地区
+        const dependencies = this.checkRegionDependencies(id);
+        if (dependencies.merchants > 0) {
+            throw new Error(`无法删除地区：还有 ${dependencies.merchants} 个商家绑定到此地区`);
+        }
+        
         const stmt = db.prepare('DELETE FROM regions WHERE id = ?');
-        return stmt.run(id);
+        const result = stmt.run(id);
+        
+        // 清理相关缓存
+        cache.set('all_regions', null);
+        cache.set('all_merchants', null);
+        
+        return result;
     },
 
     // 商家操作
     createMerchant(teacherName, regionId, contact, bindCode, userId) {
-        const stmt = getPreparedStatement(`
+        const stmt = db.prepare(`
             INSERT INTO merchants (user_id, teacher_name, region_id, contact, bind_code, bind_step, status) 
             VALUES (?, ?, ?, ?, ?, 5, 'active')
         `);
@@ -107,10 +135,27 @@ const dbOperations = {
         const cached = cache.get(cacheKey);
         if (cached) return cached;
         
-        const stmt = getPreparedStatement(`
+        const stmt = db.prepare(`
             SELECT m.*, r.name as region_name 
             FROM merchants m 
             LEFT JOIN regions r ON m.region_id = r.id 
+            ORDER BY m.created_at DESC
+        `);
+        const result = stmt.all();
+        cache.set(cacheKey, result, 2 * 60 * 1000); // 2分钟缓存
+        return result;
+    },
+
+    getActiveMerchants() {
+        const cacheKey = 'active_merchants';
+        const cached = cache.get(cacheKey);
+        if (cached) return cached;
+        
+        const stmt = db.prepare(`
+            SELECT m.*, r.name as region_name 
+            FROM merchants m 
+            LEFT JOIN regions r ON m.region_id = r.id 
+            WHERE m.status = 'active'
             ORDER BY m.created_at DESC
         `);
         const result = stmt.all();
@@ -236,7 +281,13 @@ const dbOperations = {
             return merchantResult;
         });
         
-        return transaction();
+        const result = transaction();
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
     },
 
     resetMerchantBind(id) {
@@ -282,8 +333,15 @@ const dbOperations = {
     },
 
     toggleMerchantStatus(id) {
-        const stmt = db.prepare('UPDATE merchants SET status = CASE WHEN status = "active" THEN "suspended" ELSE "active" END WHERE id = ?');
-        return stmt.run(id);
+        // 直接使用db而不是getPreparedStatement，避免缓存问题
+        const stmt = db.prepare('UPDATE merchants SET status = CASE WHEN status = ? THEN ? ELSE ? END WHERE id = ?');
+        const result = stmt.run('active', 'suspended', 'active', id);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
     },
 
     // 按钮操作
@@ -613,7 +671,7 @@ const dbOperations = {
         values.push(id);
         const sql = `UPDATE evaluations SET ${updateFields.join(', ')} WHERE id = ?`;
         
-        const stmt = getPreparedStatement(sql);
+        const stmt = db.prepare(sql);
         return stmt.run(...values);
     },
 

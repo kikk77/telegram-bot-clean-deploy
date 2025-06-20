@@ -22,7 +22,7 @@ telegram-marketing-bot/
 ├── public/
 │   └── admin.html          # 单页面管理后台
 ├── package.json
-├── railway.json            # Railway部署配置
+├── railway.toml            # Railway部署配置
 └── .env.example
 ```
 

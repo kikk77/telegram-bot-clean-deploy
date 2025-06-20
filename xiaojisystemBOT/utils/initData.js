@@ -1,6 +1,6 @@
 const dbOperations = require('../models/dbOperations');
 
-// 生成随机数据的辅助函数
+// 生成随机数据的辅助函数（保留用于将来可能的需要）
 function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -15,8 +15,38 @@ function getRandomDate(startDate, endDate) {
     return new Date(start + Math.random() * (end - start));
 }
 
-// 初始化测试数据
+// 数据库基础结构初始化（不创建任何测试数据）
+function initBasicData() {
+    try {
+        const { db } = require('../config/database');
+        
+        console.log('🚀 开始检查数据库基础结构...');
+        
+        // 仅检查数据库表是否存在，不创建任何默认数据
+        // 这确保了数据库结构正确，但不会自动填充任何数据
+        
+        console.log('✅ 数据库结构检查完成');
+        console.log('💡 所有数据需要通过后台管理界面手动创建');
+        
+    } catch (error) {
+        console.error('❌ 初始化数据库结构失败:', error);
+    }
+}
+
+// 测试数据生成函数（完全禁用）
 function initTestData() {
+    console.log('⚠️ 测试数据生成已完全禁用');
+    console.log('💡 请通过后台管理界面手动创建所需的数据：');
+    console.log('   - 地区管理：创建服务地区');
+    console.log('   - 绑定码管理：创建商家绑定码');
+    console.log('   - 其他数据将通过正常业务流程产生');
+    
+    // 只执行基础结构检查
+    initBasicData();
+    
+    /* 
+    // === 以下为测试数据生成代码，已完全禁用 ===
+    
     try {
         const { db } = require('../config/database');
         const dbOperations = require('../models/dbOperations');
@@ -110,209 +140,10 @@ function initTestData() {
             console.log('✅ 32位老师数据创建完成');
         }
 
-        // 生成大量订单数据 - 已禁用，保留真实数据
-        console.log('📦 跳过生成订单数据，保留真实数据...');
-        
-        // 清空现有订单数据重新生成 - 已禁用以保护真实数据
-        // db.prepare('DELETE FROM orders').run();
-        // db.prepare('DELETE FROM booking_sessions').run();
-        // db.prepare('DELETE FROM evaluations').run();
-        
-        // 订单生成逻辑已禁用，保留真实数据
-        /*
-        const merchants = dbOperations.getAllMerchants();
-        const regions = dbOperations.getAllRegions();
-        const courseTypes = ['p', 'pp', 'other'];
-        const courseContents = ['基础服务', '高级服务', '特色服务', '定制服务', 'VIP服务', '专业护理'];
-        
-        // 生成200+用户名列表
-        const userNames = [];
-        const userPrefixes = ['小', '大', '老', '阿', ''];
-        const userSuffixes = [
-            '明', '红', '丽', '华', '强', '军', '伟', '芳', '娟', '敏', '静', '丹', '霞', '峰', 
-            '磊', '超', '勇', '艳', '秀', '英', '杰', '涛', '浩', '宇', '鹏', '飞', '凯', '辉',
-            '斌', '刚', '健', '亮', '建', '文', '武', '志', '勇', '毅', '俊', '帅', '威', '雄'
-        ];
-        
-        for (let i = 0; i < 220; i++) {
-            const prefix = getRandomElement(userPrefixes);
-            const suffix = getRandomElement(userSuffixes);
-            const number = Math.random() > 0.7 ? getRandomInt(1, 99) : '';
-            userNames.push(`${prefix}${suffix}${number}`);
-        }
-        */
-        
-        // 生成真实的用户预约流程数据（过去1个月）- 已禁用
-        /*
-        const now = new Date();
-        const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        
-        let bookingSessionId = 1;
-        let totalOrdersGenerated = 0;
-        
-        // 每个用户平均2-4个预约流程
-        for (let userId = 2000000; userId < 2000220; userId++) {
-            const userName = userNames[userId - 2000000];
-            const username = `user${(userId - 2000000).toString().padStart(3, '0')}`;
-            const bookingCount = getRandomInt(2, 5); // 2-4个预约
-            
-            for (let j = 0; j < bookingCount; j++) {
-                const merchant = getRandomElement(merchants);
-                const courseType = getRandomElement(courseTypes);
-                
-                // 根据课程类型确定价格和内容（按照真实逻辑）
-                let courseContent = '';
-                let price = '';
-                
-                switch (courseType) {
-                    case 'p':
-                        courseContent = 'p';
-                        price = merchant.price1 || getRandomInt(400, 600);
-                        break;
-                    case 'pp':
-                        courseContent = 'pp';
-                        price = merchant.price2 || getRandomInt(600, 900);
-                        break;
-                    case 'other':
-                        courseContent = '其他时长';
-                        price = getRandomInt(500, 800);
-                        break;
-                }
-                
-                const initialDate = getRandomDate(oneMonthAgo, now);
-                
-                // 1. 首先创建预约会话（模拟用户点击预约按钮）
-                const bookingStmt = db.prepare(`
-                    INSERT INTO booking_sessions (
-                        id, user_id, merchant_id, course_type, status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                `);
-                
-                const bookingCreatedAt = Math.floor(initialDate.getTime() / 1000);
-                
-                // 85%的预约会约课成功，70%的成功约课会完成课程
-                const bookingSuccess = Math.random() > 0.15;
-                const courseCompleted = bookingSuccess && Math.random() > 0.3;
-                
-                let sessionStatus = 'pending';
-                let confirmedTime = bookingCreatedAt;
-                let completedTime = bookingCreatedAt;
-                
-                if (bookingSuccess) {
-                    sessionStatus = 'confirmed';
-                    confirmedTime = bookingCreatedAt + getRandomInt(1800, 7200); // 0.5-2小时后确认约课成功
-                    
-                    if (courseCompleted) {
-                        sessionStatus = 'completed';
-                        completedTime = confirmedTime + getRandomInt(3600, 172800); // 1小时-2天后完成课程
-                    }
-                }
-                
-                bookingStmt.run(
-                    bookingSessionId, userId, merchant.id, courseType, 
-                    sessionStatus, bookingCreatedAt, 
-                    courseCompleted ? completedTime : (bookingSuccess ? confirmedTime : bookingCreatedAt)
-                );
-                
-                // 2. 如果约课成功，创建订单（模拟createOrderData函数）
-                if (bookingSuccess) {
-                    const orderStmt = db.prepare(`
-                        INSERT INTO orders (
-                            booking_session_id, user_id, user_name, user_username,
-                            merchant_id, teacher_name, teacher_contact, course_content,
-                            price, booking_time, status, user_evaluation, merchant_evaluation,
-                            report_content, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    `);
-                    
-                    let orderStatus = 'confirmed';
-                    let userEvaluation = null;
-                    let merchantEvaluation = null;
-                    
-                    // 3. 如果课程完成，更新订单状态并生成评价
-                    if (courseCompleted) {
-                        orderStatus = 'completed';
-                        
-                        // 生成用户评价（按照真实评价结构）
-                        const userScore = getRandomInt(7, 10);
-                        const userScores = {
-                            hardware1: getRandomInt(7, 10), // 长度
-                            hardware2: getRandomInt(7, 10), // 粗细  
-                            hardware3: getRandomInt(7, 10), // 持久力
-                            software1: getRandomInt(7, 10), // 技巧
-                        };
-                        
-                        const userComments = [
-                            '服务很好，很满意',
-                            '老师很专业，态度也很好',
-                            '整体体验不错，下次还会来',
-                            '性价比很高，推荐',
-                            '服务到位，环境也很干净',
-                            '老师技术很好，很用心'
-                        ];
-                        
-                        userEvaluation = JSON.stringify({
-                            overall_score: userScore,
-                            scores: userScores,
-                            comments: getRandomElement(userComments),
-                            created_at: new Date(completedTime * 1000 + 3600000).toISOString()
-                        });
-                        
-                        // 生成商家评价
-                        const merchantScore = getRandomInt(8, 10);
-                        const merchantScores = {
-                            length: getRandomInt(8, 10),
-                            thickness: getRandomInt(8, 10),
-                            durability: getRandomInt(8, 10),
-                            technique: getRandomInt(8, 10)
-                        };
-                        
-                        const merchantComments = [
-                            '客户很配合，沟通顺畅',
-                            '准时到达，很守时',
-                            '很好的客户，推荐',
-                            '付款及时，合作愉快',
-                            '客户很友善，体验很好'
-                        ];
-                        
-                        merchantEvaluation = JSON.stringify({
-                            overall_score: merchantScore,
-                            scores: merchantScores,
-                            comments: getRandomElement(merchantComments),
-                            created_at: new Date(completedTime * 1000 + 7200000).toISOString()
-                        });
-                    }
-                    
-                    // 生成时间字符串
-                    const bookingTimeStr = new Date(confirmedTime * 1000).toISOString();
-                    const createdAtStr = new Date(confirmedTime * 1000).toISOString();
-                    const updatedAtStr = new Date((courseCompleted ? completedTime : confirmedTime) * 1000).toISOString();
-                    
-                    orderStmt.run(
-                        bookingSessionId, userId, userName, username,
-                        merchant.id, merchant.teacher_name, merchant.contact, courseContent,
-                        price.toString(), bookingTimeStr, orderStatus,
-                        userEvaluation, merchantEvaluation, null,
-                        createdAtStr, updatedAtStr
-                    );
-                    
-                    totalOrdersGenerated++;
-                }
-                
-                bookingSessionId++;
-            }
-        }
-        
         // 重新启用外键约束
         db.pragma('foreign_keys = ON');
         
-        console.log(`✅ 生成了 ${totalOrdersGenerated} 个订单`);
-        console.log(`✅ 涵盖 ${userNames.length} 位用户`);
-        console.log(`✅ 涵盖 ${merchants.length} 位老师`);
-        console.log('🎉 完整测试数据生成完成！');
-        */
-        
-        console.log('✅ 跳过订单数据生成，保留真实数据');
+        console.log('✅ 测试数据生成完成');
         
     } catch (error) {
         console.error('❌ 初始化测试数据失败:', error);
@@ -324,13 +155,18 @@ function initTestData() {
             console.error('恢复外键约束失败:', e);
         }
     }
+    */
 }
 
 module.exports = {
-    initTestData
-}; 
+    initTestData,
+    initBasicData
+};
 
-// 如果直接运行此文件，执行初始化 - 暂时禁用
+// 生产环境：不自动创建任何测试数据
+// 所有数据需要通过后台管理界面手动创建
+
+// 如果直接运行此文件，仅执行基础结构检查（不创建数据）
 // if (require.main === module) {
-//     initTestData();
+//     initBasicData();
 // } 

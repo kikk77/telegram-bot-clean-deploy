@@ -184,29 +184,7 @@ class BindCodeService {
         return this.deleteBindCode(id, true);
     }
 
-    // 批量删除测试绑定码
-    deleteBatchTestBindCodes() {
-        try {
-            const testBindCodes = Array.from(this.bindCodes.values())
-                .filter(bc => bc.description && bc.description.includes('测试'));
-            
-            let deletedCount = 0;
-            testBindCodes.forEach(bindCode => {
-                try {
-                    this.deleteBindCode(bindCode.id, true); // 强制删除
-                    deletedCount++;
-                } catch (error) {
-                    console.error(`删除测试绑定码 ${bindCode.code} 失败:`, error);
-                }
-            });
-            
-            console.log(`批量删除了 ${deletedCount} 个测试绑定码`);
-            return deletedCount;
-        } catch (error) {
-            console.error('批量删除测试绑定码失败:', error);
-            return 0;
-        }
-    }
+
 
     // 获取绑定码统计信息
     getBindCodeStats() {

@@ -49,10 +49,7 @@ class ApiService {
         // this.routes.set('GET /api/export/orders', this.exportOrders.bind(this));
         // this.routes.set('GET /api/export/stats', this.exportStats.bind(this));
 
-        // 测试端点
-        this.routes['/api/test/create-evaluation'] = { method: 'POST', handler: this.createTestEvaluation.bind(this) };
-        this.routes['/api/test/update-evaluation'] = { method: 'POST', handler: this.updateTestEvaluation.bind(this) };
-        this.routes['/api/test/get-evaluation/:id'] = { method: 'GET', handler: this.getTestEvaluation.bind(this) };
+
         
         console.log('API路由设置完成，共', Object.keys(this.routes).length, '个路由');
     }
@@ -1228,81 +1225,7 @@ class ApiService {
         }
     }
 
-    // 测试端点 - 创建评价记录
-    async createTestEvaluation({ body }) {
-        try {
-            const { bookingSessionId, evaluatorType, evaluatorId, targetId } = body;
-            
-            // 创建评价记录
-            const evaluationId = db.prepare(`
-                INSERT INTO evaluations (
-                    booking_session_id, evaluator_type, evaluator_id, target_id, status
-                ) VALUES (?, ?, ?, ?, 'pending')
-            `).run(bookingSessionId, evaluatorType, evaluatorId, targetId).lastInsertRowid;
-            
-            return {
-                success: true,
-                evaluationId: evaluationId,
-                message: '测试评价记录创建成功'
-            };
-        } catch (error) {
-            throw new Error('创建测试评价失败: ' + error.message);
-        }
-    }
 
-    // 测试端点 - 更新评价
-    async updateTestEvaluation({ body }) {
-        try {
-            const { evaluationId, overallScore, detailScores, textComment, status } = body;
-            
-            console.log('=== 测试API调用updateEvaluation ===');
-            // console.log('传入参数:', { evaluationId, overallScore, detailScores, textComment, status }); // 调试时可启用
-            
-            const result = evaluationService.updateEvaluation(
-                evaluationId, 
-                overallScore || null, 
-                detailScores || null, 
-                textComment || null, 
-                status || null
-            );
-            
-            // 获取更新后的数据
-            const evaluation = db.prepare(`
-                SELECT * FROM evaluations WHERE id = ?
-            `).get(evaluationId);
-            
-            return {
-                success: true,
-                result: result,
-                evaluation: evaluation,
-                message: '评价更新成功'
-            };
-        } catch (error) {
-            throw new Error('更新测试评价失败: ' + error.message);
-        }
-    }
-
-    // 测试端点 - 获取评价数据
-    async getTestEvaluation({ params }) {
-        try {
-            const evaluationId = params.id;
-            
-            const evaluation = db.prepare(`
-                SELECT * FROM evaluations WHERE id = ?
-            `).get(evaluationId);
-            
-            if (!evaluation) {
-                throw new Error('评价记录不存在');
-            }
-            
-            return {
-                success: true,
-                data: evaluation
-            };
-        } catch (error) {
-            throw new Error('获取测试评价失败: ' + error.message);
-        }
-    }
 }
 
 module.exports = new ApiService(); 

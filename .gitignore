@@ -126,6 +126,9 @@ Desktop.ini
 *.sqlite
 *.sqlite3
 marketing_bot.db
+data/*.db
+data/*.sqlite
+data/*.sqlite3
 
 # Logs
 logs

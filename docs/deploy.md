@@ -33,7 +33,7 @@ telegram-marketing-bot/
 ├── app.js
 ├── admin.html  
 ├── package.json
-├── railway.json
+├── railway.toml
 ├── env.example
 └── README.md
 ```

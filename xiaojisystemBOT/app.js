@@ -12,8 +12,8 @@ if (!BOT_TOKEN) {
 
 // 导入模块
 const { initDatabase } = require('./config/database');
-const { initTestData } = require('./utils/initData');
-const { loadCacheData, initBotHandlers } = require('./services/botService');
+const { initBasicData } = require('./utils/initData');
+const { loadCacheData, initBotHandlers, bot } = require('./services/botService');
 const { initScheduler } = require('./services/schedulerService');
 const { createHttpServer } = require('./services/httpService');
 
@@ -24,14 +24,17 @@ async function start() {
     // 初始化数据库
     initDatabase();
     
-    // 初始化测试数据 - 暂时禁用以测试真实数据
-    // initTestData();
+    // 初始化基础数据（仅地区配置）
+    initBasicData();
     
     // 加载缓存数据
     await loadCacheData();
     
     // 初始化Bot事件监听
     initBotHandlers();
+    
+    // 设置全局Bot服务实例，供HTTP API使用
+    global.botService = { bot };
     
     // 启动定时任务调度器
     initScheduler();

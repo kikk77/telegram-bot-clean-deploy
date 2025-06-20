@@ -12,7 +12,8 @@
     "status": "ps aux | grep 'node app.js' | grep -v grep"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   },
   "dependencies": {
     "better-sqlite3": "^8.7.0",

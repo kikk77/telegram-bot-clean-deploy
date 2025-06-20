@@ -4,19 +4,23 @@
 
 ```
 kitelegrambot/
-├── xiaojidaniaoBOT/          # 主要软件目录
+├── xiaojisystemBOT/          # 主要软件目录
 │   ├── app.js               # 主应用文件
 │   ├── package.json         # 依赖配置
-│   ├── admin.html           # 管理后台
-│   ├── marketing_bot.db     # 数据库文件
+│   ├── data/                # 数据库文件目录
+│   ├── admin/               # 管理后台
+│   │   ├── orders.html      # 订单管理页面
+│   │   ├── admin-legacy.html # 传统管理界面
+│   │   ├── scripts/         # 前端脚本
+│   │   └── styles/          # 样式文件
 │   ├── config/              # 配置文件
 │   ├── models/              # 数据模型
 │   ├── services/            # 业务服务
 │   ├── utils/               # 工具函数
-│   ├── logs/                # 日志文件
-│   ├── start.sh             # 启动脚本
-│   ├── quick-deploy.sh      # 快速部署脚本
-│   └── ecosystem.config.js  # PM2配置
+│   ├── deployment/          # 部署相关文件
+│   ├── Dockerfile           # Docker容器配置
+│   ├── railway.toml         # Railway部署配置
+│   └── env.example          # 环境变量示例
 ├── docs/                    # 文档目录
 │   ├── README.md            # 详细说明文档
 │   ├── 商家绑定.md           # 商家绑定功能文档
@@ -32,6 +36,16 @@ kitelegrambot/
 # 设置Bot Token并启动
 BOT_TOKEN=你的机器人令牌 ./start-bot.sh
 ```
+
+## Railway部署
+
+使用Dockerfile方式部署到Railway：
+
+1. 在Railway中连接GitHub仓库
+2. 设置环境变量：BOT_TOKEN、PORT、GROUP_CHAT_ID
+3. Railway自动检测Dockerfile并构建部署
+
+详细部署说明请查看 `xiaojisystemBOT/RAILWAY_DEPLOY.md`
 
 ## 管理后台
 

@@ -70,6 +70,18 @@ function createHttpServer() {
             return;
         }
 
+        // 健康检查端点
+        if (pathname === '/health' && method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ 
+                success: true, 
+                status: 'healthy',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime()
+            }));
+            return;
+        }
+
         // API路由
         if (pathname.startsWith('/api/')) {
             handleApiRequest(req, res, pathname, method);
@@ -166,31 +178,7 @@ async function processApiRequest(pathname, method, data) {
         }
     }
 
-    // 批量删除测试绑定码API
-    if (pathname === '/api/bind-codes/batch-delete-test' && method === 'DELETE') {
-        try {
-            // 获取所有绑定码，找出测试绑定码并删除
-            const allBindCodes = dbOperations.getAllBindCodes();
-            const testBindCodes = allBindCodes.filter(bc => 
-                bc.description && bc.description.includes('测试')
-            );
-            
-            let deletedCount = 0;
-            testBindCodes.forEach(bindCode => {
-                try {
-                    dbOperations.deleteBindCode(bindCode.id);
-                    deletedCount++;
-                } catch (error) {
-                    console.error(`删除测试绑定码 ${bindCode.code} 失败:`, error);
-                }
-            });
-            
-            await loadCacheData();
-            return { success: true, data: { deletedCount }, message: `已删除 ${deletedCount} 个测试绑定码` };
-        } catch (error) {
-            return { success: false, error: error.message };
-        }
-    }
+
 
     // 地区管理API
     if (pathname === '/api/regions') {
@@ -205,10 +193,22 @@ async function processApiRequest(pathname, method, data) {
             await loadCacheData();
             return { success: true };
         } else if (method === 'DELETE') {
+            try {
             dbOperations.deleteRegion(data.id);
             await loadCacheData();
-            return { success: true };
+                return { success: true, message: '地区删除成功' };
+            } catch (error) {
+                console.error('删除地区失败:', error);
+                return { success: false, error: error.message };
         }
+        }
+    }
+
+    // 检查地区依赖关系API
+    if (pathname.match(/^\/api\/regions\/\d+\/dependencies$/) && method === 'GET') {
+        const regionId = pathname.split('/')[3];
+        const dependencies = dbOperations.checkRegionDependencies(regionId);
+        return { success: true, data: dependencies };
     }
 
     // 商家管理API
@@ -229,11 +229,17 @@ async function processApiRequest(pathname, method, data) {
     if (pathname.match(/^\/api\/merchants\/\d+$/) && method === 'DELETE') {
         const merchantId = pathname.split('/')[3];
         try {
-            dbOperations.deleteMerchant(merchantId);
+            console.log(`🗑️ 开始删除商家 ID: ${merchantId}`);
+            const result = dbOperations.deleteMerchant(merchantId);
+            console.log(`✅ 商家删除成功，影响行数: ${result.changes}`);
+            
+            // 重新加载缓存数据
             await loadCacheData();
-            return { success: true, message: '商家删除成功' };
+            console.log(`🔄 缓存数据已重新加载`);
+            
+            return { success: true, message: '商家删除成功', deletedId: merchantId };
         } catch (error) {
-            console.error('删除商家失败:', error);
+            console.error('❌ 删除商家失败:', error);
             throw new Error('删除商家失败: ' + error.message);
         }
     }
@@ -347,103 +353,7 @@ async function processApiRequest(pathname, method, data) {
         }
     }
 
-    // 测试发送API
-    if (pathname === '/api/test-send' && method === 'POST') {
-        console.log('测试发送API接收到的数据:', JSON.stringify(data, null, 2));
-        
-        // 立即执行发送逻辑，不使用setImmediate
-        (async () => {
-            try {
-                let message, options = {};
-                
-                if (data.type === 'merchant') {
-                    // 商家信息模式
-                    const merchant = dbOperations.getMerchantById(data.merchantId);
-                    if (merchant) {
-                        // 使用与商家管理页面相同的格式，但隐藏联系方式
-                        message = `地区：#${merchant.region_name || 'xx'}              艺名：${merchant.teacher_name || '未填写'}\n` +
-                                `优点：${merchant.advantages || '未填写'}\n` +
-                                `缺点：${merchant.disadvantages || '未填写'}\n` +
-                                `价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp\n\n` +
-                                `老师💃自填基本功：\n` +
-                                `💦洗:${merchant.skill_wash || '未填写'}\n` +
-                                `👄吹:${merchant.skill_blow || '未填写'}\n` +
-                                `❤️做:${merchant.skill_do || '未填写'}\n` +
-                                `🐍吻:${merchant.skill_kiss || '未填写'}`;
-                        
-                        options.reply_markup = {
-                            inline_keyboard: [[
-                                { text: '联系', url: `https://t.me/Xiaojisystembot?start=merchant_${merchant.id}` }
-                            ]]
-                        };
-                    } else {
-                        message = '❌ 商家信息不存在';
-                    }
-                    
-                } else if (data.type === 'template') {
-                    // 消息模板模式
-                    const template = dbOperations.getMessageTemplateById(data.templateId);
-                    if (template) {
-                        message = template.content;
-                        
-                        if (template.buttons_config) {
-                            try {
-                                const buttons = JSON.parse(template.buttons_config);
-                                if (buttons.length > 0) {
-                                    options.reply_markup = { inline_keyboard: buttons };
-                                }
-                            } catch (e) {
-                                console.error('解析模板按钮配置失败:', e);
-                            }
-                        }
-                        
-                        // 如果有图片，先发送图片
-                        if (template.image_url) {
-                            await bot.sendPhoto(data.chatId, template.image_url, {
-                                caption: message,
-                                reply_markup: options.reply_markup
-                            });
-                            return;
-                        }
-                    } else {
-                        message = '❌ 消息模板不存在';
-                    }
-                    
-                } else if (data.type === 'custom') {
-                    // 自定义消息模式
-                    message = data.message;
-                    
-                    if (data.buttonsConfig && data.buttonsConfig.length > 0) {
-                        options.reply_markup = { inline_keyboard: data.buttonsConfig };
-                    }
-                    
-                    // 如果有图片，先发送图片
-                    if (data.imageUrl) {
-                        await bot.sendPhoto(data.chatId, data.imageUrl, {
-                            caption: message,
-                            reply_markup: options.reply_markup
-                        });
-                        return;
-                    }
-                    
-                } else {
-                    // 默认模式（兼容旧版本）
-                    message = data.message || '🎯 点击下方按钮联系商家';
-                    options.reply_markup = {
-                        inline_keyboard: [[
-                            { text: '联系客服', url: 'https://t.me/xiaoji57' }
-                        ]]
-                    };
-                    }
-                
-                await bot.sendMessage(data.chatId, message, options);
-            } catch (error) {
-                console.error('测试发送失败:', error);
-            }
-        })();
-        
-        return { success: true };
-    }
+
 
     // 统计数据API
     if (pathname === '/api/stats' && method === 'GET') {
@@ -652,6 +562,182 @@ async function processApiRequest(pathname, method, data) {
         } catch (error) {
             console.error('获取订单详情失败:', error);
             return { success: false, error: error.message };
+        }
+    }
+
+    // 测试发送API
+    if (pathname === '/api/test-send' && method === 'POST') {
+        try {
+            const botService = global.botService;
+            if (!botService) {
+                return { success: false, error: 'Bot服务未初始化' };
+            }
+
+            const { chatId, groupId, type, merchantId, templateId, message, imageUrl, buttonsConfig } = data;
+            
+            // 兼容前端的参数名
+            const targetChatId = chatId || groupId;
+            
+            // 验证必要参数
+            if (!targetChatId) {
+                return { success: false, error: '请输入群组ID' };
+            }
+
+            let messageContent = '';
+            let sendOptions = {};
+
+            // 根据发送类型构建消息内容
+            if (type === 'merchant') {
+                if (!merchantId) {
+                    return { success: false, error: '请选择商家' };
+                }
+                
+                const merchant = dbOperations.getMerchantById(merchantId);
+                if (!merchant) {
+                    return { success: false, error: '商家不存在' };
+                }
+
+                // 构建商家信息消息，使用正确的数据库字段名
+                messageContent = `地区：#${merchant.region_name || 'xx'}              艺名：${merchant.teacher_name || '未填写'}
+优点：${merchant.advantages || '未填写'}
+缺点：${merchant.disadvantages || '未填写'}
+价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp
+
+老师💃自填基本功：
+💦洗:${merchant.skill_wash || '未填写'}
+👄吹:${merchant.skill_blow || '未填写'}
+❤️做:${merchant.skill_do || '未填写'}
+🐍吻:${merchant.skill_kiss || '未填写'}`;
+
+                // 添加跳转到私聊的按钮
+                let botUsername = process.env.BOT_USERNAME;
+                
+                // 如果环境变量未设置，尝试从bot服务获取
+                if (!botUsername && botService && botService.bot) {
+                    try {
+                        const botInfo = await botService.bot.getMe();
+                        botUsername = botInfo.username;
+                        console.log(`动态获取到bot用户名: ${botUsername}`);
+                    } catch (error) {
+                        console.error('获取bot用户名失败:', error);
+                        botUsername = 'xiaojisystemBOT'; // 默认值
+                    }
+                } else if (!botUsername) {
+                    botUsername = 'xiaojisystemBOT'; // 默认值
+                }
+                
+                sendOptions.reply_markup = {
+                    inline_keyboard: [
+                        [{ text: '出击！', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }],
+                        [{ text: '榜单', url: 'https://t.me/xiaoji233' }]
+                    ]
+                };
+
+                // 如果有图片，添加图片
+                if (imageUrl) {
+                    sendOptions.caption = messageContent;
+                    sendOptions.photo = imageUrl;
+                }
+            } else if (type === 'template') {
+                if (!templateId) {
+                    return { success: false, error: '请选择消息模板' };
+                }
+                
+                const template = dbOperations.getMessageTemplateById(templateId);
+                if (!template) {
+                    return { success: false, error: '消息模板不存在' };
+                }
+                
+                messageContent = template.content;
+                
+                // 如果模板有图片，使用模板图片
+                if (template.image_url) {
+                    sendOptions.caption = messageContent;
+                    sendOptions.photo = template.image_url;
+                }
+            } else if (type === 'custom') {
+                if (!message || !message.trim()) {
+                    return { success: false, error: '请输入消息内容' };
+                }
+                messageContent = message;
+                
+                // 如果有图片，添加图片
+                if (imageUrl) {
+                    sendOptions.caption = messageContent;
+                    sendOptions.photo = imageUrl;
+                }
+                
+                // 如果有按钮配置，添加按钮
+                if (buttonsConfig && buttonsConfig.length > 0) {
+                    sendOptions.reply_markup = {
+                        inline_keyboard: buttonsConfig
+                    };
+                }
+            } else {
+                return { success: false, error: '无效的发送类型' };
+            }
+
+            // 发送消息
+            let result;
+            if (sendOptions.photo) {
+                // 发送图片消息
+                const photoOptions = {
+                    caption: sendOptions.caption,
+                    parse_mode: 'HTML'
+                };
+                if (sendOptions.reply_markup) {
+                    photoOptions.reply_markup = sendOptions.reply_markup;
+                }
+                result = await botService.bot.sendPhoto(targetChatId, sendOptions.photo, photoOptions);
+            } else {
+                // 发送文本消息
+                const textOptions = {
+                    parse_mode: 'HTML'
+                };
+                if (sendOptions.reply_markup) {
+                    textOptions.reply_markup = sendOptions.reply_markup;
+                }
+                result = await botService.bot.sendMessage(targetChatId, messageContent, textOptions);
+            }
+
+            console.log('✅ 测试消息发送成功:', {
+                chatId: targetChatId,
+                messageId: result.message_id,
+                type,
+                merchantId,
+                templateId
+            });
+
+            return {
+                success: true,
+                message: '消息发送成功',
+                data: {
+                    messageId: result.message_id,
+                    chatId: targetChatId
+                }
+            };
+
+        } catch (error) {
+            console.error('❌ 测试发送失败:', error);
+            
+            // 处理常见错误
+            if (error.code === 'ETELEGRAM') {
+                if (error.response && error.response.description) {
+                    if (error.response.description.includes('chat not found')) {
+                        return { success: false, error: '群组不存在或机器人未加入该群组' };
+                    } else if (error.response.description.includes('not enough rights')) {
+                        return { success: false, error: '机器人在该群组中没有发送消息的权限' };
+                    } else if (error.response.description.includes('blocked')) {
+                        return { success: false, error: '机器人被该群组屏蔽' };
+                    }
+                    return { success: false, error: `Telegram错误: ${error.response.description}` };
+                }
+            }
+            
+            return { 
+                success: false, 
+                error: `发送失败: ${error.message}` 
+            };
         }
     }
 

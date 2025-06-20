@@ -957,20 +957,28 @@
                 return;
             }
 
-            container.innerHTML = regions.map(region => `
+            container.innerHTML = regions.map(region => {
+                // 计算绑定到此地区的商家数量
+                const merchantCount = merchants.filter(m => m.region_id === region.id).length;
+                
+                return `
                 <div class="list-item">
                     <div class="list-item-content">
                         <strong>📍 ${region.name}</strong>
                         <div style="color: #666; font-size: 14px; margin-top: 5px;">
-                            排序: ${region.sort_order}
+                                排序: ${region.sort_order} | 绑定商家: ${merchantCount} 个
                         </div>
+                            ${merchantCount > 0 ? `<div style="margin-top: 5px;">
+                                <span class="badge info">${merchantCount} 个商家</span>
+                            </div>` : ''}
                     </div>
                     <div class="list-item-actions">
                         <button class="btn btn-warning btn-small" onclick="editRegion(${region.id}, '${region.name}', ${region.sort_order})">编辑</button>
-                        <button class="btn btn-danger btn-small" onclick="deleteRegion(${region.id})">删除</button>
+                            <button class="btn btn-danger btn-small" onclick="deleteRegion(${region.id})" ${merchantCount > 0 ? 'title="有商家绑定，无法删除"' : ''}>删除</button>
                     </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         // 创建地区
@@ -1020,13 +1028,30 @@
 
         // 删除地区
         async function deleteRegion(id) {
-            if (!confirm('确定要删除这个地区吗？删除后相关商家的地区信息将丢失。')) return;
-
             try {
                 showLoading();
+                
+                // 首先检查依赖关系
+                const dependencies = await apiRequest(`/api/regions/${id}/dependencies`);
+                
+                if (dependencies.merchants > 0) {
+                    hideLoading();
+                    showAlert(`无法删除地区：还有 ${dependencies.merchants} 个商家绑定到此地区。请先将这些商家转移到其他地区或删除商家后再删除地区。`, 'error');
+                    return;
+                }
+                
+                if (!confirm('确定要删除这个地区吗？此操作不可恢复。')) {
+                    hideLoading();
+                    return;
+                }
+
+                // 删除地区 - apiRequest在成功时不会抛出异常，所以直接认为成功
                 await apiRequest('/api/regions', 'DELETE', { id });
+                
                 showAlert('地区删除成功');
                 await loadRegions();
+                await loadMerchants(); // 刷新商家列表
+                
             } catch (error) {
                 showAlert('删除地区失败: ' + error.message, 'error');
             } finally {
@@ -1242,7 +1267,9 @@
         // 加载商家数据
         async function loadMerchants() {
             try {
-                merchants = await apiRequest('/api/merchants');
+                // 添加时间戳避免浏览器缓存
+                const timestamp = Date.now();
+                merchants = await apiRequest(`/api/merchants?t=${timestamp}`);
                 renderMerchants();
                 updateSelects(); // 更新下拉选择框
             } catch (error) {
@@ -1557,6 +1584,10 @@
                 showAlert(`商家"${merchant.teacher_name}"删除成功`, 'success');
                 console.log('删除成功，开始重新加载数据...');
                 
+                // 清空本地缓存
+                merchants = [];
+                buttons = [];
+                
                 // 重新加载所有相关数据
                 await Promise.all([
                     loadMerchants(),
@@ -1589,7 +1620,8 @@
 
         // 加载按钮数据
         async function loadButtons() {
-            buttons = await apiRequest('/api/buttons');
+            const timestamp = Date.now();
+            buttons = await apiRequest(`/api/buttons?t=${timestamp}`);
             renderButtons();
         }
 

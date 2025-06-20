@@ -1,0 +1,2 @@
+# 此文件确保data目录在git中被保留
+# Railway Volume将挂载到此目录，实现数据持久化 

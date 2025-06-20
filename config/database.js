@@ -1,15 +1,24 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// 初始化数据库
-const dbPath = path.join(__dirname, '..', 'data', 'marketing_bot.db');
+// 数据库路径配置 - 支持Railway Volume
+const isProduction = process.env.NODE_ENV === 'production';
+const dataDir = isProduction ? '/app/data' : path.join(__dirname, '..', 'data');
+const dbPath = path.join(dataDir, 'marketing_bot.db');
+
+console.log(`📊 数据库环境: ${isProduction ? '生产环境' : '开发环境'}`);
+console.log(`📂 数据库路径: ${dbPath}`);
 
 // 确保data目录存在
 const fs = require('fs');
-const dataDir = path.dirname(dbPath);
 if (!fs.existsSync(dataDir)) {
+    console.log(`📁 创建数据目录: ${dataDir}`);
     fs.mkdirSync(dataDir, { recursive: true });
 }
+
+// 检查数据库是否已存在
+const dbExists = fs.existsSync(dbPath);
+console.log(`💾 数据库状态: ${dbExists ? '已存在' : '将创建新数据库'}`);
 
 // 数据库性能优化配置
 const db = new Database(dbPath, {
@@ -18,11 +27,11 @@ const db = new Database(dbPath, {
 
 // 性能优化设置 - 添加错误处理
 try {
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
-db.pragma('cache_size = 1000');
-db.pragma('temp_store = memory');
-db.pragma('mmap_size = 268435456'); // 256MB
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('cache_size = 1000');
+    db.pragma('temp_store = memory');
+    db.pragma('mmap_size = 268435456'); // 256MB
     console.log('✅ 数据库性能优化设置完成');
 } catch (error) {
     console.warn('⚠️ 数据库性能优化设置失败，使用默认设置:', error.message);
@@ -77,6 +86,26 @@ function getPreparedStatement(sql) {
 
 // 创建数据库表
 function initDatabase() {
+    console.log('🔧 开始初始化数据库表结构...');
+    
+    // 检查数据库版本（用于数据迁移）
+    try {
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS db_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        `);
+        
+        const currentVersion = db.prepare('SELECT value FROM db_meta WHERE key = ?').get('db_version')?.value || '1.0.0';
+        console.log(`📋 当前数据库版本: ${currentVersion}`);
+        
+        // 设置或更新数据库版本
+        db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('db_version', '1.1.0');
+    } catch (error) {
+        console.warn('⚠️ 数据库版本检查失败:', error.message);
+    }
+    
     // 绑定码表
     db.exec(`
         CREATE TABLE IF NOT EXISTS bind_codes (
@@ -340,8 +369,20 @@ function initDatabase() {
         )
     `);
 
-    console.log('✅ 数据库初始化完成');
+    console.log('✅ 数据库表初始化完成');
+    
+    // 显示数据库统计信息
+    try {
+        const tableCount = db.prepare("SELECT COUNT(*) as count FROM sqlite_master WHERE type='table'").get().count;
+        const dbSize = fs.statSync(dbPath).size;
+        console.log(`📊 数据库统计: ${tableCount}个表, 文件大小: ${(dbSize / 1024).toFixed(1)}KB`);
+    } catch (error) {
+        console.warn('⚠️ 获取数据库统计信息失败:', error.message);
+    }
 }
+
+// 调用初始化函数
+initDatabase();
 
 module.exports = {
     db,

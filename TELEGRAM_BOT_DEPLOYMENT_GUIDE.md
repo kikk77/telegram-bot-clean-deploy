@@ -141,9 +141,20 @@ restartPolicyMaxRetries = 10
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 
+# Volume配置 - 数据持久化
+[[deploy.volumes]]
+mountPath = "/app/data"
+name = "telegram-bot-data"
+
 [env]
 NODE_ENV = "production"
 ```
+
+### 数据持久化配置
+Railway通过Volume挂载实现SQLite数据库持久化：
+- **Volume名称**: telegram-bot-data
+- **挂载路径**: /app/data
+- **数据库文件**: /app/data/marketing_bot.db
 
 ### Git配置 (.gitignore)
 ```gitignore
@@ -193,9 +204,64 @@ data/*.db
 *.log
 ```
 
+## 数据持久化解决方案
+
+### 问题描述
+Railway平台每次重新部署时会创建新的容器，导致SQLite数据库文件丢失，所有数据需要重新开始。
+
+### 解决方案：Railway Volumes
+使用Railway的Volume功能实现数据持久化：
+
+#### 1. Volume配置
+在`railway.toml`中配置Volume挂载：
+```toml
+[[deploy.volumes]]
+mountPath = "/app/data"
+name = "telegram-bot-data"
+```
+
+#### 2. 数据库路径适配
+数据库配置会自动检测环境：
+- **开发环境**: `./data/marketing_bot.db`
+- **生产环境**: `/app/data/marketing_bot.db` (Volume挂载路径)
+
+#### 3. 数据库备份工具
+新增备份和恢复功能：
+```bash
+# 创建备份
+npm run db:backup-scheduled
+
+# 手动备份
+npm run db:backup ./backup.json
+
+# 恢复数据
+npm run db:restore ./backup.json
+```
+
+#### 4. 数据迁移支持
+- 自动检测数据库版本
+- 支持表结构升级
+- 保护现有数据完整性
+
+#### 5. Volume管理注意事项
+- Volume在项目删除前会持久保存
+- 重新部署不会影响Volume中的数据
+- Volume大小限制根据Railway计划而定
+- 可以通过Railway控制面板管理Volume
+
 ## 常见问题排查
 
-### 1. 数据库字段不匹配问题
+### 1. 数据持久化问题
+
+**症状**: 每次部署后数据库重置为空
+
+**解决步骤**:
+1. 确认railway.toml中Volume配置正确
+2. 检查数据库路径是否指向/app/data
+3. 验证Volume是否成功创建和挂载
+4. 查看部署日志确认数据库初始化状态
+
+### 2. 数据库字段不匹配问题
 
 **症状**: 商家信息显示"undefined"，测试发送功能异常
 

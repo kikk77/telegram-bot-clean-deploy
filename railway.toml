@@ -8,5 +8,10 @@ restartPolicyMaxRetries = 10
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 
+# Volume配置 - 数据持久化
+[[deploy.volumes]]
+mountPath = "/app/data"
+name = "telegram-bot-data"
+
 [env]
 NODE_ENV = "production" 

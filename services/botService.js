@@ -137,7 +137,7 @@ async function clearUserConversation(userId) {
     }
 }
 
-// 删除上一条消息并发送新消息
+// 删除上一条消息并发送新消息的丝滑版本
 async function sendMessageWithDelete(chatId, text, options = {}, messageType = 'general', data = {}) {
     try {
         // 获取用户的最后一条消息
@@ -818,6 +818,59 @@ function initBotHandlers() {
         if (data.startsWith('attack_')) {
             const merchantId = data.replace('attack_', '');
             
+            // 获取商家信息
+            const merchant = dbOperations.getMerchantById(merchantId);
+            if (!merchant) {
+                await bot.sendMessage(chatId, '❌ 商家信息不存在');
+                return;
+            }
+            
+            // 检查商家状态
+            if (merchant.status !== 'active') {
+                await bot.sendMessage(chatId, '😔 抱歉，目前老师已下线，请看看其他老师吧～\n\n您可以使用 /start 命令重新查看可用的老师列表。');
+                return;
+            }
+            
+            // 获取用户信息
+            const userName = query.from.first_name || '';
+            const userLastName = query.from.last_name || '';
+            const fullName = `${userName} ${userLastName}`.trim() || '未设置名称';
+            const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+            
+            // 创建"尝试预约"状态的订单
+            try {
+                const now = Math.floor(Date.now() / 1000);
+                const orderData = {
+                    booking_session_id: null, // 暂时为空，后续预约时关联
+                    user_id: userId,
+                    user_name: fullName,
+                    user_username: username,
+                    merchant_id: merchant.id,
+                    teacher_name: merchant.teacher_name,
+                    teacher_contact: merchant.contact,
+                    course_content: '待确定课程', // 用户还未选择具体课程
+                    price: '待确定价格', // 价格待确定
+                    booking_time: new Date().toISOString(),
+                    status: 'attempting', // 新状态：尝试预约
+                    user_evaluation: null,
+                    merchant_evaluation: null,
+                    report_content: null,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                };
+                
+                const orderId = dbOperations.createOrder(orderData);
+                
+                console.log(`✅ 创建尝试预约订单成功: 订单ID ${orderId}, 用户 ${fullName} (${username}), 老师 ${merchant.teacher_name}`);
+                
+                // 记录用户点击行为到数据库
+                dbOperations.logInteraction(userId, query.from.username, query.from.first_name, query.from.last_name, null, null, 'attack_click', chatId);
+                
+            } catch (error) {
+                console.error('创建尝试预约订单失败:', error);
+                // 继续执行，不影响用户体验
+            }
+            
             // 发送认证提示信息
             const attackMessage = `✅本榜单老师均已通过视频认证，请小鸡们放心预约。
 ————————————————————————————
@@ -860,18 +913,43 @@ function initBotHandlers() {
                     return;
                 }
                 
-                // 确定预约类型的中文描述
+                // 确定预约类型的中文描述和价格
                 let bookTypeText = '';
+                let price = '待确定价格';
                 switch (bookType) {
                     case 'p':
                         bookTypeText = 'p';
+                        price = merchant.price1 || '未设置';
                         break;
                     case 'pp':
                         bookTypeText = 'pp';
+                        price = merchant.price2 || '未设置';
                         break;
                     case 'other':
                         bookTypeText = '其他时长';
+                        price = '其他';
                         break;
+                }
+                
+                // 查找并更新之前创建的"尝试预约"订单
+                try {
+                    // 查找用户最近对该商家的"尝试预约"订单
+                    const recentOrder = dbOperations.getRecentAttemptingOrder(userId, merchantId);
+                    if (recentOrder) {
+                        // 更新订单信息
+                        const updateData = {
+                            course_content: bookTypeText,
+                            price: price,
+                            status: 'pending', // 更新状态为待确认
+                            updated_at: new Date().toISOString()
+                        };
+                        
+                        dbOperations.updateOrderFields(recentOrder.id, updateData);
+                        console.log(`✅ 更新订单成功: 订单ID ${recentOrder.id}, 课程 ${bookTypeText}, 价格 ${price}`);
+                    }
+                } catch (error) {
+                    console.error('更新订单失败:', error);
+                    // 继续执行，不影响用户体验
                 }
                 
                 // 生成联系方式链接
@@ -3857,11 +3935,27 @@ async function handleBookingSuccessFlow(userId, data, query) {
             const bookingSession = dbOperations.getBookingSession(bookingSessionId);
             
             if (bookingSession) {
+                // 查找对应的订单并更新状态
+                const existingOrder = dbOperations.getRecentAttemptingOrder(userId, bookingSession.merchant_id) || 
+                                    dbOperations.getOrderByStatus(userId, bookingSession.merchant_id, 'pending');
                 
-                // 创建后台订单数据
-                const orderId = await createOrderData(bookingSession, userId, query);
+                let orderId;
+                if (existingOrder) {
+                    // 更新现有订单状态
+                    const updateData = {
+                        booking_session_id: bookingSessionId,
+                        status: 'confirmed', // 约课成功
+                        updated_at: new Date().toISOString()
+                    };
+                    dbOperations.updateOrderFields(existingOrder.id, updateData);
+                    orderId = existingOrder.id;
+                    console.log(`✅ 更新订单状态成功: 订单ID ${orderId}, 状态: confirmed`);
+                } else {
+                    // 如果没有找到现有订单，创建新订单（兼容旧逻辑）
+                    orderId = await createOrderData(bookingSession, userId, query);
+                }
                 
-                await sendMessageWithoutDelete(userId, '✅ 约课成功！订单已创建，请等待课程完成确认。', {}, 'booking_success_confirmed');
+                await sendMessageWithoutDelete(userId, '✅ 约课成功！订单已确认，请等待课程完成确认。', {}, 'booking_success_confirmed');
                 
                 // 延迟发送课程完成确认消息
                 setTimeout(async () => {
@@ -3880,6 +3974,22 @@ async function handleBookingSuccessFlow(userId, data, query) {
             
         } else if (data.startsWith('booking_failed_')) {
             const bookingSessionId = data.replace('booking_failed_', '');
+            const bookingSession = dbOperations.getBookingSession(bookingSessionId);
+            
+            if (bookingSession) {
+                // 查找对应的订单并更新状态为失败
+                const existingOrder = dbOperations.getRecentAttemptingOrder(userId, bookingSession.merchant_id) || 
+                                    dbOperations.getOrderByStatus(userId, bookingSession.merchant_id, 'pending');
+                
+                if (existingOrder) {
+                    const updateData = {
+                        status: 'failed', // 约课失败
+                        updated_at: new Date().toISOString()
+                    };
+                    dbOperations.updateOrderFields(existingOrder.id, updateData);
+                    console.log(`✅ 更新订单状态为失败: 订单ID ${existingOrder.id}`);
+                }
+            }
             
             // 清空本轮对话历史
             await clearUserConversation(userId);

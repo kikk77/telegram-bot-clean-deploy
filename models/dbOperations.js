@@ -773,6 +773,39 @@ const dbOperations = {
         return stmt.run(status, new Date().toISOString(), id);
     },
 
+    // 更新订单多个字段
+    updateOrderFields(id, updateData) {
+        const fields = Object.keys(updateData);
+        const setClause = fields.map(field => `${field} = ?`).join(', ');
+        const values = Object.values(updateData);
+        values.push(id);
+        
+        const stmt = db.prepare(`UPDATE orders SET ${setClause} WHERE id = ?`);
+        return stmt.run(...values);
+    },
+
+    // 获取用户最近的"尝试预约"订单
+    getRecentAttemptingOrder(userId, merchantId) {
+        const stmt = db.prepare(`
+            SELECT * FROM orders 
+            WHERE user_id = ? AND merchant_id = ? AND status = 'attempting'
+            ORDER BY created_at DESC 
+            LIMIT 1
+        `);
+        return stmt.get(userId, merchantId);
+    },
+
+    // 获取用户指定状态的订单
+    getOrderByStatus(userId, merchantId, status) {
+        const stmt = db.prepare(`
+            SELECT * FROM orders 
+            WHERE user_id = ? AND merchant_id = ? AND status = ?
+            ORDER BY created_at DESC 
+            LIMIT 1
+        `);
+        return stmt.get(userId, merchantId, status);
+    },
+
     // ===== 评价系统 - 简单高效的数据返回 =====
     
     // 获取所有评价数据（简化版本，只返回基础信息）

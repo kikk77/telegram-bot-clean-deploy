@@ -454,6 +454,8 @@ class ApiService {
                     CASE 
                         WHEN bs.user_course_status = 'completed' THEN 'completed'
                         WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
+                        WHEN o.status = 'attempting' THEN 'attempting'
+                        WHEN o.status = 'failed' THEN 'failed'
                         WHEN o.status = 'cancelled' THEN 'cancelled'
                         ELSE 'pending'
                     END as status,
@@ -464,6 +466,8 @@ class ApiService {
                 GROUP BY CASE 
                     WHEN bs.user_course_status = 'completed' THEN 'completed'
                     WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
+                    WHEN o.status = 'attempting' THEN 'attempting'
+                    WHEN o.status = 'failed' THEN 'failed'
                     WHEN o.status = 'cancelled' THEN 'cancelled'
                     ELSE 'pending'
                 END
@@ -471,9 +475,11 @@ class ApiService {
             `).all(...whereConditions.params);
 
             const statusLabels = {
+                'attempting': '尝试预约',
                 'pending': '待确认',
                 'confirmed': '已确认',
                 'completed': '已完成',
+                'failed': '预约失败',
                 'cancelled': '已取消'
             };
 
@@ -558,6 +564,10 @@ class ApiService {
                     realStatus = 'completed';
                 } else if (order.user_course_status === 'confirmed' || order.status === 'confirmed') {
                     realStatus = 'confirmed';
+                } else if (order.status === 'attempting') {
+                    realStatus = 'attempting';
+                } else if (order.status === 'failed') {
+                    realStatus = 'failed';
                 } else if (order.status === 'cancelled') {
                     realStatus = 'cancelled';
                 }

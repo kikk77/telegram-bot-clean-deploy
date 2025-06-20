@@ -714,9 +714,11 @@ class OptimizedOrdersManager {
 
     getStatusText(status) {
         const statusMap = {
+            'attempting': '尝试预约',
             'pending': '待确认',
             'confirmed': '已确认', 
             'completed': '已完成',
+            'failed': '预约失败',
             'cancelled': '已取消'
         };
         return statusMap[status] || status;

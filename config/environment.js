@@ -74,8 +74,14 @@ function validateConfig() {
     
     if (missing.length > 0) {
         console.error(`❌ 缺少必需的环境变量: ${missing.join(', ')}`);
+        console.error(`💡 请在Railway Variables中设置这些环境变量`);
+        
         if (nodeEnv === 'production') {
-            process.exit(1);
+            console.error(`⚠️ 生产环境缺少必需环境变量，部分功能可能不可用`);
+            console.error(`🔧 请登录Railway控制台设置环境变量后重新部署`);
+            // 不直接退出，让健康检查服务继续运行
+            // process.exit(1);
+            throw new Error(`缺少必需的环境变量: ${missing.join(', ')}`);
         } else {
             console.warn(`⚠️ 在${nodeEnv}环境中缺少环境变量，继续运行...`);
         }
@@ -128,6 +134,105 @@ function isDevelopment() {
     return nodeEnv === 'development';
 }
 
+// 启动完整应用服务
+async function startApp() {
+    console.log('🤖 Telegram营销机器人启动中...');
+    
+    try {
+        // 检查环境变量但不强制要求全部配置
+        let hasRequiredVars = true;
+        try {
+            validateConfig();
+        } catch (error) {
+            console.warn('⚠️ 环境变量验证失败:', error.message);
+            hasRequiredVars = false;
+        }
+        
+        displayConfig();
+        
+        // 导入并初始化数据库
+        const { initDatabase } = require('./database');
+        const { initBasicData } = require('../utils/initData');
+        
+        // 初始化数据库
+        initDatabase();
+        
+        // 初始化基础数据（仅地区配置）
+        initBasicData();
+        
+        // 始终启动HTTP服务器和管理后台
+        const { createHttpServer } = require('../services/httpService');
+        createHttpServer();
+        
+        console.log('✅ 基础服务初始化完成！');
+        console.log('🎯 基础服务状态:');
+        console.log('   - HTTP服务器: 运行中');
+        console.log('   - 管理后台: 可用 (/admin)');
+        console.log('   - API接口: 可用 (/api/*)');
+        console.log('   - 健康检查: 可用 (/health)');
+        console.log('   - 数据库: 已初始化');
+        
+        // 如果环境变量配置完整，继续加载Bot相关功能
+        if (hasRequiredVars && process.env.BOT_TOKEN) {
+            console.log('🤖 启动Telegram Bot相关功能...');
+            
+            const { loadCacheData, initBotHandlers, bot } = require('../services/botService');
+            const { initScheduler } = require('../services/schedulerService');
+            
+            // 加载缓存数据
+            await loadCacheData();
+            
+            // 初始化Bot事件监听
+            initBotHandlers();
+            
+            // 设置全局Bot服务实例，供HTTP API使用
+            global.botService = { bot };
+            
+            // 启动定时任务调度器
+            initScheduler();
+            
+            console.log('✅ 完整功能启动完成！');
+            console.log('🎯 Bot功能列表:');
+            console.log('   - 商家绑定系统');
+            console.log('   - 按钮点击跳转私聊');
+            console.log('   - 触发词自动回复');
+            console.log('   - 定时发送消息');
+            console.log('   - 消息模板管理');
+        } else {
+            console.log('⚠️ Bot功能未启动 - 环境变量不完整');
+            console.log('💡 管理后台仍然可用，请在Railway Variables中设置以下变量:');
+            console.log('   - BOT_TOKEN: Telegram Bot的访问令牌');
+            console.log('   - BOT_USERNAME: Bot的用户名');
+            console.log('   - GROUP_CHAT_ID: 群组聊天ID（可选）');
+            
+            // 设置一个空的Bot服务，避免API调用报错
+            global.botService = { 
+                bot: {
+                    sendMessage: () => Promise.reject(new Error('Bot服务未启动，请配置BOT_TOKEN')),
+                    sendPhoto: () => Promise.reject(new Error('Bot服务未启动，请配置BOT_TOKEN'))
+                }
+            };
+        }
+        
+        console.log('\n🚀 应用启动完成！');
+        console.log(`📱 管理后台访问地址: /admin`);
+        
+    } catch (error) {
+        console.error('❌ 应用启动失败:', error);
+        console.log('⚠️ 尝试启动最小化服务...');
+        
+        // 尝试至少启动HTTP服务器
+        try {
+            const { createHttpServer } = require('../services/httpService');
+            createHttpServer();
+            console.log('✅ 最小化HTTP服务器已启动');
+        } catch (httpError) {
+            console.error('❌ 连最小化服务器都无法启动:', httpError);
+            throw error; // 重新抛出错误，让调用者处理
+        }
+    }
+}
+
 module.exports = {
     config,
     nodeEnv,
@@ -137,5 +242,6 @@ module.exports = {
     isDeployment,
     isProduction,
     isStaging,
-    isDevelopment
+    isDevelopment,
+    startApp
 }; 

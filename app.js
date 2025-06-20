@@ -1,66 +1,107 @@
 // 加载环境变量
 require('dotenv').config();
 
-// 导入环境配置
-const { config, validateConfig, displayConfig } = require('./config/environment');
+// 导入依赖
+const { startApp } = require('./config/environment');
 
-// 验证和显示配置
-validateConfig();
-displayConfig();
+// 创建HTTP服务器 - 包含健康检查
+const http = require('http');
+const PORT = process.env.PORT || 3000;
 
-// 导入模块
-const { initDatabase } = require('./config/database');
-const { initBasicData } = require('./utils/initData');
-const { loadCacheData, initBotHandlers, bot } = require('./services/botService');
-const { initScheduler } = require('./services/schedulerService');
-const { createHttpServer } = require('./services/httpService');
+console.log(`🚀 启动环境: ${process.env.NODE_ENV || 'development'}`);
+console.log(`📡 服务端口: ${PORT}`);
 
-// 启动函数
-async function start() {
-    console.log('🤖 Telegram营销机器人启动中...');
+// 创建一个简单的HTTP服务器处理健康检查
+const server = http.createServer((req, res) => {
+    const url = req.url;
+    console.log(`📥 HTTP请求: ${req.method} ${url} - ${new Date().toISOString()}`);
     
-    // 初始化数据库
-    initDatabase();
+    // CORS头
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     
-    // 初始化基础数据（仅地区配置）
-    initBasicData();
+    if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+    }
     
-    // 加载缓存数据
-    await loadCacheData();
+    if (url === '/health' || url === '/') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            environment: process.env.NODE_ENV || 'development',
+            port: PORT,
+            service: 'telegram-marketing-bot'
+        }));
+    } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not Found', availableEndpoints: ['/health'] }));
+    }
+});
+
+// 立即启动HTTP服务器
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ HTTP服务器已启动在端口 ${PORT}`);
+    console.log(`🩺 健康检查可用: http://localhost:${PORT}/health`);
     
-    // 初始化Bot事件监听
-    initBotHandlers();
-    
-    // 设置全局Bot服务实例，供HTTP API使用
-    global.botService = { bot };
-    
-    // 启动定时任务调度器
-    initScheduler();
-    
-    // 启动HTTP服务器
-    createHttpServer();
-    
-    console.log('✅ 所有服务启动完成！');
-    console.log('🎯 功能列表:');
-    console.log('   - 商家绑定系统');
-    console.log('   - 按钮点击跳转私聊');
-    console.log('   - 触发词自动回复');
-    console.log('   - 定时发送消息');
-    console.log('   - 消息模板管理');
-    console.log('   - 完整管理后台');
+    // 延迟启动完整应用，确保健康检查优先响应
+    setTimeout(() => {
+        console.log(`🔄 开始启动完整应用服务...`);
+        startFullApplication();
+    }, 2000);
+});
+
+// 启动完整应用服务
+async function startFullApplication() {
+    try {
+        // 关闭临时健康检查服务器
+        server.close(() => {
+            console.log(`🔄 临时健康检查服务器已关闭，启动完整服务...`);
+        });
+        
+        // 启动完整的应用（包括HTTP服务器、Bot服务、API等）
+        await startApp();
+        
+    } catch (error) {
+        console.error(`❌ 完整应用启动失败:`, error);
+        // 即使完整应用启动失败，保持健康检查服务运行
+        if (server.listening) {
+            console.log(`🩺 保持健康检查服务运行...`);
+        } else {
+            // 重新启动简单的健康检查服务器
+            const backupServer = http.createServer((req, res) => {
+                if (req.url === '/health' || req.url === '/') {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ 
+                        status: 'partial', 
+                        error: 'Full application failed to start',
+                        timestamp: new Date().toISOString(),
+                        service: 'telegram-marketing-bot'
+                    }));
+                } else {
+                    res.writeHead(404);
+                    res.end('Not Found');
+                }
+            });
+            
+            backupServer.listen(PORT, '0.0.0.0', () => {
+                console.log(`🆘 备用健康检查服务器已启动在端口 ${PORT}`);
+            });
+        }
+    }
 }
 
-// 错误处理
-process.on('uncaughtException', (error) => {
-    console.error('未捕获的异常:', error);
+// 优雅关闭处理
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully...');
+    process.exit(0);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('未处理的Promise拒绝:', reason);
-});
-
-// 启动应用
-start().catch(error => {
-    console.error('应用启动失败:', error);
-    process.exit(1);
+process.on('SIGINT', () => {
+    console.log('SIGINT received, shutting down gracefully...');
+    process.exit(0);
 }); 

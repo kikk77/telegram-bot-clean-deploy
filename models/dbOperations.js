@@ -2,20 +2,37 @@ const { db, cache } = require('../config/database');
 
 // 数据库操作函数
 const dbOperations = {
-    // 绑定码操作
+    // 绑定码操作 - 统一的绑定码管理逻辑
     generateBindCode() {
-        return Math.random().toString(36).substring(2, 8).toUpperCase();
+        let code;
+        let attempts = 0;
+        const maxAttempts = 100;
+        
+        do {
+            code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            attempts++;
+            
+            if (attempts > maxAttempts) {
+                throw new Error('无法生成唯一绑定码，请重试');
+            }
+            
+            // 检查是否已存在
+            const existing = db.prepare('SELECT id FROM bind_codes WHERE code = ?').get(code);
+            if (!existing) break;
+        } while (true);
+        
+        return code;
     },
 
     createBindCode(description) {
         const code = this.generateBindCode();
-        const stmt = db.prepare('INSERT INTO bind_codes (code, description) VALUES (?, ?)');
+        const stmt = db.prepare('INSERT INTO bind_codes (code, description, used, created_at) VALUES (?, ?, 0, strftime(\'%s\', \'now\'))');
         const result = stmt.run(code, description);
         return { id: result.lastInsertRowid, code };
     },
 
     getBindCode(code) {
-        const stmt = db.prepare('SELECT * FROM bind_codes WHERE code = ? AND used = 0');
+        const stmt = db.prepare('SELECT * FROM bind_codes WHERE code = ?');
         return stmt.get(code);
     },
 
@@ -26,23 +43,169 @@ const dbOperations = {
 
     getAllBindCodes() {
         const stmt = db.prepare(`
-            SELECT bc.*, m.teacher_name, m.username 
+            SELECT 
+                bc.id,
+                bc.code,
+                bc.description,
+                bc.used,
+                bc.used_by,
+                bc.used_at,
+                bc.created_at,
+                m.teacher_name,
+                m.username
             FROM bind_codes bc 
-            LEFT JOIN merchants m ON bc.used_by = m.user_id 
+            LEFT JOIN merchants m ON bc.used_by = m.user_id AND bc.used = 1
             ORDER BY bc.created_at DESC
         `);
         return stmt.all();
     },
 
+    // 标记绑定码为已使用 - 统一方法
     useBindCode(code, userId) {
-        const stmt = db.prepare('UPDATE bind_codes SET used = 1, used_by = ?, used_at = strftime(\'%s\', \'now\') WHERE code = ? AND used = 0');
-        const result = stmt.run(userId, code);
-        return result.changes > 0;
+        const transaction = db.transaction(() => {
+            // 检查绑定码是否存在且未使用
+            const bindCode = db.prepare('SELECT * FROM bind_codes WHERE code = ?').get(code);
+            if (!bindCode) {
+                throw new Error('绑定码不存在');
+            }
+            if (bindCode.used) {
+                throw new Error('绑定码已被使用');
+            }
+            
+            // 标记为已使用
+            const stmt = db.prepare('UPDATE bind_codes SET used = 1, used_by = ?, used_at = strftime(\'%s\', \'now\') WHERE code = ?');
+            const result = stmt.run(userId, code);
+            
+            if (result.changes === 0) {
+                throw new Error('标记绑定码失败');
+            }
+            
+            return true;
+        });
+        
+        return transaction();
+    },
+
+    // 检查绑定码是否已使用 - 统一检查方法
+    isBindCodeUsed(code) {
+        const stmt = db.prepare('SELECT used, used_by FROM bind_codes WHERE code = ?');
+        const result = stmt.get(code);
+        return result ? { used: result.used === 1, usedBy: result.used_by } : null;
     },
 
     deleteBindCode(id) {
         const stmt = db.prepare('DELETE FROM bind_codes WHERE id = ?');
         return stmt.run(id);
+    },
+
+    // 检查绑定码的使用状态和依赖关系
+    checkBindCodeDependencies(id) {
+        const bindCode = this.getBindCodeById(id);
+        if (!bindCode) {
+            return { exists: false };
+        }
+        
+        // 检查是否有商家使用此绑定码
+        const merchant = db.prepare('SELECT id, teacher_name, username FROM merchants WHERE bind_code = ?').get(bindCode.code);
+        
+        return {
+            exists: true,
+            used: bindCode.used === 1,
+            usedBy: bindCode.used_by,
+            merchant: merchant,
+            canDelete: !bindCode.used && !merchant
+        };
+    },
+
+    // 强制删除绑定码及相关商家记录
+    forceDeleteBindCode(id) {
+        const transaction = db.transaction(() => {
+            const bindCode = this.getBindCodeById(id);
+            if (!bindCode) {
+                throw new Error('绑定码不存在');
+            }
+            
+            // 删除使用此绑定码的商家记录
+            const merchant = db.prepare('SELECT id FROM merchants WHERE bind_code = ?').get(bindCode.code);
+            let deletedMerchant = false;
+            
+            if (merchant) {
+                // 删除商家相关的所有数据
+                db.prepare('DELETE FROM orders WHERE merchant_id = ?').run(merchant.id);
+                db.prepare('DELETE FROM booking_sessions WHERE merchant_id = ?').run(merchant.id);
+                db.prepare('DELETE FROM merchants WHERE id = ?').run(merchant.id);
+                deletedMerchant = true;
+                
+                // 清理相关缓存
+                cache.set('all_merchants', null);
+                cache.set('active_merchants', null);
+            }
+            
+            // 删除绑定码
+            this.deleteBindCode(id);
+            
+            return { deletedMerchant };
+        });
+        
+        return transaction();
+    },
+
+    // 修复绑定码数据一致性
+    repairBindCodeConsistency() {
+        const transaction = db.transaction(() => {
+            console.log('🔧 开始修复绑定码数据一致性...');
+            
+            // 1. 查找商家使用但不存在的绑定码
+            const orphanBindCodes = db.prepare(`
+                SELECT DISTINCT m.bind_code, m.teacher_name, m.username
+                FROM merchants m 
+                LEFT JOIN bind_codes bc ON m.bind_code = bc.code 
+                WHERE m.bind_code IS NOT NULL AND bc.code IS NULL
+            `).all();
+            
+            let createdCount = 0;
+            for (const orphan of orphanBindCodes) {
+                // 创建缺失的绑定码记录
+                db.prepare('INSERT INTO bind_codes (code, description, used, used_by, used_at, created_at) VALUES (?, ?, 1, (SELECT user_id FROM merchants WHERE bind_code = ? LIMIT 1), strftime(\'%s\', \'now\'), strftime(\'%s\', \'now\'))').run(
+                    orphan.bind_code,
+                    `系统修复: ${orphan.teacher_name} (@${orphan.username})`,
+                    orphan.bind_code
+                );
+                createdCount++;
+                console.log(`✅ 创建缺失的绑定码: ${orphan.bind_code} (${orphan.teacher_name})`);
+            }
+            
+            // 2. 修复绑定码状态不一致的问题
+            const inconsistentBindCodes = db.prepare(`
+                SELECT bc.id, bc.code, bc.used, bc.used_by, m.user_id as merchant_user_id
+                FROM bind_codes bc
+                LEFT JOIN merchants m ON bc.code = m.bind_code
+                WHERE (bc.used = 0 AND m.bind_code IS NOT NULL) OR (bc.used = 1 AND bc.used_by != m.user_id)
+            `).all();
+            
+            let fixedCount = 0;
+            for (const inconsistent of inconsistentBindCodes) {
+                if (inconsistent.merchant_user_id) {
+                    // 有商家使用，更新绑定码状态
+                    db.prepare('UPDATE bind_codes SET used = 1, used_by = ?, used_at = strftime(\'%s\', \'now\') WHERE id = ?').run(
+                        inconsistent.merchant_user_id,
+                        inconsistent.id
+                    );
+                    fixedCount++;
+                    console.log(`✅ 修复绑定码状态: ${inconsistent.code} -> 已使用`);
+                }
+            }
+            
+            console.log(`🎉 绑定码一致性修复完成: 创建 ${createdCount} 个，修复 ${fixedCount} 个`);
+            return { 
+                success: true,
+                message: `创建 ${createdCount} 个，修复 ${fixedCount} 个`,
+                created: createdCount, 
+                fixed: fixedCount 
+            };
+        });
+        
+        return transaction();
     },
 
     // 地区操作
@@ -969,7 +1132,7 @@ const dbOperations = {
 
     updateOrderEvaluation(id, userEvaluation, merchantEvaluation) {
         const stmt = db.prepare('UPDATE orders SET user_evaluation = ?, merchant_evaluation = ?, updated_at = ? WHERE id = ?');
-        return stmt.run(userEvaluation, merchantEvaluation, new Date().toISOString(), id);
+        return stmt.run(userEvaluation, merchantEvaluation, Math.floor(Date.now() / 1000), id);
     },
 
     updateOrderReport(id, reportContent) {
@@ -979,7 +1142,7 @@ const dbOperations = {
 
     updateOrderStatus(id, status) {
         const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?');
-        return stmt.run(status, new Date().toISOString(), id);
+        return stmt.run(status, Math.floor(Date.now() / 1000), id);
     },
 
     // 更新订单多个字段

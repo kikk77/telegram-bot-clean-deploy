@@ -971,8 +971,20 @@
             }
         }
 
-        // 删除绑定码
+        // 删除绑定码 - 需要管理员密码验证
         async function deleteBindCode(id) {
+            // 首先检查绑定码状态
+            const bindCode = bindCodes.find(bc => bc.id === id);
+            if (!bindCode) {
+                showAlert('绑定码不存在', 'error');
+                return;
+            }
+            
+            if (bindCode.used) {
+                showAlert('已使用的绑定码无法删除，请使用强制删除功能', 'error');
+                return;
+            }
+            
             if (!confirm('确定要删除这个绑定码吗？')) return;
 
             try {
@@ -1003,12 +1015,25 @@
             }
         }
 
-        // 强制删除已使用的绑定码
+        // 强制删除已使用的绑定码 - 需要管理员密码验证
         async function forceDeleteBindCode(id) {
             // 如果是从deleteBindCode调用的，不需要再次确认
             const needConfirm = arguments.length === 1;
             
             if (needConfirm && !confirm('确定要强制删除这个已使用的绑定码吗？\n⚠️ 注意：这将同时删除相关的商家记录！')) {
+                return;
+            }
+
+            // 要求输入管理员密码
+            const adminPassword = prompt('⚠️ 强制删除需要管理员密码验证\n请输入管理员密码:');
+            if (!adminPassword) {
+                showAlert('操作已取消', 'info');
+                return;
+            }
+            
+            // 简单的密码验证（实际项目中应该使用更安全的方式）
+            if (adminPassword !== '9229') {
+                showAlert('管理员密码错误！', 'error');
                 return;
             }
 
@@ -1563,12 +1588,22 @@
                     description: '商家编辑-手动生成'
                 });
                 
-                if (response.success && response.data && response.data.code) {
-                    document.getElementById('editBindCode').value = response.data.code;
-                    showAlert('新绑定码生成成功', 'success');
+                // 使用与绑定码管理页面完全相同的响应处理逻辑
+                let bindCode = null;
+                if (response && response.success && response.data && response.data.code) {
+                    bindCode = response.data.code;
+                } else if (response && response.code) {
+                    bindCode = response.code;
                 } else {
-                    throw new Error('生成绑定码失败：响应格式错误');
+                    console.error('响应格式错误:', response);
+                    throw new Error('生成绑定码失败：服务器响应格式错误');
                 }
+                
+                document.getElementById('editBindCode').value = bindCode;
+                showAlert('新绑定码生成成功', 'success');
+                
+                // 刷新绑定码列表以保持数据同步
+                await loadBindCodes();
             } catch (error) {
                 console.error('生成绑定码失败:', error);
                 showAlert('生成绑定码失败: ' + error.message, 'error');
@@ -2524,18 +2559,30 @@
             document.getElementById('newMerchantModal').style.display = 'none';
         }
 
-        // 创建新商家
+        // 创建新商家 - 强制要求商家名称和用户名
         async function createNewMerchant(event) {
             event.preventDefault();
             showLoading();
             
             try {
-                const name = document.getElementById('newMerchantName').value;
-                const username = document.getElementById('newMerchantUsername').value;
-                const bindCode = document.getElementById('newMerchantBindCode').value;
+                const name = document.getElementById('newMerchantName').value.trim();
+                const username = document.getElementById('newMerchantUsername').value.trim();
+                const bindCode = document.getElementById('newMerchantBindCode').value.trim();
                 
-                if (!name || !username) {
-                    throw new Error('请填写商家名称和用户名');
+                // 强制验证必填字段
+                if (!name) {
+                    throw new Error('商家名称不能为空！');
+                }
+                if (!username) {
+                    throw new Error('用户名不能为空！');
+                }
+                
+                // 验证用户名格式
+                if (username.includes('@')) {
+                    throw new Error('用户名不需要包含@符号，请直接输入用户名');
+                }
+                if (username.length < 3) {
+                    throw new Error('用户名长度不能少于3个字符');
                 }
                 
                 const requestData = {

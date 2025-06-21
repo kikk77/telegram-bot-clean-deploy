@@ -611,10 +611,14 @@ function initBotHandlers() {
                 return;
             }
             
-            // 验证绑定码
+            // 验证绑定码 - 使用统一的验证逻辑
             const bindCode = dbOperations.getBindCode(code);
             if (!bindCode) {
-                bot.sendMessage(chatId, '❌ 绑定码无效或已被使用');
+                bot.sendMessage(chatId, '❌ 绑定码不存在');
+                return;
+            }
+            if (bindCode.used) {
+                bot.sendMessage(chatId, '❌ 绑定码已被使用');
                 return;
             }
             
@@ -2542,9 +2546,27 @@ async function handleUserEvaluationConfirm(userId, data, query) {
             // 检查是否有文字评价
             const textComment = scores.textComment || null;
             
-            // 只在这里进行一次数据库写入
+            // 保存到新的evaluations表
             dbOperations.updateEvaluation(evaluationId, null, scores, textComment, 'completed');
-            console.log(`📝 评价数据已保存到数据库: ${evaluationId}`, scores);
+            console.log(`📝 评价数据已保存到evaluations表: ${evaluationId}`, scores);
+            
+            // 兼容性：同时更新orders表中的用户评价字段
+            const evaluation = dbOperations.getEvaluation(evaluationId);
+            if (evaluation && evaluation.booking_session_id) {
+                const order = dbOperations.getOrderByBookingSession(evaluation.booking_session_id);
+                if (order) {
+                    const evaluationData = JSON.stringify({
+                        scores: scores,
+                        textComment: textComment,
+                        created_at: Math.floor(Date.now() / 1000)
+                    });
+                    dbOperations.updateOrderFields(order.id, {
+                        user_evaluation: evaluationData,
+                        updated_at: Math.floor(Date.now() / 1000)
+                    });
+                    console.log(`📝 兼容性：用户评价数据已同步到orders表，订单ID: ${order.id}`);
+                }
+            }
             
             if (textComment) {
                 console.log(`📝 用户文字评价: "${textComment}"`);
@@ -2639,8 +2661,27 @@ async function handleMerchantDetailCommentInput(userId, text, evalSession) {
         const existingEvaluation = evaluationService.getEvaluation(evaluationId);
         const existingOverallScore = existingEvaluation ? existingEvaluation.overall_score : null;
         
-        // 直接提交评价到数据库
+        // 提交评价到新的evaluations表
         evaluationService.updateEvaluation(evaluationId, existingOverallScore, tempData, text, 'completed');
+        
+        // 兼容性：同时更新orders表中的商家评价字段
+        const evaluation = evaluationService.getEvaluation(evaluationId);
+        if (evaluation && evaluation.booking_session_id) {
+            const order = dbOperations.getOrderByBookingSession(evaluation.booking_session_id);
+            if (order) {
+                const evaluationData = JSON.stringify({
+                    overall_score: existingOverallScore,
+                    scores: tempData,
+                    textComment: text,
+                    created_at: Math.floor(Date.now() / 1000)
+                });
+                dbOperations.updateOrderFields(order.id, {
+                    merchant_evaluation: evaluationData,
+                    updated_at: Math.floor(Date.now() / 1000)
+                });
+                console.log(`📝 兼容性：商家评价数据已同步到orders表，订单ID: ${order.id}`);
+            }
+        }
         
         // 删除评价会话
         dbOperations.deleteEvaluationSession(evalSession.id);
@@ -2880,7 +2921,7 @@ async function handleMerchantEvaluationConfirm(userId, data, query) {
             console.log('解析score:', score, typeof score);
             console.log('解析evaluationId:', evaluationId);
             
-            // 保存评分
+            // 保存评分到新的evaluations表
             console.log('调用updateEvaluation保存总体评分');
             try {
                 const result = evaluationService.updateEvaluation(evaluationId, score, null, null, 'overall_completed');
@@ -2889,6 +2930,24 @@ async function handleMerchantEvaluationConfirm(userId, data, query) {
                 // 验证保存是否成功
                 const savedEval = evaluationService.getEvaluation(evaluationId);
                 console.log('保存后的评价数据:', savedEval);
+                
+                // 兼容性：同时更新orders表中的商家评价字段
+                if (savedEval && savedEval.booking_session_id) {
+                    const order = dbOperations.getOrderByBookingSession(savedEval.booking_session_id);
+                    if (order) {
+                        const evaluationData = JSON.stringify({
+                            overall_score: score,
+                            scores: {},
+                            textComment: null,
+                            created_at: Math.floor(Date.now() / 1000)
+                        });
+                        dbOperations.updateOrderFields(order.id, {
+                            merchant_evaluation: evaluationData,
+                            updated_at: Math.floor(Date.now() / 1000)
+                        });
+                        console.log(`📝 兼容性：商家总体评分已同步到orders表，订单ID: ${order.id}`);
+                    }
+                }
                 
             } catch (error) {
                 console.error('保存总体评分失败:', error);
@@ -4174,24 +4233,26 @@ async function createOrderData(bookingSession, userId, query) {
                 break;
         }
         
-        // 创建订单数据
+        // 创建订单数据 - 确保与商家绑定流程兼容
         const orderData = {
             booking_session_id: bookingSession.id,
             user_id: userId,
             user_name: userFullName,
             user_username: username,
             merchant_id: merchant.id,
+            merchant_user_id: merchant.user_id, // 确保包含商家的真实用户ID
             teacher_name: merchant.teacher_name,
             teacher_contact: merchant.contact,
+            course_type: bookingSession.course_type, // 确保课程类型正确
             course_content: courseContent,
-            price: price,
-            booking_time: new Date().toISOString(),
+            price_range: price,
+            actual_price: null, // 实际价格待后续确定
             status: 'confirmed', // 约课成功
             user_evaluation: null, // 将来填入用户评价
             merchant_evaluation: null, // 将来填入商家评价
             report_content: null, // 将来填入报告内容
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            created_at: Math.floor(Date.now() / 1000), // 使用Unix时间戳保持一致性
+            updated_at: Math.floor(Date.now() / 1000)
         };
         
         // 保存到数据库

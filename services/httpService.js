@@ -315,57 +315,30 @@ async function processApiRequest(pathname, method, data) {
             const result = dbOperations.createBindCode(data.description);
             await safeLoadCacheData();
             return { success: true, data: result };
-        } else if (method === 'DELETE') {
-            try {
-                // 检查绑定码是否存在
-                const bindCode = dbOperations.getBindCodeById(data.id);
-                if (!bindCode) {
-                    return { success: false, error: '绑定码不存在' };
-                }
-                
-                // 检查是否已被使用
-                if (bindCode.used_by) {
-                    return { 
-                        success: false, 
-                        error: '绑定码已被使用，无法删除。如需强制删除，请使用强制删除功能。',
-                        code: 'BIND_CODE_IN_USE'
-                    };
-                }
-                
-                // 删除未使用的绑定码
-                const result = dbOperations.deleteBindCode(data.id);
-                await safeLoadCacheData();
-                
-                return { 
-                    success: true, 
-                    message: '绑定码删除成功',
-                    deletedCount: result.changes
-                };
-            } catch (error) {
-                console.error('删除绑定码失败:', error);
-                return { success: false, error: error.message };
-            }
         }
     }
 
     // 处理单个绑定码的删除和强制删除
     if (pathname.match(/^\/api\/bind-codes\/\d+$/)) {
-        const bindCodeId = pathname.split('/')[3];
+        const bindCodeId = parseInt(pathname.split('/')[3]);
         
         if (method === 'DELETE') {
             try {
-                // 检查绑定码是否存在
-                const bindCode = dbOperations.getBindCodeById(bindCodeId);
-                if (!bindCode) {
+                // 使用统一的依赖检查方法
+                const dependencies = dbOperations.checkBindCodeDependencies(bindCodeId);
+                
+                if (!dependencies.exists) {
                     return { success: false, error: '绑定码不存在' };
                 }
                 
-                // 检查是否已被使用
-                if (bindCode.used_by) {
+                if (!dependencies.canDelete) {
                     return { 
                         success: false, 
-                        error: '绑定码已被使用，无法删除。如需强制删除，请使用强制删除功能。',
-                        code: 'BIND_CODE_IN_USE'
+                        error: dependencies.merchant 
+                            ? `绑定码已被商家 ${dependencies.merchant.teacher_name} 使用，无法删除。如需强制删除，请使用强制删除功能。`
+                            : '绑定码已被使用，无法删除。如需强制删除，请使用强制删除功能。',
+                        code: 'BIND_CODE_IN_USE',
+                        merchant: dependencies.merchant
                     };
                 }
                 
@@ -387,36 +360,17 @@ async function processApiRequest(pathname, method, data) {
 
     // 强制删除绑定码API
     if (pathname.match(/^\/api\/bind-codes\/\d+\/force$/)) {
-        const bindCodeId = pathname.split('/')[3];
+        const bindCodeId = parseInt(pathname.split('/')[3]);
         
         if (method === 'DELETE') {
             try {
-                // 检查绑定码是否存在
-                const bindCode = dbOperations.getBindCodeById(bindCodeId);
-                if (!bindCode) {
-                    return { success: false, error: '绑定码不存在' };
-                }
-                
-                let deletedMerchant = false;
-                
-                // 查找使用此绑定码的商家（无论绑定码是否标记为已使用）
-                const { db } = require('../config/database');
-                const merchant = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(bindCode.code);
-                if (merchant) {
-                    console.log(`强制删除绑定码：同时删除关联的商家 ID: ${merchant.id} (${merchant.teacher_name})`);
-                    dbOperations.deleteMerchant(merchant.id);
-                    deletedMerchant = true;
-                }
-                
-                // 删除绑定码
-                const result = dbOperations.deleteBindCode(bindCodeId);
+                const result = dbOperations.forceDeleteBindCode(bindCodeId);
                 await safeLoadCacheData();
                 
                 return { 
                     success: true, 
-                    message: deletedMerchant ? '已强制删除绑定码及相关商家记录' : '绑定码删除成功',
-                    deletedCount: result.changes,
-                    deletedMerchant
+                    message: result.deletedMerchant ? '绑定码及相关商家记录已强制删除' : '绑定码已删除',
+                    deletedMerchant: result.deletedMerchant
                 };
             } catch (error) {
                 console.error('强制删除绑定码失败:', error);
@@ -520,13 +474,13 @@ async function processApiRequest(pathname, method, data) {
                 // 如果提供了绑定码，验证其有效性
                 if (data.bind_code) {
                     bindCodeRecord = dbOperations.getBindCode(data.bind_code);
-                    if (!bindCodeRecord) {
+                    if (!bindCodeRecord || bindCodeRecord.used) {
                         return { success: false, error: '提供的绑定码无效或已被使用' };
                     }
                     bindCode = data.bind_code;
                 } else {
                     // 如果没有提供绑定码，自动创建一个
-                    bindCodeRecord = dbOperations.createBindCode(`管理员创建: ${data.teacher_name}`);
+                    bindCodeRecord = dbOperations.createBindCode(`管理员创建: ${data.teacher_name} (@${data.username})`);
                     if (!bindCodeRecord) {
                         return { success: false, error: '创建绑定码失败' };
                     }

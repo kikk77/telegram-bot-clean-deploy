@@ -176,7 +176,7 @@ async function startApp() {
         if (hasRequiredVars && process.env.BOT_TOKEN) {
             console.log('🤖 启动Telegram Bot相关功能...');
             
-            const { loadCacheData, initBotHandlers, bot } = require('../services/botService');
+            const { loadCacheData, initBotHandlers, bot, getBotUsername } = require('../services/botService');
             const { initScheduler } = require('../services/schedulerService');
             
             // 加载缓存数据
@@ -185,8 +185,16 @@ async function startApp() {
             // 初始化Bot事件监听
             initBotHandlers();
             
+            // 预先获取Bot用户名并缓存
+            try {
+                const botUsername = await getBotUsername();
+                console.log(`✅ Bot用户名预获取成功: @${botUsername}`);
+            } catch (error) {
+                console.warn('⚠️ Bot用户名预获取失败:', error.message);
+            }
+            
             // 设置全局Bot服务实例，供HTTP API使用
-            global.botService = { bot };
+            global.botService = { bot, getBotUsername };
             
             // 启动定时任务调度器
             initScheduler();

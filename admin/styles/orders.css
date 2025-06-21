@@ -272,9 +272,9 @@
 }
 
 .status-confirmed {
-    background: #d1ecf1;
-    color: #0c5460;
-    border: 1px solid #bee5eb;
+    background: #cce5ff;
+    color: #004085;
+    border: 1px solid #99d6ff;
 }
 
 .status-completed {
@@ -283,10 +283,16 @@
     border: 1px solid #c3e6cb;
 }
 
+.status-incomplete {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
 .status-attempting {
-    background: #e2e3f4;
-    color: #4b4b8b;
-    border: 1px solid #b7b9d1;
+    background: #e8f4fd;
+    color: #0c5460;
+    border: 1px solid #b8daff;
 }
 
 .status-failed {
@@ -296,9 +302,9 @@
 }
 
 .status-cancelled {
-    background: #e2e3e4;
-    color: #5a6c7d;
-    border: 1px solid #b1bcc7;
+    background: #f0f0f0;
+    color: #6c757d;
+    border: 1px solid #d6d8db;
 }
 
 /* 评价状态样式 */
@@ -1235,11 +1241,186 @@
     
     .scores-grid {
         grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .score-column {
+        gap: 0.5rem;
     }
     
     .overall-score {
         flex-direction: column;
         gap: 0.5rem;
         text-align: center;
+    }
+
+    .evaluation-section {
+        padding: 0 1rem;
+    }
+
+    .score-item {
+        padding: 0.5rem;
+    }
+}
+
+/* 评价区域样式 */
+.evaluation-section {
+    margin: 2rem 0;
+    padding: 0 2rem;
+}
+
+.section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 0 0 1.5rem 0;
+    font-size: 1.25rem;
+    color: #2c3e50;
+    font-weight: 600;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.evaluation-time {
+    font-size: 0.875rem;
+    color: #6c757d;
+    font-weight: 400;
+    margin-left: auto;
+}
+
+.section-icon {
+    font-size: 1.5rem;
+}
+
+.evaluation-scores-card {
+    margin-bottom: 1.5rem;
+}
+
+.evaluation-comments-card {
+    margin-bottom: 1.5rem;
+}
+
+/* 评分网格布局 - 两列布局，左边6项右边6项 */
+.scores-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin: 1rem 0;
+}
+
+.score-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.score-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+    transition: all 0.2s ease;
+}
+
+.score-item:hover {
+    background: #e9ecef;
+    transform: translateY(-1px);
+}
+
+.score-label {
+    font-weight: 500;
+    color: #495057;
+}
+
+.score-value {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 1.1em;
+}
+
+/* 评价内容样式 */
+.comment-content {
+    padding: 1rem 0;
+}
+
+.comment-text {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 1rem;
+    line-height: 1.6;
+    color: #495057;
+    min-height: 3rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.comment-text.no-comment {
+    color: #6c757d;
+    font-style: italic;
+    text-align: center;
+}
+
+.comment-time {
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    color: #6c757d;
+    text-align: right;
+}
+
+/* 复制按钮样式 */
+.comment-actions {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.copy-evaluation-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.copy-evaluation-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+}
+
+.copy-evaluation-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.copy-evaluation-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.4);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    .comment-actions {
+        justify-content: center;
+    }
+    
+    .copy-evaluation-btn {
+        width: 100%;
+        justify-content: center;
     }
 } 

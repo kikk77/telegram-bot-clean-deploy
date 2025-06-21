@@ -377,6 +377,9 @@ class OptimizedOrdersManager {
                 throw new Error(`未知图表类型: ${chartId}`);
         }
         
+        // 添加调试信息
+        console.log(`图表 ${chartId} 数据:`, response);
+        
         // 处理API返回的数据格式
         return response.data || response;
     }
@@ -414,18 +417,32 @@ class OptimizedOrdersManager {
 
         switch (chartId) {
             case 'ordersChart':
+                const datasets = [{
+                    label: '总订单数',
+                    data: data.values || [],
+                    borderColor: '#4f46e5',
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }];
+                
+                // 如果有已完成订单数据，添加第二个数据集
+                if (data.completedValues && data.completedValues.length > 0) {
+                    datasets.push({
+                        label: '已完成订单',
+                        data: data.completedValues,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        fill: false,
+                        tension: 0.4
+                    });
+                }
+                
                 return {
                     type: 'line',
                     data: {
                         labels: data.labels || [],
-                        datasets: [{
-                            label: '订单数量',
-                            data: data.values || [],
-                            borderColor: '#4f46e5',
-                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                            fill: true,
-                            tension: 0.4
-                        }]
+                        datasets: datasets
                     },
                     options: {
                         ...commonOptions,
@@ -481,13 +498,29 @@ class OptimizedOrdersManager {
                 };
 
             case 'statusChart':
+                // 状态颜色映射
+                const statusColorMap = {
+                    '已完成': '#10b981',    // 绿色
+                    '已确认': '#004085',    // 蓝色
+                    '待确认': '#856404',    // 黄色
+                    '未完成': '#856404',    // 黄色
+                    '尝试预约': '#0c5460',  // 浅蓝色
+                    '预约失败': '#721c24',  // 红色
+                    '已取消': '#6c757d'     // 灰色
+                };
+                
+                // 根据标签动态生成颜色数组
+                const dynamicColors = (data.labels || []).map(label => 
+                    statusColorMap[label] || '#856404' // 默认黄色
+                );
+                
                 return {
                     type: 'doughnut',
                     data: {
                         labels: data.labels || [],
                         datasets: [{
                             data: data.values || [],
-                            backgroundColor: ['#10b981', '#4f46e5', '#f59e0b', '#ef4444']
+                            backgroundColor: dynamicColors
                         }]
                     },
                     options: commonOptions
@@ -718,6 +751,7 @@ class OptimizedOrdersManager {
             'pending': '待确认',
             'confirmed': '已确认', 
             'completed': '已完成',
+            'incomplete': '未完成',
             'failed': '预约失败',
             'cancelled': '已取消'
         };
@@ -1104,27 +1138,67 @@ class OptimizedOrdersManager {
                 </div>
                 
                 ${order.user_evaluation ? `
-                <!-- 用户评价卡片 -->
-                <div class="detail-card evaluation-card">
-                    <div class="card-title">
-                        <span class="card-icon">👤</span>
+                <!-- 用户评价区域 -->
+                <div class="evaluation-section">
+                    <h3 class="section-title">
+                        <span class="section-icon">👤</span>
                         用户评价
+                        ${this.getEvaluationTime(order.user_evaluation)}
+                    </h3>
+                    
+                    <!-- 12项评分卡片 -->
+                    <div class="detail-card evaluation-scores-card">
+                        <div class="card-title">
+                            <span class="card-icon">📊</span>
+                            评分详情
+                        </div>
+                        <div class="card-content">
+                            ${this.renderEvaluationScores(order.user_evaluation)}
+                        </div>
                     </div>
-                    <div class="card-content">
-                        ${this.renderEvaluation(order.user_evaluation)}
+                    
+                    <!-- 文字评价卡片 -->
+                    <div class="detail-card evaluation-comments-card">
+                        <div class="card-title">
+                            <span class="card-icon">💬</span>
+                            文字评价
+                        </div>
+                        <div class="card-content">
+                            ${this.renderEvaluationComments(order.user_evaluation)}
+                        </div>
                     </div>
                 </div>
                 ` : ''}
                 
                 ${order.merchant_evaluation ? `
-                <!-- 商家评价卡片 -->
-                <div class="detail-card evaluation-card">
-                    <div class="card-title">
-                        <span class="card-icon">👩‍🏫</span>
+                <!-- 商家评价区域 -->
+                <div class="evaluation-section">
+                    <h3 class="section-title">
+                        <span class="section-icon">👩‍🏫</span>
                         商家评价
+                        ${this.getEvaluationTime(order.merchant_evaluation)}
+                    </h3>
+                    
+                    <!-- 12项评分卡片 -->
+                    <div class="detail-card evaluation-scores-card">
+                        <div class="card-title">
+                            <span class="card-icon">📊</span>
+                            评分详情
+                        </div>
+                        <div class="card-content">
+                            ${this.renderEvaluationScores(order.merchant_evaluation)}
+                        </div>
                     </div>
-                    <div class="card-content">
-                        ${this.renderEvaluation(order.merchant_evaluation)}
+                    
+                    <!-- 文字评价卡片 -->
+                    <div class="detail-card evaluation-comments-card">
+                        <div class="card-title">
+                            <span class="card-icon">💬</span>
+                            文字评价
+                        </div>
+                        <div class="card-content">
+                            ${this.renderEvaluationComments(order.merchant_evaluation)}
+                        </div>
                     </div>
                 </div>
                 ` : ''}
@@ -1203,6 +1277,185 @@ class OptimizedOrdersManager {
         }
     }
 
+    renderEvaluationScores(evaluationData) {
+        try {
+            const evaluation = typeof evaluationData === 'string' ? JSON.parse(evaluationData) : evaluationData;
+            
+            console.log('渲染评分数据:', evaluation);
+            
+            let html = '';
+            
+            // 检查是否为简单评价
+            if (evaluation.is_simple_evaluation) {
+                html += `
+                <div class="info-item">
+                    <span class="info-label">评价类型</span>
+                    <span class="info-value" style="color: #ff9800;">简单评价</span>
+                </div>`;
+                
+                // 显示总体评分（如果有）
+                if (evaluation.overall_score !== null && evaluation.overall_score !== undefined) {
+                    html += `
+                    <div class="info-item">
+                        <span class="info-label">出击素质</span>
+                        <span class="info-value price">${evaluation.overall_score}/10 ${this.renderStars(evaluation.overall_score)}</span>
+                    </div>`;
+                }
+                
+                return html;
+            }
+            
+            // 总体评分 - 无论简单评价还是详细评价都要显示
+            if (evaluation.overall_score !== null && evaluation.overall_score !== undefined) {
+                html += `
+                <div class="info-item">
+                    <span class="info-label">出击素质</span>
+                    <span class="info-value price">${evaluation.overall_score}/10 ${this.renderStars(evaluation.overall_score)}</span>
+                </div>`;
+            }
+            
+            // 详细评分 - 使用info-item格式，按照12项评分的顺序显示
+            if (evaluation.scores && Object.keys(evaluation.scores).length > 0) {
+                // 定义评分项目的显示顺序和标签 - 根据实际的12项评分系统
+                const scoreLabels = {
+                    'appearance': '颜值',
+                    'waist': '腰腹', 
+                    'feet': '脚型',
+                    'legs': '腿型',
+                    'tightness': '松紧',
+                    'breasts': '咪咪',
+                    'temperament': '气质',
+                    'environment': '环境',
+                    'sexiness': '骚气',
+                    'attitude': '态度',
+                    'voice': '叫声',
+                    'initiative': '主动'
+                };
+                
+                // 定义左右两列的分组
+                const leftColumnKeys = ['appearance', 'waist', 'feet', 'legs', 'tightness', 'breasts'];
+                const rightColumnKeys = ['temperament', 'environment', 'sexiness', 'attitude', 'voice', 'initiative'];
+                
+                // 创建两列布局的评分显示
+                html += '<div class="scores-grid">';
+                
+                // 左列
+                html += '<div class="score-column">';
+                leftColumnKeys.forEach(key => {
+                    if (evaluation.scores[key] !== undefined && typeof evaluation.scores[key] === 'number') {
+                        const score = evaluation.scores[key];
+                        const label = scoreLabels[key];
+                        
+                        html += `
+                        <div class="score-item">
+                            <span class="score-label">${label}</span>
+                            <span class="score-value">${score}/10</span>
+                        </div>`;
+                    }
+                });
+                html += '</div>';
+                
+                // 右列
+                html += '<div class="score-column">';
+                rightColumnKeys.forEach(key => {
+                    if (evaluation.scores[key] !== undefined && typeof evaluation.scores[key] === 'number') {
+                        const score = evaluation.scores[key];
+                        const label = scoreLabels[key];
+                        
+                        html += `
+                        <div class="score-item">
+                            <span class="score-label">${label}</span>
+                            <span class="score-value">${score}/10</span>
+                        </div>`;
+                    }
+                });
+                html += '</div>';
+                
+                html += '</div>';
+            }
+            
+            // 评分详情卡片不显示评价时间，保持纯净的评分显示
+            
+            return html || '<div class="info-item"><span class="info-value" style="color: #999;">暂无评分数据</span></div>';
+            
+        } catch (error) {
+            console.error('渲染评分失败:', error);
+            return '<div class="info-item"><span class="info-value">评分数据解析失败</span></div>';
+        }
+    }
+
+    renderEvaluationComments(evaluationData) {
+        try {
+            const evaluation = typeof evaluationData === 'string' ? JSON.parse(evaluationData) : evaluationData;
+            
+            console.log('渲染评价内容:', evaluation);
+            
+            let html = '';
+            let commentText = '';
+            
+            // 检查是否为简单评价
+            if (evaluation.is_simple_evaluation) {
+                commentText = evaluation.comments || '商家已完成简单评价';
+                const commentId = 'comment_' + Math.random().toString(36).substr(2, 9);
+                html += `
+                <div class="comment-content">
+                    <div class="comment-text" id="${commentId}">${commentText}</div>
+                    <div class="comment-actions">
+                        <button class="copy-evaluation-btn" onclick="orderManager.copyEvaluationContentById('${commentId}')">
+                            📋 复制评价内容
+                        </button>
+                    </div>
+                </div>`;
+                
+                return html;
+            }
+            
+            // 详细评价的文字内容
+            if (evaluation.comments) {
+                commentText = evaluation.comments;
+                const commentId = 'comment_' + Math.random().toString(36).substr(2, 9);
+                html += `
+                <div class="comment-content">
+                    <div class="comment-text" id="${commentId}">${commentText}</div>
+                    <div class="comment-actions">
+                        <button class="copy-evaluation-btn" onclick="orderManager.copyEvaluationContentById('${commentId}')">
+                            📋 复制评价内容
+                        </button>
+                    </div>
+                </div>`;
+            } else {
+                html += `
+                <div class="comment-content">
+                    <div class="comment-text no-comment">暂无文字评价</div>
+                </div>`;
+            }
+            
+            return html;
+            
+        } catch (error) {
+            console.error('渲染评价内容失败:', error);
+            return '<div class="comment-content"><div class="comment-text">评价内容解析失败</div></div>';
+        }
+    }
+
+    getEvaluationTime(evaluationData) {
+        try {
+            if (!evaluationData) return '';
+            
+            const evaluation = typeof evaluationData === 'string' ? JSON.parse(evaluationData) : evaluationData;
+            
+            if (evaluation.created_at) {
+                return `<span class="evaluation-time">${new Date(evaluation.created_at).toLocaleString('zh-CN')}</span>`;
+            }
+            
+            return '';
+        } catch (error) {
+            console.error('获取评价时间失败:', error);
+            return '';
+        }
+    }
+
+    // 保留原有的renderEvaluation方法以保持兼容性
     renderEvaluation(evaluationData) {
         try {
             const evaluation = typeof evaluationData === 'string' ? JSON.parse(evaluationData) : evaluationData;
@@ -1401,6 +1654,116 @@ class OptimizedOrdersManager {
             return '<span class="eval-pending" style="color: #9e9e9e; font-weight: 500;">⏳ 未评价</span>';
         }
     }
+
+    // 复制评价内容到剪贴板（通过元素ID）
+    copyEvaluationContentById(elementId) {
+        try {
+            const element = document.getElementById(elementId);
+            if (!element) {
+                console.error('找不到评价内容元素:', elementId);
+                this.showError('复制失败，找不到评价内容');
+                return;
+            }
+            
+            // 获取元素的文本内容
+            const content = element.textContent || element.innerText || '';
+            
+            if (!content.trim()) {
+                this.showError('评价内容为空');
+                return;
+            }
+            
+            // 使用现代剪贴板API
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(content).then(() => {
+                    this.showSuccessMessage('评价内容已复制到剪贴板');
+                    // 添加视觉反馈
+                    this.highlightCopiedContent(elementId);
+                }).catch(err => {
+                    console.error('复制失败:', err);
+                    this.fallbackCopyText(content);
+                });
+            } else {
+                // 降级方案
+                this.fallbackCopyText(content);
+            }
+        } catch (error) {
+            console.error('复制评价内容失败:', error);
+            this.showError('复制失败，请手动选择文本复制');
+        }
+    }
+
+    // 复制评价内容到剪贴板（直接传入内容，保留兼容性）
+    copyEvaluationContent(content) {
+        try {
+            // 解码HTML实体
+            const decodedContent = content.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+            
+            // 使用现代剪贴板API
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(decodedContent).then(() => {
+                    this.showSuccessMessage('评价内容已复制到剪贴板');
+                }).catch(err => {
+                    console.error('复制失败:', err);
+                    this.fallbackCopyText(decodedContent);
+                });
+            } else {
+                // 降级方案
+                this.fallbackCopyText(decodedContent);
+            }
+        } catch (error) {
+            console.error('复制评价内容失败:', error);
+            this.showError('复制失败，请手动选择文本复制');
+        }
+    }
+
+    // 降级复制方案
+    fallbackCopyText(text) {
+        try {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            textArea.setSelectionRange(0, text.length);
+            
+            const successful = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            if (successful) {
+                this.showSuccessMessage('评价内容已复制到剪贴板');
+            } else {
+                this.showError('复制失败，请手动选择文本复制');
+            }
+        } catch (err) {
+            console.error('降级复制方案失败:', err);
+            this.showError('复制失败，请手动选择文本复制');
+        }
+    }
+
+    // 高亮复制的内容（视觉反馈）
+    highlightCopiedContent(elementId) {
+        try {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.style.transition = 'background-color 0.3s ease';
+                element.style.backgroundColor = '#e3f2fd';
+                
+                setTimeout(() => {
+                    element.style.backgroundColor = '';
+                    setTimeout(() => {
+                        element.style.transition = '';
+                    }, 300);
+                }, 1000);
+            }
+        } catch (error) {
+            console.error('高亮效果失败:', error);
+        }
+    }
 }
 
 // 初始化管理器
@@ -1411,5 +1774,6 @@ window.refreshData = () => ordersManager.refreshData();
 window.searchOrders = (query) => ordersManager.searchOrders(query);
 window.changePage = (direction) => ordersManager.changePage(direction);
 window.updateDashboard = () => ordersManager.updateDashboard();
+window.orderManager = ordersManager; // 提供全局访问
 
 console.log('订单管理系统优化版本已加载'); 

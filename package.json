@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "node app.js",
+    "test": "node start-local-test.js",
     "stop": "pkill -f 'node app.js'",
     "restart": "npm run stop && sleep 2 && npm start",
     "logs": "tail -f bot.log",

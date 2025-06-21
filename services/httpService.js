@@ -104,9 +104,13 @@ function createHttpServer() {
             return;
         }
 
-        // 404
-        res.writeHead(404);
-        res.end('Not Found');
+        // 404 - 返回JSON格式响应
+        console.log(`❌ 404 - 路径不存在: ${pathname}`);
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ 
+            error: 'Not Found',
+            availableEndpoints: ['/health', '/admin', '/api/*', '/webhook']
+        }));
     });
 
     server.listen(PORT, () => {
@@ -622,20 +626,22 @@ async function processApiRequest(pathname, method, data) {
 🐍吻:${merchant.skill_kiss || '未填写'}`;
 
                 // 添加跳转到私聊的按钮
-                let botUsername = process.env.BOT_USERNAME;
+                let botUsername;
                 
-                // 如果环境变量未设置，尝试从bot服务获取
-                if (!botUsername && botService && botService.bot) {
-                    try {
-                        const botInfo = await botService.bot.getMe();
-                        botUsername = botInfo.username;
-                        console.log(`动态获取到bot用户名: ${botUsername}`);
-                    } catch (error) {
-                        console.error('获取bot用户名失败:', error);
-                        botUsername = 'xiaojisystemBOT'; // 默认值
+                // 使用统一的Bot用户名获取机制
+                try {
+                    botUsername = await botService.getBotUsername();
+                                 } catch (error) {
+                    console.error('获取bot用户名失败:', error);
+                    // 根据环境选择默认值
+                    const nodeEnv = process.env.NODE_ENV || 'development';
+                    if (nodeEnv === 'production') {
+                        botUsername = 'xiaojisystembot'; // Railway生产环境
+                    } else if (nodeEnv === 'staging') {
+                        botUsername = 'xiaoji_daniao_bot'; // 测试环境
+                    } else {
+                        botUsername = 'xiaojisystembot'; // 开发环境默认
                     }
-                } else if (!botUsername) {
-                    botUsername = 'xiaojisystemBOT'; // 默认值
                 }
                 
                 sendOptions.reply_markup = {
@@ -753,7 +759,38 @@ async function processApiRequest(pathname, method, data) {
         }
     }
 
-    return { success: false, error: 'API路径不存在' };
+    // 获取Bot用户名
+    if (pathname === '/api/bot-username' && method === 'GET') {
+        try {
+            const botUsername = await botService.getBotUsername();
+            return {
+                success: true,
+                data: { username: botUsername }
+            };
+        } catch (error) {
+            console.error('获取Bot用户名失败:', error);
+            return {
+                success: false,
+                error: '获取Bot用户名失败'
+            };
+        }
+    }
+
+    // API路由不存在
+    console.log(`❌ API路径不存在: ${pathname} (${method})`);
+    return { 
+        success: false, 
+        error: 'API路径不存在',
+        availableEndpoints: [
+            'GET /api/stats',
+            'GET /api/orders', 
+            'GET /api/bind-codes',
+            'GET /api/regions',
+            'GET /api/merchants',
+            'GET /api/charts/*',
+            'GET /api/bot-username'
+        ]
+    };
 }
 
 // Webhook更新处理 - 事件驱动机制

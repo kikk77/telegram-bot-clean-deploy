@@ -10,8 +10,13 @@ class AppointmentService {
     // 发送约课成功确认消息
     async sendBookingSuccessCheck(userId, bookingSessionId, merchant, bookType, fullName, username) {
         try {
-            const message = `⚠️本条信息预约后再点击按钮⚠️
-本次是否与老师约课成功？`;
+            const message = `⚠️ 预约后再点击本条信息 ⚠️
+
+跟老师约课成功了吗？
+
+⚠️ 预约后再点击本条信息 ⚠️
+
+跟老师约课成功了吗？`;
             
             const keyboard = {
                 inline_keyboard: [
@@ -52,16 +57,16 @@ class AppointmentService {
                     // 创建后台订单数据
                     const orderId = await this.createOrderData(bookingSession, userId, query);
                     
-                    await this.sendMessageWithoutDelete(userId, '✅ 约课成功！订单已创建，请等待课程完成确认。', {}, 'booking_success_confirmed');
+                    await this.sendMessageWithoutDelete(userId, '✅ 约课成功！\n\n👩🏻‍🏫 上完课后返回此处\n\n✍🏻 完成老师课程评价\n\n😭 这将对老师有很大帮助！', {}, 'booking_success_confirmed');
                     
-                    // 延迟发送课程完成确认消息
+                    // 延迟30分钟发送课程完成确认消息
                     setTimeout(async () => {
                         const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
                         const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
                         const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
                         
                         await this.sendCourseCompletionCheck(userId, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
-                    }, 2000);
+                    }, 30 * 60 * 1000); // 30分钟 = 30 * 60 * 1000毫秒
                     
                     console.log(`用户 ${userId} 确认约课成功，预约会话 ${bookingSessionId}，订单ID ${orderId}`);
                     
@@ -77,7 +82,7 @@ class AppointmentService {
                 // 清空本轮对话历史
                 await this.clearUserConversation(userId);
                 
-                // 发送最终消息
+                // 发送最终消息（不使用消息管理系统，避免被跟踪）
                 await this.bot.sendMessage(userId, '欢迎下次预约课程📅 🐤小鸡与你同在。');
                 
                 console.log(`用户 ${userId} 确认约课未成功，预约会话 ${bookingSessionId}`);

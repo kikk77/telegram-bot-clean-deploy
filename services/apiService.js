@@ -159,8 +159,8 @@ class ApiService {
                 SELECT 
                     AVG(
                         CASE 
-                            WHEN o.price IS NOT NULL AND o.price != '未设置' AND CAST(o.price AS REAL) > 0 
-                            THEN CAST(o.price AS REAL)
+                            WHEN o.price_range IS NOT NULL AND o.price_range != '未设置' AND CAST(o.price_range AS REAL) > 0 
+                            THEN CAST(o.price_range AS REAL)
                             WHEN o.course_content = 'p' AND m.price1 IS NOT NULL 
                             THEN CAST(m.price1 AS REAL)
                             WHEN o.course_content = 'pp' AND m.price2 IS NOT NULL 
@@ -278,7 +278,7 @@ class ApiService {
                         WHEN bs.user_course_status = 'completed' 
                         THEN 1 ELSE 0 
                     END) as completedOrders,
-                    AVG(CAST(o.price AS REAL)) as avgPrice,
+                    AVG(CAST(o.price_range AS REAL)) as avgPrice,
                     CAST(SUM(CASE 
                         WHEN bs.user_course_status = 'completed' 
                         THEN 1 ELSE 0 
@@ -410,10 +410,10 @@ class ApiService {
             const priceData = db.prepare(`
                 SELECT 
                     CASE 
-                        WHEN CAST(o.price AS REAL) < 500 THEN '0-500'
-                        WHEN CAST(o.price AS REAL) < 700 THEN '500-700'
-                        WHEN CAST(o.price AS REAL) < 900 THEN '700-900'
-                        WHEN CAST(o.price AS REAL) < 1100 THEN '900-1100'
+                        WHEN CAST(o.price_range AS REAL) < 500 THEN '0-500'
+                        WHEN CAST(o.price_range AS REAL) < 700 THEN '500-700'
+                        WHEN CAST(o.price_range AS REAL) < 900 THEN '700-900'
+                        WHEN CAST(o.price_range AS REAL) < 1100 THEN '900-1100'
                         ELSE '1100+'
                     END as price_range,
                     COUNT(*) as orderCount
@@ -453,6 +453,7 @@ class ApiService {
                 SELECT 
                     CASE 
                         WHEN bs.user_course_status = 'completed' THEN 'completed'
+                        WHEN bs.user_course_status = 'incomplete' THEN 'incomplete'
                         WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
                         WHEN o.status = 'attempting' THEN 'attempting'
                         WHEN o.status = 'failed' THEN 'failed'
@@ -465,6 +466,7 @@ class ApiService {
                 WHERE ${whereClause}
                 GROUP BY CASE 
                     WHEN bs.user_course_status = 'completed' THEN 'completed'
+                    WHEN bs.user_course_status = 'incomplete' THEN 'incomplete'
                     WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
                     WHEN o.status = 'attempting' THEN 'attempting'
                     WHEN o.status = 'failed' THEN 'failed'
@@ -479,6 +481,7 @@ class ApiService {
                 'pending': '待确认',
                 'confirmed': '已确认',
                 'completed': '已完成',
+                'incomplete': '未完成',
                 'failed': '预约失败',
                 'cancelled': '已取消'
             };
@@ -562,6 +565,8 @@ class ApiService {
                 let realStatus = 'pending'; // 默认状态
                 if (order.user_course_status === 'completed') {
                     realStatus = 'completed';
+                } else if (order.user_course_status === 'incomplete') {
+                    realStatus = 'incomplete';
                 } else if (order.user_course_status === 'confirmed' || order.status === 'confirmed') {
                     realStatus = 'confirmed';
                 } else if (order.status === 'attempting') {
@@ -723,6 +728,8 @@ class ApiService {
             let realStatus = 'pending'; // 默认状态
             if (order.user_course_status === 'completed') {
                 realStatus = 'completed';
+            } else if (order.user_course_status === 'incomplete') {
+                realStatus = 'incomplete';
             } else if (order.user_course_status === 'confirmed' || order.status === 'confirmed') {
                 realStatus = 'confirmed';
             } else if (order.status === 'cancelled') {
@@ -1098,16 +1105,16 @@ class ApiService {
         if (filters.priceRange) {
             switch (filters.priceRange) {
                 case '0-500':
-                    conditions.push('CAST(o.price AS INTEGER) BETWEEN 0 AND 500');
+                    conditions.push('CAST(o.price_range AS INTEGER) BETWEEN 0 AND 500');
                     break;
                 case '500-1000':
-                    conditions.push('CAST(o.price AS INTEGER) BETWEEN 500 AND 1000');
+                    conditions.push('CAST(o.price_range AS INTEGER) BETWEEN 500 AND 1000');
                     break;
                 case '1000-2000':
-                    conditions.push('CAST(o.price AS INTEGER) BETWEEN 1000 AND 2000');
+                    conditions.push('CAST(o.price_range AS INTEGER) BETWEEN 1000 AND 2000');
                     break;
                 case '2000+':
-                    conditions.push('CAST(o.price AS INTEGER) > 2000');
+                    conditions.push('CAST(o.price_range AS INTEGER) > 2000');
                     break;
             }
         }

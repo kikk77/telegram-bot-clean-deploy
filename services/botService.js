@@ -50,6 +50,7 @@ let regions = [];
 const userBindStates = new Map(); // 用户绑定状态
 const userMessageHistory = new Map(); // 用户消息历史记录
 const triggerCooldowns = new Map(); // 触发词冷却时间
+const bookingCooldowns = new Map(); // 预约冷却时间管理
 
 // 内存管理配置
 const MEMORY_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30分钟清理一次
@@ -66,6 +67,13 @@ setInterval(() => {
         }
     }
     
+    // 清理过期的预约冷却（30分钟过期）
+    for (const [cooldownKey, cooldownTime] of bookingCooldowns.entries()) {
+        if (now - cooldownTime > 30 * 60 * 1000) { // 30分钟过期
+            bookingCooldowns.delete(cooldownKey);
+        }
+    }
+    
     // 清理过期的消息历史（保留最近的消息）
     for (const [userId, history] of userMessageHistory.entries()) {
         if (history.length > MAX_USER_HISTORY) {
@@ -73,7 +81,7 @@ setInterval(() => {
         }
     }
     
-    console.log(`内存清理完成 - 消息历史大小: ${userMessageHistory.size}`);
+    console.log(`内存清理完成 - 消息历史大小: ${userMessageHistory.size}, 预约冷却大小: ${bookingCooldowns.size}`);
 }, MEMORY_CLEANUP_INTERVAL);
 
 // 用户状态枚举
@@ -646,7 +654,14 @@ function initBotHandlers() {
                     };
                     
                     console.log(`发送商家信息给用户 ${userId}`);
-                    bot.sendMessage(chatId, merchantInfo, options);
+                    const sentMessage = await bot.sendMessage(chatId, merchantInfo, options);
+                    console.log(`发送商家信息成功id${sentMessage.message_id}`);
+                    
+                    // 将商家信息消息添加到消息跟踪系统
+                    addMessageToHistory(userId, sentMessage.message_id, 'merchant_info', {
+                        merchantId: merchantId,
+                        merchantName: merchant.teacher_name
+                    });
                     return;
                 } else {
                     console.log(`未找到商家ID ${merchantId} 对应的商家信息`);
@@ -769,6 +784,13 @@ function initBotHandlers() {
                 try {
                     await bot.deleteMessage(chatId, query.message.message_id);
                     console.log(`✅ 立即删除按钮消息成功: ${chatId}_${query.message.message_id}`);
+                    
+                    // 从消息跟踪系统中移除已删除的消息
+                    const history = userMessageHistory.get(userId);
+                    if (history) {
+                        const updatedHistory = history.filter(msg => msg.messageId !== query.message.message_id);
+                        userMessageHistory.set(userId, updatedHistory);
+                    }
                 } catch (error) {
                     if (!error.message.includes('message to delete not found')) {
                         console.log(`⚠️ 立即删除按钮消息失败: ${chatId}_${query.message.message_id} - ${error.message}`);
@@ -839,24 +861,22 @@ function initBotHandlers() {
             
             // 创建"尝试预约"状态的订单
             try {
-                const now = Math.floor(Date.now() / 1000);
                 const orderData = {
                     booking_session_id: null, // 暂时为空，后续预约时关联
                     user_id: userId,
                     user_name: fullName,
                     user_username: username,
                     merchant_id: merchant.id,
+                    merchant_user_id: merchant.user_id,
                     teacher_name: merchant.teacher_name,
                     teacher_contact: merchant.contact,
-                    course_content: '待确定课程', // 用户还未选择具体课程
-                    price: '待确定价格', // 价格待确定
-                    booking_time: new Date().toISOString(),
-                    status: 'attempting', // 新状态：尝试预约
+                    course_type: null, // 用户还未选择具体课程
+                    course_content: '待确定课程',
+                    price_range: '待确定价格',
+                    status: 'attempting', // 尝试预约状态
                     user_evaluation: null,
                     merchant_evaluation: null,
-                    report_content: null,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
+                    report_content: null
                 };
                 
                 const orderId = dbOperations.createOrder(orderData);
@@ -938,10 +958,11 @@ function initBotHandlers() {
                     if (recentOrder) {
                         // 更新订单信息
                         const updateData = {
+                            course_type: bookType,
                             course_content: bookTypeText,
-                            price: price,
+                            price_range: price,
                             status: 'pending', // 更新状态为待确认
-                            updated_at: new Date().toISOString()
+                            updated_at: Math.floor(Date.now() / 1000)
                         };
                         
                         dbOperations.updateOrderFields(recentOrder.id, updateData);
@@ -959,14 +980,21 @@ function initBotHandlers() {
                 }
                 
                 const finalMessage = `🐤小鸡出征！
-         已将出击信息发送给${contactLink}老师。请点击联系方式开始私聊老师进行预约。`;
+         已将出击信息发送给${contactLink}老师。
+         请点击 **联系方式主动私聊老师** 进行预约。`;
                 
-                // 发送联系老师信息（不删除，保留此信息）
+                // 发送联系老师信息（添加到消息跟踪系统）
                 const contactOptions = {
                     parse_mode: 'Markdown'
                 };
                 
-                await bot.sendMessage(chatId, finalMessage, contactOptions);
+                const sentMessage = await bot.sendMessage(chatId, finalMessage, contactOptions);
+                
+                // 将联系老师信息添加到消息跟踪系统
+                addMessageToHistory(userId, sentMessage.message_id, 'contact_teacher', {
+                    merchantId: merchantId,
+                    teacherName: merchant.teacher_name
+                });
                 
                 // 后台异步处理（不阻塞用户体验）
                 setImmediate(async () => {
@@ -1491,14 +1519,143 @@ async function sendRebookingQuestionToUser(userId, bookingSessionId) {
 async function handleRebookFlow(userId, data, query) {
     try {
         if (data.startsWith('rebook_no_')) {
+            const bookingSessionId = data.replace('rebook_no_', '');
+            
+            // 获取对应的订单并更新状态为"已取消"
+            const order = dbOperations.getOrderByBookingSession(bookingSessionId);
+            if (order) {
+                dbOperations.updateOrderStatus(order.id, 'cancelled');
+                console.log(`订单 ${order.id} 状态已更新为"已取消"，原因：用户选择不重新预约`);
+            }
             
             // 清空本轮对话历史
             await clearUserConversation(userId);
             
-            // 发送最终消息（不使用消息管理系统，直接发送）
+            // 发送最终消息（不使用消息管理系统，避免被跟踪）
             await bot.sendMessage(userId, '欢迎下次预约课程📅 🐤小鸡与你同在。');
             
-            console.log(`用户 ${userId} 选择不重新预约`);
+            console.log(`用户 ${userId} 选择不重新预约，预约会话 ${bookingSessionId}`);
+            
+        } else if (data.startsWith('rebook_p_') || data.startsWith('rebook_pp_') || data.startsWith('rebook_other_')) {
+            // 处理重新预约的具体课程选择 - 创建新的预约会话和订单
+            const parts = data.split('_');
+            const bookType = parts[1]; // p, pp, other
+            const merchantId = parts[2];
+            
+            // 获取用户信息
+            const userName = query.from.first_name || '';
+            const userLastName = query.from.last_name || '';
+            const fullName = `${userName} ${userLastName}`.trim() || '未设置名称';
+            const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+            
+            // 获取商家信息
+            const merchant = dbOperations.getMerchantById(merchantId);
+            if (merchant) {
+                // 检查商家状态
+                if (merchant.status !== 'active') {
+                    await sendMessageWithoutDelete(userId, '😔 抱歉，目前老师已下线，请看看其他老师吧～', {}, 'merchant_offline');
+                    return;
+                }
+                
+                // 确定预约类型的中文描述和价格
+                let bookTypeText = '';
+                let price = '待确定价格';
+                switch (bookType) {
+                    case 'p':
+                        bookTypeText = 'p';
+                        price = merchant.price1 || '未设置';
+                        break;
+                    case 'pp':
+                        bookTypeText = 'pp';
+                        price = merchant.price2 || '未设置';
+                        break;
+                    case 'other':
+                        bookTypeText = '其他时长';
+                        price = '其他';
+                        break;
+                }
+                
+                // 创建新的预约会话（重新预约）
+                const newBookingSessionId = dbOperations.createBookingSession(userId, merchantId, bookType);
+                
+                // 创建新的订单记录
+                try {
+                    const orderData = {
+                        booking_session_id: newBookingSessionId,
+                        user_id: userId,
+                        user_name: fullName,
+                        user_username: username,
+                        merchant_id: merchant.id,
+                        merchant_user_id: merchant.user_id,
+                        teacher_name: merchant.teacher_name,
+                        teacher_contact: merchant.contact,
+                        course_type: bookType,
+                        course_content: bookTypeText,
+                        price_range: price,
+                        status: 'pending', // 新订单状态为待确认
+                        user_evaluation: null,
+                        merchant_evaluation: null,
+                        report_content: null
+                    };
+                    
+                    const newOrderId = dbOperations.createOrder(orderData);
+                    console.log(`✅ 创建重新预约订单成功: 订单ID ${newOrderId}, 预约会话 ${newBookingSessionId}, 用户 ${fullName}, 老师 ${merchant.teacher_name}, 课程 ${bookTypeText}`);
+                    
+                } catch (error) {
+                    console.error('创建重新预约订单失败:', error);
+                    await sendMessageWithoutDelete(userId, '❌ 重新预约失败，请稍后再试', {}, 'rebook_error');
+                    return;
+                }
+                
+                // 发送通知给商家
+                if (merchant.user_id) {
+                    const merchantNotification = `老师您好，
+用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您重新预约${bookTypeText}课程
+请及时关注私聊信息。
+————————————————————————
+🐤小鸡出征！请尽力服务好我们的勇士～
+如遇任何问题，请群内联系小鸡管理员。`;
+                    
+                    bot.sendMessage(merchant.user_id, merchantNotification).catch(error => {
+                        console.log(`无法发送通知给商家 ${merchant.user_id}: ${error.message}`);
+                    });
+                    
+                    console.log(`已通知商家 ${merchant.user_id}，用户 ${fullName} (${username}) 重新预约了 ${bookTypeText}`);
+                }
+                
+                // 生成联系方式链接
+                let contactLink = merchant.contact;
+                if (contactLink && contactLink.startsWith('@')) {
+                    contactLink = `[${contactLink}](https://t.me/${contactLink.substring(1)})`;
+                }
+                
+                const finalMessage = `🐤小鸡出征！
+         已将出击信息发送给${contactLink}老师。
+         请点击 **联系方式主动私聊老师** 进行预约。`;
+                
+                // 发送联系老师信息
+                const contactOptions = {
+                    parse_mode: 'Markdown'
+                };
+                
+                const sentMessage = await bot.sendMessage(userId, finalMessage, contactOptions);
+                
+                // 将联系老师信息添加到消息跟踪系统
+                addMessageToHistory(userId, sentMessage.message_id, 'contact_teacher', {
+                    merchantId: merchantId,
+                    teacherName: merchant.teacher_name,
+                    isRebook: true
+                });
+                
+                // 延迟2秒发送约课成功确认消息
+                setTimeout(async () => {
+                    await sendBookingSuccessCheck(userId, newBookingSessionId, merchant, bookType, fullName, username);
+                }, 2000);
+                
+                // 记录交互
+                dbOperations.logInteraction(userId, query.from.username, query.from.first_name, query.from.last_name, null, null, `rebook_${bookType}`, userId);
+                console.log(`用户 ${userId} ${fullName} (${username}) 重新预约了商家 ${merchantId} (${bookType})`);
+            }
             
         } else if (data.startsWith('rebook_yes_')) {
             const bookingSessionId = data.replace('rebook_yes_', '');
@@ -1523,20 +1680,58 @@ async function handleRebookFlow(userId, data, query) {
                 
                 console.log(`用户 ${userId} 选择重新预约，预约会话 ${bookingSessionId}`);
                 
-                // 重新发送预约通知
-                const merchantNotification = `老师您好，
-用户名称 ${userFullName}（${username}）即将与您进行联系。他想跟您预约其他时长课程
-请及时关注私聊信息。
-————————————————————————
-🐤小鸡出征！请尽力服务好我们的勇士～
-如遇任何问题，请群内联系小鸡管理员。`;
+                // 清空本轮对话历史，准备重新开始预约流程
+                await clearUserConversation(userId);
                 
-                bot.sendMessage(merchant.user_id, merchantNotification);
+                // 重新发送"小鸡出征"的老师信息和预约选择按钮
+                // 生成联系方式链接
+                let contactLink = merchant.contact;
+                if (contactLink && contactLink.startsWith('@')) {
+                    contactLink = `[${contactLink}](https://t.me/${contactLink.substring(1)})`;
+                }
                 
-                // 重新发送课程完成确认
-                setTimeout(() => {
-                    sendCourseCompletionCheck(bookingSession.user_id, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
-                }, 2000);
+                const finalMessage = `🐤小鸡出征！
+         已将出击信息发送给${contactLink}老师。
+         请点击 **联系方式主动私聊老师** 进行预约。`;
+                
+                // 发送联系老师信息
+                const contactOptions = {
+                    parse_mode: 'Markdown'
+                };
+                
+                const sentMessage = await bot.sendMessage(userId, finalMessage, contactOptions);
+                
+                // 将联系老师信息添加到消息跟踪系统
+                addMessageToHistory(userId, sentMessage.message_id, 'contact_teacher', {
+                    merchantId: merchant.id,
+                    teacherName: merchant.teacher_name
+                });
+                
+                // 重新发送预约选择按钮（重新进入原本的预约流程）
+                const attackMessage = `✅本榜单老师均已通过视频认证，请小鸡们放心预约。
+————————————————————————————
+🔔提示：
+1.定金大多数不会超过100哦～ 
+2.如果老师以前不需要定金，突然需要定金了，请跟管理员核实。`;
+                
+                const options = {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '预约p', callback_data: `rebook_p_${merchant.id}` }],
+                            [{ text: '预约pp', callback_data: `rebook_pp_${merchant.id}` }],
+                            [{ text: '其他时长', callback_data: `rebook_other_${merchant.id}` }]
+                        ]
+                    }
+                };
+                
+                // 延迟1秒发送预约选择按钮，让用户先看到"小鸡出征"消息
+                setTimeout(async () => {
+                    await sendMessageWithDelete(userId, attackMessage, options, 'booking_options', {
+                        merchantId: merchant.id,
+                        isRebook: true // 标记这是重新预约
+                    });
+                }, 1000);
+                
             } else {
                 console.log('预约信息不存在');
             }
@@ -3552,7 +3747,12 @@ async function handleMerchantDetailEvaluationConfirm(userId, data, query) {
             evaluationService.updateEvaluation(evaluationId, existingOverallScore, detailScores, '详细评价已完成', 'completed');
             
             // 发送完成消息
-            bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
+            await bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
+            
+            // 商家详细评价完成后，直接进入播报选择流程
+            setTimeout(async () => {
+                await showBroadcastChoice(userId, evaluationId);
+            }, 1000);
         }
         
     } catch (error) {
@@ -3898,8 +4098,13 @@ async function handleDetailedEvaluationBack(userId, data, query) {
 // 发送约课成功确认消息
 async function sendBookingSuccessCheck(userId, bookingSessionId, merchant, bookType, fullName, username) {
     try {
-        const message = `⚠️本条信息预约后再点击按钮⚠️
-本次是否与老师约课成功？`;
+        const message = `⚠️ 预约后再点击本条信息 ⚠️
+
+跟老师约课成功了吗？
+
+⚠️ 预约后再点击本条信息 ⚠️
+
+跟老师约课成功了吗？`;
         
         const keyboard = {
             inline_keyboard: [
@@ -3955,16 +4160,19 @@ async function handleBookingSuccessFlow(userId, data, query) {
                     orderId = await createOrderData(bookingSession, userId, query);
                 }
                 
-                await sendMessageWithoutDelete(userId, '✅ 约课成功！订单已确认，请等待课程完成确认。', {}, 'booking_success_confirmed');
+                // 清空本轮对话历史（包括联系老师消息）
+                await clearUserConversation(userId);
                 
-                // 延迟发送课程完成确认消息
+                await sendMessageWithoutDelete(userId, '✅ 约课成功！\n\n👩🏻‍🏫 上完课后返回此处\n\n✍🏻 完成老师课程评价\n\n😭 这将对老师有很大帮助！', {}, 'booking_success_confirmed');
+                
+                // 延迟30分钟发送课程完成确认消息
                 setTimeout(async () => {
                     const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
                     const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
                     const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
                     
                     await sendCourseCompletionCheck(userId, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
-                }, 2000);
+                }, 30 * 60 * 1000); // 30分钟 = 30 * 60 * 1000毫秒
                 
                 console.log(`用户 ${userId} 确认约课成功，预约会话 ${bookingSessionId}，订单ID ${orderId}`);
                 
@@ -3989,13 +4197,13 @@ async function handleBookingSuccessFlow(userId, data, query) {
                     dbOperations.updateOrderFields(existingOrder.id, updateData);
                     console.log(`✅ 更新订单状态为失败: 订单ID ${existingOrder.id}`);
                 }
+                
+                // 清空本轮对话历史（包括联系老师消息）
+                await clearUserConversation(userId);
+                
+                // 发送重新预约询问
+                await sendRebookingQuestionToUser(userId, bookingSessionId);
             }
-            
-            // 清空本轮对话历史
-            await clearUserConversation(userId);
-            
-            // 发送最终消息
-            await bot.sendMessage(userId, '欢迎下次预约课程📅 🐤小鸡与你同在。');
             
             console.log(`用户 ${userId} 确认约课未成功，预约会话 ${bookingSessionId}`);
         }
@@ -4063,6 +4271,54 @@ async function createOrderData(bookingSession, userId, query) {
     }
 }
 
+// Bot用户名缓存
+let cachedBotUsername = null;
+
+// 动态获取Bot用户名
+async function getBotUsername() {
+    // 如果已有缓存，直接返回
+    if (cachedBotUsername) {
+        return cachedBotUsername;
+    }
+    
+    // 优先使用环境变量
+    if (process.env.BOT_USERNAME) {
+        cachedBotUsername = process.env.BOT_USERNAME;
+        console.log(`✅ 使用环境变量BOT_USERNAME: ${cachedBotUsername}`);
+        return cachedBotUsername;
+    }
+    
+    // 动态从Telegram API获取
+    try {
+        if (bot) {
+            const botInfo = await bot.getMe();
+            cachedBotUsername = botInfo.username;
+            console.log(`✅ 动态获取Bot用户名成功: ${cachedBotUsername}`);
+            return cachedBotUsername;
+        }
+    } catch (error) {
+        console.error('❌ 动态获取Bot用户名失败:', error);
+    }
+    
+    // 根据环境选择默认值
+    const nodeEnv = process.env.NODE_ENV || 'development';
+    if (nodeEnv === 'production') {
+        cachedBotUsername = 'xiaojisystembot'; // Railway生产环境
+    } else if (nodeEnv === 'staging') {
+        cachedBotUsername = 'xiaoji_daniao_bot'; // 测试环境
+    } else {
+        cachedBotUsername = 'xiaojisystembot'; // 开发环境默认
+    }
+    
+    console.log(`⚠️ 使用环境默认Bot用户名 (${nodeEnv}): ${cachedBotUsername}`);
+    return cachedBotUsername;
+}
+
+// 清除Bot用户名缓存（用于重新获取）
+function clearBotUsernameCache() {
+    cachedBotUsername = null;
+}
+
 module.exports = {
     bot,
     loadCacheData,
@@ -4077,6 +4333,8 @@ module.exports = {
     sendMessageWithDelete,
     sendMessageWithoutDelete,
     handleBackButton,
+    getBotUsername,
+    clearBotUsernameCache,
     // 导出缓存数据的getter
     getCacheData: () => ({
         merchants,

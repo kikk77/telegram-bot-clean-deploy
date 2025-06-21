@@ -698,8 +698,39 @@
         let regions = [];
         let buttonRowCount = 0;
 
+        // 获取Bot用户名
+        async function fetchBotUsername() {
+            try {
+                const response = await fetch('/api/bot-username');
+                if (response.ok) {
+                    const data = await response.json();
+                    window.BOT_USERNAME = data.username;
+                    console.log('✅ 获取Bot用户名成功:', data.username);
+                } else {
+                    console.warn('⚠️ 获取Bot用户名失败，使用环境默认值');
+                    // 根据页面URL判断环境
+                    const hostname = window.location.hostname;
+                    if (hostname.includes('staging') || hostname.includes('test')) {
+                        window.BOT_USERNAME = 'xiaoji_daniao_bot'; // 测试环境
+                    } else {
+                        window.BOT_USERNAME = 'xiaojisystembot'; // 生产环境
+                    }
+                }
+            } catch (error) {
+                console.error('❌ 获取Bot用户名出错:', error);
+                // 根据页面URL判断环境
+                const hostname = window.location.hostname;
+                if (hostname.includes('staging') || hostname.includes('test')) {
+                    window.BOT_USERNAME = 'xiaoji_daniao_bot'; // 测试环境
+                } else {
+                    window.BOT_USERNAME = 'xiaojisystembot'; // 生产环境
+                }
+            }
+        }
+
         // 页面加载时初始化
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            await fetchBotUsername(); // 先获取Bot用户名
             initializePriceSelectors();
             loadAllData();
         });
@@ -1287,8 +1318,18 @@
             }
             
             container.innerHTML = merchants.map(merchant => {
-                // 生成商家跳转URL链接
-                const merchantUrl = `https://t.me/Xiaojisystembot?start=merchant_${merchant.id}`;
+                // 动态获取Bot用户名生成商家跳转URL链接
+                let botUsername = window.BOT_USERNAME;
+                if (!botUsername) {
+                    // 根据页面URL判断环境，选择对应的默认Bot用户名
+                    const hostname = window.location.hostname;
+                    if (hostname.includes('staging') || hostname.includes('test')) {
+                        botUsername = 'xiaoji_daniao_bot'; // 测试环境
+                    } else {
+                        botUsername = 'xiaojisystembot'; // 生产环境
+                    }
+                }
+                const merchantUrl = `https://t.me/${botUsername}?start=merchant_${merchant.id}`;
                 
                 return `
                 <div class="list-item">

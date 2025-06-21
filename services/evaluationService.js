@@ -72,13 +72,13 @@ class EvaluationService {
             }
             
             if (detailScores !== null) {
-                updateFields.push('detailed_scores = ?'); // 修复：使用正确的字段名detailed_scores
+                updateFields.push('detailed_scores = ?'); // 使用数据库中实际存在的字段名detailed_scores
                 values.push(typeof detailScores === 'object' ? JSON.stringify(detailScores) : detailScores);
                 console.log('将更新detailed_scores');
             }
             
             if (textComment !== null) {
-                updateFields.push('comments = ?'); // 修复：使用正确的字段名comments
+                updateFields.push('comments = ?'); // 使用数据库中实际存在的字段名comments
                 values.push(textComment);
                 console.log('将更新comments');
             }

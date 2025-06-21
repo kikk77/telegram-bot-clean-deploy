@@ -717,10 +717,10 @@ const dbOperations = {
         const stmt = db.prepare(`
             INSERT INTO orders (
                 booking_session_id, user_id, user_name, user_username, 
-                merchant_id, teacher_name, teacher_contact, course_content, 
-                price, booking_time, status, user_evaluation, merchant_evaluation, 
-                report_content, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                merchant_id, merchant_user_id, teacher_name, teacher_contact, 
+                course_type, course_content, price_range, status, 
+                user_evaluation, merchant_evaluation, report_content
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
             orderData.booking_session_id,
@@ -728,17 +728,16 @@ const dbOperations = {
             orderData.user_name,
             orderData.user_username,
             orderData.merchant_id,
+            orderData.merchant_user_id,
             orderData.teacher_name,
             orderData.teacher_contact,
+            orderData.course_type,
             orderData.course_content,
-            orderData.price,
-            orderData.booking_time,
-            orderData.status,
+            orderData.price_range,
+            orderData.status || 'attempting',
             orderData.user_evaluation,
             orderData.merchant_evaluation,
-            orderData.report_content,
-            orderData.created_at,
-            orderData.updated_at
+            orderData.report_content
         );
         return result.lastInsertRowid;
     },
@@ -817,7 +816,7 @@ const dbOperations = {
                 o.user_username,
                 o.teacher_name,
                 o.course_content,
-                o.price,
+                o.price_range,
                 datetime(o.created_at, 'unixepoch', 'localtime') as order_time,
                 CASE 
                     WHEN o.user_evaluation IS NOT NULL AND o.merchant_evaluation IS NOT NULL 
@@ -891,7 +890,7 @@ const dbOperations = {
                 o.user_username,
                 o.teacher_name,
                 o.course_content,
-                o.price,
+                o.price_range,
                 o.user_evaluation,
                 o.merchant_evaluation,
                 datetime(o.created_at, 'unixepoch', 'localtime') as order_time,

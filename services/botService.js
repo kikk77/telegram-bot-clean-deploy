@@ -8,7 +8,23 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 // 初始化Telegram Bot
 let bot;
 try {
-    bot = new TelegramBot(BOT_TOKEN, { polling: true });
+    // 配置Bot选项，避免IP连接问题
+    const botOptions = { 
+        polling: true,
+        // 添加请求选项来提高连接稳定性
+        request: {
+            // 增加超时时间
+            timeout: 60000,
+            // 启用keep-alive
+            forever: true,
+            // 允许重试
+            pool: {
+                maxSockets: 10
+            }
+        }
+    };
+    
+    bot = new TelegramBot(BOT_TOKEN, botOptions);
     console.log('✅ Telegram Bot初始化成功');
     
     // 添加错误事件监听
@@ -23,6 +39,8 @@ try {
         console.error('❌ Telegram Bot轮询错误:', error.message);
         if (error.message.includes('ENOTFOUND')) {
             console.log('⚠️ 网络连接问题，Bot将自动重试连接');
+        } else if (error.message.includes('ETIMEDOUT')) {
+            console.log('⚠️ 连接超时，Bot将自动重试连接');
         }
     });
     
@@ -47,7 +65,7 @@ let bindCodes = [];
 let regions = [];
 
 // 内存映射管理 - 添加自动清理机制
-const userBindStates = new Map(); // 用户绑定状态
+// 用户绑定状态变量已移除（绑定流程已简化）
 const userMessageHistory = new Map(); // 用户消息历史记录
 const triggerCooldowns = new Map(); // 触发词冷却时间
 const bookingCooldowns = new Map(); // 预约冷却时间管理
@@ -84,15 +102,7 @@ setInterval(() => {
     console.log(`内存清理完成 - 消息历史大小: ${userMessageHistory.size}, 预约冷却大小: ${bookingCooldowns.size}`);
 }, MEMORY_CLEANUP_INTERVAL);
 
-// 用户状态枚举
-const BindSteps = {
-    NONE: 'none',
-    WELCOME: 'welcome',
-    INPUT_NAME: 'input_name',
-    SELECT_REGION: 'select_region',
-    INPUT_CONTACT: 'input_contact',
-    COMPLETED: 'completed'
-};
+// 绑定步骤枚举已移除（绑定流程已简化）
 
 // 消息历史管理
 function addMessageToHistory(userId, messageId, messageType, data = {}) {
@@ -460,151 +470,57 @@ function checkTriggerWords(message, chatId) {
     }
 }
 
-// 绑定流程处理函数
-async function handleBindProcess(userId, chatId, text, username) {
-    const userState = userBindStates.get(userId) || { step: BindSteps.NONE };
+// 处理文字输入（评价系统和触发词检查）
+async function handleTextInput(userId, chatId, text, username) {
+    // 检查是否在用户文字评价状态（新系统：检查内存状态，旧系统：检查数据库会话）
+    let isUserTextComment = false;
+    let userEvalSession = null;
     
-    switch (userState.step) {
-        case BindSteps.INPUT_NAME:
-            if (!text || text.startsWith('/')) {
-                bot.sendMessage(chatId, '❌ 请输入有效的老师名称');
-                return;
-            }
-            
-            userState.teacherName = text.trim();
-            userState.step = BindSteps.SELECT_REGION;
-            userBindStates.set(userId, userState);
-            
-            // 显示地区选择按钮
-            showRegionSelection(chatId, userId);
-            break;
-            
-        case BindSteps.INPUT_CONTACT:
-            if (!text || text.startsWith('/')) {
-                bot.sendMessage(chatId, '❌ 请输入有效的联系方式');
-                return;
-            }
-            
-            userState.contact = text.trim();
-            userState.step = BindSteps.COMPLETED;
-            userBindStates.set(userId, userState);
-            
-            // 完成绑定
-            await completeBinding(userId, chatId, userState, username);
-            break;
-            
-        default:
-            // 检查是否在用户文字评价状态（新系统：检查内存状态，旧系统：检查数据库会话）
-            let isUserTextComment = false;
-            let userEvalSession = null;
-            
-            // 检查新系统：内存状态中是否刚完成12项评价且正在等待文字输入
-            const userEvalState = userEvaluationStates.get(userId);
-            if (userEvalState && userEvalState.completedCount === 12 && chatId > 0) {
-                // 用户已完成12项评价，任何文本输入都认为是文字评价
-                console.log(`检测到新系统用户文字评价输入`);
-                isUserTextComment = true;
-            }
-            
-            // 检查旧系统：数据库会话状态
-            if (!isUserTextComment) {
-                userEvalSession = dbOperations.getEvaluationSessionByUserAndState(userId, 'user_text_comment');
-                if (userEvalSession && chatId > 0) {
-                    console.log(`检测到旧系统用户文字评价输入`);
-                    isUserTextComment = true;
-                }
-            }
-            
-            if (isUserTextComment) {
-                // 处理用户文字评价输入
-                await handleUserTextCommentInput(userId, text, userEvalSession);
-                return;
-            }
-            
-            // 检查是否在商家详细评价文字输入状态
-            const merchantEvalSession = dbOperations.getEvaluationSessionByUserAndState(userId, 'merchant_detail_comment');
-            if (merchantEvalSession && chatId > 0) { // 只处理私聊消息
-                // 处理商家详细评价文字输入
-                await handleMerchantDetailCommentInput(userId, text, merchantEvalSession);
-                return;
-            }
-            
-            // 不在绑定流程中，检查触发词
-            if (chatId < 0) { // 群组消息
-                console.log(`群组消息 - chatId: ${chatId}, userId: ${userId}, text: "${text}"`);
-                console.log(`当前触发词数量: ${triggerWords.length}, 模板数量: ${messageTemplates.length}`);
-                checkTriggerWords({ 
-                    text, 
-                    from: { id: userId, username }, 
-                    chat: { id: chatId },
-                    message_id: Date.now() // 添加消息ID
-                }, chatId);
-            }
-            break;
+    // 检查新系统：内存状态中是否刚完成12项评价且正在等待文字输入
+    const userEvalState = userEvaluationStates.get(userId);
+    if (userEvalState && userEvalState.completedCount === 12 && chatId > 0) {
+        // 用户已完成12项评价，任何文本输入都认为是文字评价
+        console.log(`检测到新系统用户文字评价输入`);
+        isUserTextComment = true;
+    }
+    
+    // 检查旧系统：数据库会话状态
+    if (!isUserTextComment) {
+        userEvalSession = dbOperations.getEvaluationSessionByUserAndState(userId, 'user_text_comment');
+        if (userEvalSession && chatId > 0) {
+            console.log(`检测到旧系统用户文字评价输入`);
+            isUserTextComment = true;
+        }
+    }
+    
+    if (isUserTextComment) {
+        // 处理用户文字评价输入
+        await handleUserTextCommentInput(userId, text, userEvalSession);
+        return;
+    }
+    
+    // 检查是否在商家详细评价文字输入状态
+    const merchantEvalSession = dbOperations.getEvaluationSessionByUserAndState(userId, 'merchant_detail_comment');
+    if (merchantEvalSession && chatId > 0) { // 只处理私聊消息
+        // 处理商家详细评价文字输入
+        await handleMerchantDetailCommentInput(userId, text, merchantEvalSession);
+        return;
+    }
+    
+    // 检查触发词（仅群组消息）
+    if (chatId < 0) { // 群组消息
+        console.log(`群组消息 - chatId: ${chatId}, userId: ${userId}, text: "${text}"`);
+        console.log(`当前触发词数量: ${triggerWords.length}, 模板数量: ${messageTemplates.length}`);
+        checkTriggerWords({ 
+            text, 
+            from: { id: userId, username }, 
+            chat: { id: chatId },
+            message_id: Date.now() // 添加消息ID
+        }, chatId);
     }
 }
 
-// 显示地区选择
-function showRegionSelection(chatId, userId) {
-    const keyboard = [];
-    const regionsPerRow = 2;
-    
-    for (let i = 0; i < regions.length; i += regionsPerRow) {
-        const row = [];
-        for (let j = i; j < Math.min(i + regionsPerRow, regions.length); j++) {
-            row.push({
-                text: regions[j].name,
-                callback_data: `select_region_${regions[j].id}`
-            });
-        }
-        keyboard.push(row);
-    }
-    
-    // 添加上一步按钮
-    keyboard.push([{ text: '⬅️ 上一步', callback_data: 'bind_prev_step' }]);
-    
-    const options = {
-        reply_markup: {
-            inline_keyboard: keyboard
-        }
-    };
-    
-    bot.sendMessage(chatId, '📍 请选择您所在的地区：', options);
-}
-
-// 完成绑定
-async function completeBinding(userId, chatId, userState, username) {
-    try {
-        // 创建商家记录
-        const merchantId = dbOperations.createMerchant(
-            userState.teacherName,
-            userState.regionId,
-            userState.contact,
-            userState.bindCode,
-            userId
-        );
-        
-        // 标记绑定码为已使用
-        dbOperations.useBindCode(userState.bindCode, userId);
-        
-        // 清除用户状态
-        userBindStates.delete(userId);
-        
-        // 重新加载缓存
-        await loadCacheData();
-        
-        // 发送成功消息
-        const region = regions.find(r => r.id === userState.regionId);
-        const successMessage = `✅ 绑定成功！\n\n👨‍🏫 老师名称：${userState.teacherName}\n📍 所在地区：${region ? region.name : '未知'}\n📞 联系方式：${userState.contact}\n\n您现在可以接收用户咨询了！`;
-        
-        bot.sendMessage(chatId, successMessage);
-        
-    } catch (error) {
-        console.error('完成绑定时出错:', error);
-        bot.sendMessage(chatId, '❌ 绑定过程中出现错误，请重试');
-        userBindStates.delete(userId);
-    }
-}
+// 旧的绑定流程函数已移除（绑定流程已简化）
 
 // 初始化Bot事件监听
 function initBotHandlers() {
@@ -669,7 +585,7 @@ function initBotHandlers() {
             }
             
             console.log(`发送默认欢迎消息给用户 ${userId}`);
-            bot.sendMessage(chatId, '🤖 欢迎使用营销机器人！\n\n如果您是商家，请使用 /bind <绑定码> 来绑定您的账户');
+            bot.sendMessage(chatId, '各位小鸡勇士，欢迎来到🐥小鸡管家\n关注机器人并置顶！\n避免后续要出击时找不到哦～');
             return;
         }
 
@@ -691,23 +607,44 @@ function initBotHandlers() {
                 return;
             }
             
-            // 开始绑定流程
-            const userState = {
-                step: BindSteps.WELCOME,
-                bindCode: code
-            };
-            userBindStates.set(userId, userState);
+            try {
+                // 直接完成绑定，创建商家记录
+                const merchantName = username || `用户${userId}`;
+                const merchantId = dbOperations.createMerchantSimple({
+                    user_id: userId,
+                    username: username,
+                    bind_code: code,
+                    bind_step: 5,  // 直接设为完成状态
+                    status: 'active'
+                });
+                
+                // 标记绑定码为已使用
+                dbOperations.useBindCode(code, userId);
+                
+                // 重新加载缓存数据
+                await loadCacheData();
+                
+                // 发送绑定成功消息（分两条发送）
+                const successMessage1 = `🎉 欢迎加入小鸡榜单！
+✅ 您已绑定成功！
+⏳ 接下来您只需要等待咨询即可。`;
+                
+                const successMessage2 = `📌 请置顶🐥小鸡管家机器人
+⚠️ 避免错过小鸡的客人通知哦～
+❓ 如有问题请从群内联系客服 @xiaoji57`;
+                
+                bot.sendMessage(chatId, successMessage1);
+                setTimeout(() => {
+                    bot.sendMessage(chatId, successMessage2);
+                }, 500); // 延迟500毫秒发送第二条消息
+                
+                console.log(`商家 ${userId} (${username}) 绑定成功，绑定码: ${code}`);
+                
+            } catch (error) {
+                console.error('绑定过程中出错:', error);
+                bot.sendMessage(chatId, '❌ 绑定过程中出现错误，请重试或联系管理员');
+            }
             
-            // 显示欢迎信息和开始按钮
-            const options = {
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: '🚀 开始绑定', callback_data: 'start_bind' }
-                    ]]
-                }
-            };
-            
-            bot.sendMessage(chatId, `🎉 绑定码验证成功！\n\n📋 绑定码：${code}\n📝 描述：${bindCode.description || '无'}\n\n点击下方按钮开始绑定流程：`, options);
             return;
         }
 
@@ -717,8 +654,8 @@ function initBotHandlers() {
             return;
         }
 
-        // 处理绑定流程中的文字输入
-        await handleBindProcess(userId, chatId, text, username);
+        // 处理文字输入（评价系统和触发词检查）
+        await handleTextInput(userId, chatId, text, username);
     });
 
     // 高效防重复点击机制 - 基于操作去重
@@ -1002,7 +939,7 @@ function initBotHandlers() {
                         // 创建预约会话
                         const bookingSessionId = dbOperations.createBookingSession(userId, merchantId, bookType);
                         
-                        // 发送通知给商家（异步）
+                        // 发送通知给商家（异步）- 只有绑定了真实ID的商家才能收到通知
                         if (merchant.user_id) {
                             const merchantNotification = `老师您好，
 用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您预约${bookTypeText}课程
@@ -1036,100 +973,10 @@ function initBotHandlers() {
             return;
         }
 
-        // 处理绑定流程按钮
-        if (data === 'start_bind') {
-            const userState = userBindStates.get(userId);
-            if (userState && userState.step === BindSteps.WELCOME) {
-                userState.step = BindSteps.INPUT_NAME;
-                userBindStates.set(userId, userState);
-                
-                const options = {
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: '⬅️ 上一步', callback_data: 'bind_prev_step' }
-                        ]]
-                    }
-                };
-                
-                await bot.sendMessage(chatId, '👨‍🏫 请输入您的老师名称：', options);
-            }
-            return;
-        }
+        // 绑定流程已简化，不再需要复杂的多步骤绑定按钮处理
         
-        if (data.startsWith('select_region_')) {
-            const regionId = parseInt(data.replace('select_region_', ''));
-            const userState = userBindStates.get(userId);
-            
-            if (userState && userState.step === BindSteps.SELECT_REGION) {
-                userState.regionId = regionId;
-                userState.step = BindSteps.INPUT_CONTACT;
-                userBindStates.set(userId, userState);
-                
-                const region = regions.find(r => r.id === regionId);
-                const options = {
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: '⬅️ 上一步', callback_data: 'bind_prev_step' }
-                        ]]
-                    }
-                };
-                
-                await bot.sendMessage(chatId, `✅ 已选择地区：${region ? region.name : '未知'}\n\n📞 请输入您的联系方式（如：@username 或 手机号）：`, options);
-            }
-            return;
-        }
-        
-        if (data === 'bind_prev_step') {
-            const userState = userBindStates.get(userId);
-            if (!userState) {
-                return;
-            }
-            
-            switch (userState.step) {
-                case BindSteps.INPUT_NAME:
-                    // 回到欢迎页面
-                    userState.step = BindSteps.WELCOME;
-                    userBindStates.set(userId, userState);
-                    
-                    const options = {
-                        reply_markup: {
-                            inline_keyboard: [[
-                                { text: '🚀 开始绑定', callback_data: 'start_bind' }
-                            ]]
-                        }
-                    };
-                    
-                    await bot.sendMessage(chatId, `🎉 绑定码验证成功！\n\n📋 绑定码：${userState.bindCode}\n\n点击下方按钮开始绑定流程：`, options);
-                    break;
-                    
-                case BindSteps.SELECT_REGION:
-                    // 回到输入名称
-                    userState.step = BindSteps.INPUT_NAME;
-                    userState.teacherName = undefined;
-                    userBindStates.set(userId, userState);
-                    
-                    const nameOptions = {
-                        reply_markup: {
-                            inline_keyboard: [[
-                                { text: '⬅️ 上一步', callback_data: 'bind_prev_step' }
-                            ]]
-                        }
-                    };
-                    
-                    await bot.sendMessage(chatId, '👨‍🏫 请输入您的老师名称：', nameOptions);
-                    break;
-                    
-                case BindSteps.INPUT_CONTACT:
-                    // 回到地区选择
-                    userState.step = BindSteps.SELECT_REGION;
-                    userState.regionId = undefined;
-                    userBindStates.set(userId, userState);
-                    
-                    showRegionSelection(chatId, userId);
-                    break;
-            }
-            return;
-        }
+        // 地区选择处理已移除（绑定流程已简化）
+        // 绑定流程上一步按钮处理已移除（绑定流程已简化）
 
         // 处理原有按钮点击
         if (data.startsWith('contact_')) {
@@ -1381,16 +1228,19 @@ async function sendCourseCompletionCheck(userId, merchantId, bookingSessionId, u
             ]
         };
         
-        // 使用不删除历史的方式发送课程完成确认消息，保留此信息
-        await sendMessageWithoutDelete(merchantId, merchantMessage, { 
-            reply_markup: merchantKeyboard 
-        }, 'course_completion_check', {
-            bookingSessionId,
-            userId,
-            userFullName,
-            username,
-            teacherName
-        });
+        // 只有真实用户ID才发送给商家
+        if (merchantId < 9000000000) {
+            // 使用不删除历史的方式发送课程完成确认消息，保留此信息
+            await sendMessageWithoutDelete(merchantId, merchantMessage, { 
+                reply_markup: merchantKeyboard 
+            }, 'course_completion_check', {
+                bookingSessionId,
+                userId,
+                userFullName,
+                username,
+                teacherName
+            });
+        }
         
     } catch (error) {
         console.error('发送课程完成确认消息失败:', error);
@@ -1607,7 +1457,7 @@ async function handleRebookFlow(userId, data, query) {
                     return;
                 }
                 
-                // 发送通知给商家
+                // 发送通知给商家 - 只有绑定了真实ID的商家才能收到通知
                 if (merchant.user_id) {
                     const merchantNotification = `老师您好，
 用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您重新预约${bookTypeText}课程
@@ -3407,7 +3257,12 @@ async function handleRealBroadcast(userId, evaluationId, query) {
         console.log(`播报消息内容:`, broadcastMessage);
 
         // 发送到群组播报
-        const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1002793326688';
+        const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+        if (!GROUP_CHAT_ID) {
+            console.error('❌ GROUP_CHAT_ID 环境变量未设置');
+            await sendMessageWithoutDelete(userId, '❌ 播报失败：群组配置未设置，请联系管理员。', {}, 'broadcast_error');
+            return;
+        }
         console.log(`目标群组ID: ${GROUP_CHAT_ID}`);
         
         try {
@@ -3499,7 +3354,12 @@ async function handleAnonymousBroadcast(userId, evaluationId, query) {
         console.log(`播报消息内容:`, broadcastMessage);
 
         // 发送到群组播报
-        const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1002793326688';
+        const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+        if (!GROUP_CHAT_ID) {
+            console.error('❌ GROUP_CHAT_ID 环境变量未设置');
+            await sendMessageWithoutDelete(userId, '❌ 播报失败：群组配置未设置，请联系管理员。', {}, 'broadcast_error');
+            return;
+        }
         console.log(`目标群组ID: ${GROUP_CHAT_ID}`);
         
         try {
@@ -4171,7 +4031,10 @@ async function handleBookingSuccessFlow(userId, data, query) {
                     const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
                     const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
                     
-                    await sendCourseCompletionCheck(userId, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
+                    // 只有绑定了真实ID的商家才发送课程完成确认
+                    if (merchant.user_id) {
+                        await sendCourseCompletionCheck(userId, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
+                    }
                 }, 30 * 60 * 1000); // 30分钟 = 30 * 60 * 1000毫秒
                 
                 console.log(`用户 ${userId} 确认约课成功，预约会话 ${bookingSessionId}，订单ID ${orderId}`);
@@ -4300,18 +4163,8 @@ async function getBotUsername() {
         console.error('❌ 动态获取Bot用户名失败:', error);
     }
     
-    // 根据环境选择默认值
-    const nodeEnv = process.env.NODE_ENV || 'development';
-    if (nodeEnv === 'production') {
-        cachedBotUsername = 'xiaojisystembot'; // Railway生产环境
-    } else if (nodeEnv === 'staging') {
-        cachedBotUsername = 'xiaoji_daniao_bot'; // 测试环境
-    } else {
-        cachedBotUsername = 'xiaojisystembot'; // 开发环境默认
-    }
-    
-    console.log(`⚠️ 使用环境默认Bot用户名 (${nodeEnv}): ${cachedBotUsername}`);
-    return cachedBotUsername;
+    // 如果所有方法都失败，抛出错误
+    throw new Error('无法获取Bot用户名：请设置BOT_USERNAME环境变量或确保Bot可用');
 }
 
 // 清除Bot用户名缓存（用于重新获取）

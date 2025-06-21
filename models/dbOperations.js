@@ -19,6 +19,11 @@ const dbOperations = {
         return stmt.get(code);
     },
 
+    getBindCodeById(id) {
+        const stmt = db.prepare('SELECT * FROM bind_codes WHERE id = ?');
+        return stmt.get(id);
+    },
+
     getAllBindCodes() {
         const stmt = db.prepare(`
             SELECT bc.*, m.teacher_name, m.username 
@@ -116,6 +121,33 @@ const dbOperations = {
         
         // 清理相关缓存
         cache.set('all_merchants', null);
+        
+        return result.lastInsertRowid;
+    },
+
+    // 简化的商家创建方法 - 用于新的绑定流程
+    createMerchantSimple(merchantData) {
+        const stmt = db.prepare(`
+            INSERT INTO merchants (user_id, username, bind_code, bind_step, status, teacher_name, created_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        
+        const teacherName = merchantData.username || `用户${merchantData.user_id}`;
+        const now = Math.floor(Date.now() / 1000);
+        
+        const result = stmt.run(
+            merchantData.user_id,
+            merchantData.username,
+            merchantData.bind_code,
+            merchantData.bind_step,
+            merchantData.status,
+            teacherName,
+            now
+        );
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
         
         return result.lastInsertRowid;
     },
@@ -336,6 +368,136 @@ const dbOperations = {
         // 直接使用db而不是getPreparedStatement，避免缓存问题
         const stmt = db.prepare('UPDATE merchants SET status = CASE WHEN status = ? THEN ? ELSE ? END WHERE id = ?');
         const result = stmt.run('active', 'suspended', 'active', id);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 检查商家关注状态
+    checkMerchantsFollowStatus(merchantIds) {
+        const results = {};
+        
+        for (const merchantId of merchantIds) {
+            const merchant = this.getMerchantById(merchantId);
+            if (!merchant) {
+                results[merchantId] = { followed: false, reason: '商家不存在' };
+                continue;
+            }
+            
+            if (!merchant.username) {
+                results[merchantId] = { followed: false, reason: '未设置用户名' };
+                continue;
+            }
+            
+            // 从交互记录中查找用户是否关注了机器人
+            const userRecord = db.prepare(`
+                SELECT user_id, username, first_name, last_name, timestamp
+                FROM interactions 
+                WHERE username = ? 
+                ORDER BY timestamp DESC 
+                LIMIT 1
+            `).get(merchant.username);
+            
+            if (userRecord) {
+                results[merchantId] = { 
+                    followed: true, 
+                    user_id: userRecord.user_id,
+                    first_name: userRecord.first_name,
+                    last_name: userRecord.last_name,
+                    last_interaction: userRecord.timestamp
+                };
+                
+                // 如果商家的user_id为空或0，更新它为真实的user_id
+                if (!merchant.user_id || merchant.user_id === 0) {
+                    this.updateMerchantUserId(merchantId, userRecord.user_id);
+                }
+            } else {
+                results[merchantId] = { followed: false, reason: '未关注机器人' };
+            }
+        }
+        
+        return results;
+    },
+
+    // 更新商家的用户ID
+    updateMerchantUserId(merchantId, userId) {
+        const stmt = db.prepare('UPDATE merchants SET user_id = ? WHERE id = ?');
+        const result = stmt.run(userId, merchantId);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 单独更新商家地区
+    updateMerchantRegion(id, regionId) {
+        const stmt = db.prepare('UPDATE merchants SET region_id = ? WHERE id = ?');
+        const result = stmt.run(regionId, id);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 单独更新商家艺名
+    updateMerchantTeacherName(id, teacherName) {
+        const stmt = db.prepare('UPDATE merchants SET teacher_name = ? WHERE id = ?');
+        const result = stmt.run(teacherName, id);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 单独更新商家联系方式
+    updateMerchantContact(id, contact) {
+        const stmt = db.prepare('UPDATE merchants SET contact = ? WHERE id = ?');
+        const result = stmt.run(contact, id);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 单独更新商家价格
+    updateMerchantPrices(id, price1, price2) {
+        const stmt = db.prepare('UPDATE merchants SET price1 = ?, price2 = ? WHERE id = ?');
+        const result = stmt.run(price1, price2, id);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 单独更新商家状态
+    updateMerchantStatus(id, status) {
+        const stmt = db.prepare('UPDATE merchants SET status = ? WHERE id = ?');
+        const result = stmt.run(status, id);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 单独更新商家绑定码
+    updateMerchantBindCode(id, bindCode) {
+        const stmt = db.prepare('UPDATE merchants SET bind_code = ? WHERE id = ?');
+        const result = stmt.run(bindCode || null, id);
         
         // 清理相关缓存
         cache.set('all_merchants', null);
@@ -728,7 +890,7 @@ const dbOperations = {
             orderData.user_name,
             orderData.user_username,
             orderData.merchant_id,
-            orderData.merchant_user_id,
+            orderData.merchant_user_id || null,
             orderData.teacher_name,
             orderData.teacher_contact,
             orderData.course_type,

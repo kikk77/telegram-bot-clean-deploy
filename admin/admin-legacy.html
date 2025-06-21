@@ -464,7 +464,13 @@
             </div>
 
             <div class="card">
-                <h3>👥 已绑定商家列表</h3>
+                <div class="section-header">
+                    <h3>📊 已绑定商家列表</h3>
+                    <div class="header-actions">
+                        <button class="btn btn-success" onclick="openNewMerchantModal()">➕ 新增商家</button>
+                        <button class="btn btn-info" onclick="refreshFollowStatus()">🔄 刷新关注状态</button>
+                    </div>
+                </div>
                 <div id="merchantsList"></div>
             </div>
 
@@ -544,6 +550,20 @@
                             </div>
                         </div>
 
+                        <!-- 绑定码管理 -->
+                        <div class="card" style="margin-bottom: 20px;">
+                            <h4>🔗 绑定码管理</h4>
+                            <div class="form-group">
+                                <label>当前绑定码：</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <input type="text" id="editBindCode" placeholder="未设置绑定码" style="flex: 1;">
+                                    <button type="button" class="btn btn-small" onclick="generateNewBindCode()" style="white-space: nowrap;">生成新绑定码</button>
+                                    <button type="button" class="btn btn-small btn-warning" onclick="clearBindCode()" style="white-space: nowrap;">清除绑定码</button>
+                                </div>
+                                <small>绑定码用于商家绑定，如果修改将影响现有绑定关系</small>
+                            </div>
+                        </div>
+
                         <!-- 基本功信息 -->
                         <div class="card" style="margin-bottom: 20px;">
                             <h4>💃 老师自填基本功</h4>
@@ -579,6 +599,37 @@
                             <button type="button" onclick="closeMerchantEditModal()" class="btn btn-secondary">取消</button>
                             <button type="button" onclick="previewMerchantInfo()" class="btn btn-warning">预览</button>
                             <button type="submit" class="btn btn-primary">保存修改</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 新增商家模态框 -->
+            <div id="newMerchantModal" class="modal">
+                <div class="modal-content" style="max-width: 600px;">
+                    <span class="close" onclick="closeNewMerchantModal()">&times;</span>
+                    <h3>➕ 新增商家</h3>
+                    <form onsubmit="createNewMerchant(event)">
+                        <div class="form-group">
+                            <label>商家名称：</label>
+                            <input type="text" id="newMerchantName" required placeholder="请输入商家名称">
+                            <small>此名称将作为商家的艺名显示</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Telegram用户名：</label>
+                            <input type="text" id="newMerchantUsername" required placeholder="请输入用户名，例如：username">
+                            <small>不需要输入@符号，只需要输入用户名部分</small>
+                        </div>
+                        <div class="form-group">
+                            <label>绑定码：</label>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="text" id="newMerchantBindCode" readonly style="flex: 1;">
+                                <button type="button" class="btn btn-small" onclick="generateBindCodeForNewMerchant()">生成绑定码</button>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" onclick="closeNewMerchantModal()" class="btn btn-secondary">取消</button>
+                            <button type="submit" class="btn btn-primary">创建商家</button>
                         </div>
                     </form>
                 </div>
@@ -619,7 +670,7 @@
         <!-- 测试发送 -->
         <div id="test" class="tab-content">
             <div class="card">
-                <h3>📤 发送测试消息</h3>
+                <h3>📤 发送信息</h3>
                 <form onsubmit="sendTestMessage(event)">
                     <div class="form-row">
                         <div class="form-group">
@@ -849,10 +900,10 @@
             const result = await response.json();
             
             if (!result.success) {
-                throw new Error(result.error || '请求失败');
+                throw new Error(result.error || result.message || '请求失败');
             }
             
-            return result.data;
+            return result.data || result;
         }
 
         // 加载绑定码数据
@@ -926,9 +977,25 @@
 
             try {
                 showLoading();
-                await apiRequest('/api/bind-codes', 'DELETE', { id });
-                showAlert('绑定码删除成功');
-                await loadBindCodes();
+                const response = await apiRequest(`/api/bind-codes/${id}`, 'DELETE');
+                
+                if (response.success) {
+                    showAlert(response.message || '绑定码删除成功');
+                    await loadBindCodes();
+                } else {
+                    // 如果是因为绑定码已被使用而无法删除
+                    if (response.code === 'BIND_CODE_IN_USE') {
+                        const confirmForce = confirm(
+                            `${response.error}\n\n是否要强制删除？\n⚠️ 警告：强制删除将同时删除相关的商家记录！`
+                        );
+                        if (confirmForce) {
+                            await forceDeleteBindCode(id);
+                            return;
+                        }
+                    } else {
+                        showAlert(response.error || '删除绑定码失败', 'error');
+                    }
+                }
             } catch (error) {
                 showAlert('删除绑定码失败: ' + error.message, 'error');
             } finally {
@@ -938,13 +1005,27 @@
 
         // 强制删除已使用的绑定码
         async function forceDeleteBindCode(id) {
-            if (!confirm('确定要强制删除这个已使用的绑定码吗？\n注意：这将删除已经绑定的商家相关的绑定码记录！')) return;
+            // 如果是从deleteBindCode调用的，不需要再次确认
+            const needConfirm = arguments.length === 1;
+            
+            if (needConfirm && !confirm('确定要强制删除这个已使用的绑定码吗？\n⚠️ 注意：这将同时删除相关的商家记录！')) {
+                return;
+            }
 
             try {
                 showLoading();
-                await apiRequest('/api/bind-codes/force-delete', 'DELETE', { id });
-                showAlert('绑定码已强制删除');
-                await loadBindCodes();
+                const response = await apiRequest(`/api/bind-codes/${id}/force`, 'DELETE');
+                
+                if (response.success) {
+                    showAlert(response.message || '绑定码已强制删除');
+                    await loadBindCodes();
+                    // 如果删除了商家，也要刷新商家列表
+                    if (response.deletedMerchant) {
+                        await loadMerchants();
+                    }
+                } else {
+                    showAlert(response.error || '强制删除绑定码失败', 'error');
+                }
             } catch (error) {
                 showAlert('强制删除绑定码失败: ' + error.message, 'error');
             } finally {
@@ -954,13 +1035,22 @@
 
         // 批量删除测试绑定码
         async function batchDeleteTestBindCodes() {
-            if (!confirm('确定要批量删除所有测试绑定码吗？\n这将删除所有描述中包含"测试"的绑定码（包括已使用的）！')) return;
+            if (!confirm('确定要批量删除所有测试绑定码吗？\n⚠️ 这将删除所有描述中包含"测试"的绑定码（包括已使用的）！\n⚠️ 已使用的绑定码将同时删除相关商家记录！')) return;
 
             try {
                 showLoading();
-                const result = await apiRequest('/api/bind-codes/batch-delete-test', 'DELETE');
-                showAlert(`批量删除成功！删除了 ${result.deletedCount} 个测试绑定码`);
-                await loadBindCodes();
+                const response = await apiRequest('/api/bind-codes/batch-delete-test', 'DELETE');
+                
+                if (response.success) {
+                    showAlert(response.message || '批量删除成功');
+                    await loadBindCodes();
+                    // 如果删除了商家，也要刷新商家列表
+                    if (response.deletedMerchants > 0) {
+                        await loadMerchants();
+                    }
+                } else {
+                    showAlert(response.error || '批量删除测试绑定码失败', 'error');
+                }
             } catch (error) {
                 showAlert('批量删除测试绑定码失败: ' + error.message, 'error');
             } finally {
@@ -1310,79 +1400,65 @@
             }
         }
 
+        // 渲染商家列表
         function renderMerchants() {
             const container = document.getElementById('merchantsList');
+            if (!container) return;
+
             if (merchants.length === 0) {
-                container.innerHTML = '<p>暂无已绑定的商家</p>';
+                container.innerHTML = '<p>暂无商家数据</p>';
                 return;
             }
-            
+
             container.innerHTML = merchants.map(merchant => {
-                // 动态获取Bot用户名生成商家跳转URL链接
-                let botUsername = window.BOT_USERNAME;
-                if (!botUsername) {
-                    // 根据页面URL判断环境，选择对应的默认Bot用户名
-                    const hostname = window.location.hostname;
-                    if (hostname.includes('staging') || hostname.includes('test')) {
-                        botUsername = 'xiaoji_daniao_bot'; // 测试环境
+                const regionName = merchant.region_name || '未设置';
+                const teacherName = merchant.teacher_name || '未设置';
+                const contact = merchant.contact || '未设置';
+                const username = merchant.username || '未设置';
+                const bindCode = merchant.bind_code || '未设置';
+                const status = merchant.status || 'inactive';
+                const userId = merchant.user_id;
+                
+                // 关注状态显示
+                let followStatus = '';
+                if (merchant.followStatus) {
+                    if (merchant.followStatus.followed) {
+                        followStatus = `<span class="badge success" title="用户ID: ${merchant.followStatus.user_id}">✅ 已关注</span>`;
                     } else {
-                        botUsername = 'xiaojisystembot'; // 生产环境
+                        followStatus = `<span class="badge danger" title="${merchant.followStatus.reason}">❌ 未关注</span>`;
                     }
+                } else {
+                    followStatus = `<span class="badge secondary">❓ 未检测</span>`;
                 }
-                const merchantUrl = `https://t.me/${botUsername}?start=merchant_${merchant.id}`;
                 
                 return `
                 <div class="list-item">
                     <div class="list-item-content">
-                        <strong>👨‍🏫 ${merchant.teacher_name || '未知老师'}</strong>
+                        <strong>👨‍🏫 ${teacherName}</strong>
                         <div style="color: #666; font-size: 14px; margin-top: 5px;">
-                            📍 地区: ${merchant.region_name || '未设置'}
+                            用户名: @${username} | 地区: ${regionName} | 联系方式: ${contact}
                         </div>
-                        <div style="color: #666; font-size: 14px;">
-                            📞 联系方式: ${merchant.contact || '未设置'}
-                        </div>
-                        <div style="color: #666; font-size: 14px;">
-                            🔑 绑定码: <code>${merchant.bind_code || '未知'}</code>
-                        </div>
-                        <div style="color: #666; font-size: 14px;">
-                            👤 用户ID: ${merchant.user_id} ${merchant.username ? `(@${merchant.username})` : ''}
-                        </div>
-                        <div style="color: #999; font-size: 12px; margin-top: 5px;">
-                            绑定时间: ${new Date(merchant.created_at * 1000).toLocaleString()}
-                        </div>
-                        <div style="margin-top: 8px;">
-                            <span class="badge ${merchant.status === 'active' ? 'success' : 'warning'}">
-                                ${merchant.status === 'active' ? '正常' : '暂停'}
-                            </span>
-                            <span class="badge info">
-                                绑定步骤: ${merchant.bind_step}/5
-                            </span>
-                        </div>
-                        <div style="margin-top: 10px; padding: 10px; background: #f0f8ff; border-radius: 5px; border-left: 4px solid #007bff;">
-                            <strong style="color: #007bff;">🔗 频道推广链接：</strong>
-                            <div style="margin-top: 5px;">
-                                <input type="text" value="${merchantUrl}" readonly 
-                                       style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px; font-family: monospace; font-size: 12px;" 
-                                       onclick="this.select()" title="点击选择全部">
-                            </div>
-                            <div style="margin-top: 5px; display: flex; gap: 5px;">
-                                <button class="btn btn-small" style="background: #28a745; color: white;" onclick="copyMerchantUrl('${merchantUrl}')">📋 复制链接</button>
-                                <button class="btn btn-small" style="background: #17a2b8; color: white;" onclick="openMerchantUrl('${merchantUrl}')">🔗 测试链接</button>
-                            </div>
-                            <div style="margin-top: 3px; font-size: 11px; color: #666;">
-                                💡 用户点击此链接可直接跳转到机器人查看商家信息并开始约课流程
-                            </div>
+                        <div style="margin-top: 5px;">
+                            <span class="badge ${status === 'active' ? 'success' : 'danger'}">${status === 'active' ? '启用' : '禁用'}</span>
+                            ${followStatus}
+                            <span class="badge info">绑定码: ${bindCode}</span>
+                            ${userId && userId > 0 ? `<span class="badge primary">ID: ${userId}</span>` : ''}
                         </div>
                     </div>
                     <div class="list-item-actions">
                         <button class="btn btn-primary btn-small" onclick="editMerchant(${merchant.id})">编辑</button>
-                        <button class="btn ${merchant.status === 'active' ? 'btn-warning' : 'btn-success'} btn-small" onclick="toggleMerchantStatus(${merchant.id})">
-                            ${merchant.status === 'active' ? '暂停' : '启动'}
+                        <button class="btn btn-info btn-small" onclick="refreshSingleMerchantFollowStatus(${merchant.id})" title="检测此商家的关注状态">
+                            🔄 检测关注
+                        </button>
+                        <button class="btn ${status === 'active' ? 'btn-warning' : 'btn-success'} btn-small" 
+                                onclick="toggleMerchantStatus(${merchant.id})" 
+                                title="点击${status === 'active' ? '禁用' : '启用'}商家">
+                            ${status === 'active' ? '禁用' : '启用'}
                         </button>
                         <button class="btn btn-danger btn-small" onclick="deleteMerchant(${merchant.id})">删除</button>
                     </div>
                 </div>
-            `;
+                `;
             }).join('');
         }
 
@@ -1395,7 +1471,7 @@
                 return;
             }
 
-            const merchant = merchants.find(m => m.id === id);
+            const merchant = merchants.find(m => m.id == id); // 使用松散比较，避免类型问题
             if (!merchant) return;
 
             // 填充基本信息
@@ -1403,6 +1479,7 @@
             document.getElementById('editTeacherName').value = merchant.teacher_name || '';
             document.getElementById('editRegionId').value = merchant.region_id || '';
             document.getElementById('editContact').value = merchant.contact || '';
+            document.getElementById('editBindCode').value = merchant.bind_code || '';
             
             // 填充模板信息
             document.getElementById('editAdvantages').value = merchant.advantages || '';
@@ -1461,6 +1538,36 @@
             }
         }
 
+        // 生成新绑定码
+        async function generateNewBindCode() {
+            try {
+                showLoading();
+                const response = await apiRequest('/api/bind-codes', 'POST', {
+                    description: '商家编辑-手动生成'
+                });
+                
+                if (response.success && response.data && response.data.code) {
+                    document.getElementById('editBindCode').value = response.data.code;
+                    showAlert('新绑定码生成成功', 'success');
+                } else {
+                    throw new Error('生成绑定码失败：响应格式错误');
+                }
+            } catch (error) {
+                console.error('生成绑定码失败:', error);
+                showAlert('生成绑定码失败: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 清除绑定码
+        function clearBindCode() {
+            if (confirm('确定要清除当前绑定码吗？清除后商家将无法使用此绑定码进行绑定。')) {
+                document.getElementById('editBindCode').value = '';
+                showAlert('绑定码已清除', 'info');
+            }
+        }
+
         // 预览商家信息
         function previewMerchantInfo() {
             const regionSelect = document.getElementById('editRegionId');
@@ -1501,6 +1608,7 @@
             const teacherName = document.getElementById('editTeacherName').value;
             const regionId = document.getElementById('editRegionId').value;
             const contact = document.getElementById('editContact').value;
+            const bindCode = document.getElementById('editBindCode').value;
             const advantages = document.getElementById('editAdvantages').value;
             const disadvantages = document.getElementById('editDisadvantages').value;
             const price1 = document.getElementById('editPrice1').value ? parseInt(document.getElementById('editPrice1').value) : null;
@@ -1516,6 +1624,7 @@
                     teacherName,
                     regionId,
                     contact,
+                    bindCode,
                     advantages,
                     disadvantages,
                     price1,
@@ -1537,8 +1646,14 @@
 
         // 暂停/启动商家
         async function toggleMerchantStatus(id) {
-            const merchant = merchants.find(m => m.id === id);
-            if (!merchant) return;
+            console.log('toggleMerchantStatus 调用:', { id, idType: typeof id, merchantsLength: merchants.length, merchants });
+            const merchant = merchants.find(m => m.id == id); // 使用松散比较，避免类型问题
+            console.log('找到的商家:', merchant);
+            if (!merchant) {
+                console.error('未找到商家，ID:', id);
+                showAlert('未找到指定的商家，请刷新页面后重试', 'error');
+                return;
+            }
 
             const action = merchant.status === 'active' ? '暂停' : '启动';
             
@@ -1566,7 +1681,7 @@
         // 删除商家
         async function deleteMerchant(id) {
             // 找到要删除的商家
-            const merchant = merchants.find(m => m.id === id);
+            const merchant = merchants.find(m => m.id == id); // 使用松散比较，避免类型问题
             if (!merchant) {
                 showAlert('未找到指定的商家', 'error');
                 return;
@@ -1783,9 +1898,10 @@
         // 更新下拉选择框
         function updateSelects() {
             // 更新商家选择框
-            const merchantSelects = document.querySelectorAll('#buttonMerchant');
+            const merchantSelects = document.querySelectorAll('#buttonMerchant, #testMerchant');
             merchantSelects.forEach(select => {
-                select.innerHTML = '<option value="">选择商家</option>' + 
+                const defaultOption = select.id === 'testMerchant' ? '<option value="">请选择商家</option>' : '<option value="">选择商家</option>';
+                select.innerHTML = defaultOption + 
                     merchants.map(m => `<option value="${m.id}">${m.teacher_name || '未知商家'}</option>`).join('');
             });
 
@@ -2039,15 +2155,19 @@
         // 更新商家选择器
         function updateMerchantSelect() {
             const select = document.getElementById('testMerchant');
+            const currentValue = select.value; // 保存当前选中的值
             select.innerHTML = '<option value="">请选择商家</option>';
             
+            console.log('🔍 当前商家数据:', merchants);
+            
             merchants.forEach(merchant => {
-                // 检查绑定步骤是否完成（bind_step = 5）且状态为活跃
-                if (merchant.bind_step === 5 && merchant.status === 'active') {
+                // 放宽筛选条件：只要有商家名称就可以选择
+                if (merchant.teacher_name) {
                     const option = document.createElement('option');
                     option.value = merchant.id;
-                    option.textContent = `${merchant.teacher_name || '未知姓名'} - ${merchant.region_name || '未知地区'}`;
+                    option.textContent = `${merchant.teacher_name} - ${merchant.region_name || '未知地区'}`;
                     select.appendChild(option);
+                    console.log(`✅ 添加商家选项: ${merchant.teacher_name} (ID: ${merchant.id})`);
                 }
             });
             
@@ -2055,9 +2175,19 @@
             if (select.children.length === 1) {
                 const option = document.createElement('option');
                 option.value = '';
-                option.textContent = '暂无可用商家（需要完成绑定且状态为活跃）';
+                option.textContent = '暂无商家数据，请检查商家管理页面';
                 option.disabled = true;
                 select.appendChild(option);
+                console.log('⚠️ 没有找到可用商家');
+            } else {
+                console.log(`✅ 共添加了 ${select.children.length - 1} 个商家选项`);
+            }
+            
+            // 恢复之前选中的值
+            if (currentValue) {
+                select.value = currentValue;
+                // 如果恢复了选中值，触发预览更新
+                handleMerchantChange();
             }
             
             select.onchange = handleMerchantChange;
@@ -2074,7 +2204,7 @@
                 return;
             }
             
-            const merchant = merchants.find(m => m.id == merchantId);
+            const merchant = merchants.find(m => m.id == merchantId); // 已经使用松散比较
             if (merchant) {
                 // 使用与商家管理页面相同的格式
                 const previewText = `地区：#${merchant.region_name || 'xx'}              艺名：${merchant.teacher_name || '未填写'}
@@ -2366,6 +2496,188 @@
 
         // 初始化按钮构建器
         addButtonRow();
+
+        // 新增商家模态框
+        function openNewMerchantModal() {
+            document.getElementById('newMerchantModal').style.display = 'block';
+        }
+
+        // 关闭新增商家模态框
+        function closeNewMerchantModal() {
+            document.getElementById('newMerchantModal').style.display = 'none';
+        }
+
+        // 创建新商家
+        async function createNewMerchant(event) {
+            event.preventDefault();
+            showLoading();
+            
+            try {
+                const name = document.getElementById('newMerchantName').value;
+                const username = document.getElementById('newMerchantUsername').value;
+                const bindCode = document.getElementById('newMerchantBindCode').value;
+                
+                if (!name || !username) {
+                    throw new Error('请填写商家名称和用户名');
+                }
+                
+                const requestData = {
+                    teacher_name: name,
+                    username: username
+                };
+                
+                // 如果有绑定码，包含在请求中
+                if (bindCode) {
+                    requestData.bind_code = bindCode;
+                }
+                
+                const response = await apiRequest('/api/merchants', 'POST', requestData);
+                
+                let message = '新商家创建成功！';
+                if (response.bindCode) {
+                    message += `\n绑定码：${response.bindCode}`;
+                }
+                message += '\n商家需要使用绑定码主动绑定才会收到通知。';
+                
+                showAlert(message);
+                closeNewMerchantModal();
+                
+                // 清空表单
+                document.getElementById('newMerchantName').value = '';
+                document.getElementById('newMerchantUsername').value = '';
+                document.getElementById('newMerchantBindCode').value = '';
+                
+                await loadMerchants();
+                await loadBindCodes(); // 刷新绑定码列表
+            } catch (error) {
+                showAlert('创建新商家失败: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 生成绑定码
+        async function generateBindCodeForNewMerchant() {
+            try {
+                showLoading();
+                const name = document.getElementById('newMerchantName').value;
+                const username = document.getElementById('newMerchantUsername').value;
+                
+                if (!name || !username) {
+                    showAlert('请先填写商家名称和用户名', 'error');
+                    return;
+                }
+                
+                console.log('正在生成绑定码...');
+                const response = await apiRequest('/api/bind-codes', 'POST', {
+                    description: `管理员创建: ${name} (@${username})`
+                });
+                
+                console.log('API响应:', response);
+                
+                // 兼容不同的响应格式
+                let bindCode = null;
+                if (response && response.success && response.data && response.data.code) {
+                    bindCode = response.data.code;
+                } else if (response && response.code) {
+                    bindCode = response.code;
+                } else {
+                    console.error('响应格式错误:', response);
+                    throw new Error('生成绑定码失败：服务器响应格式错误');
+                }
+                
+                document.getElementById('newMerchantBindCode').value = bindCode;
+                showAlert('绑定码生成成功！');
+                
+            } catch (error) {
+                console.error('生成绑定码失败:', error);
+                showAlert('生成绑定码失败: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 刷新所有商家关注状态
+        async function refreshFollowStatus() {
+            try {
+                showLoading();
+                
+                if (merchants.length === 0) {
+                    showAlert('没有商家数据需要检查', 'warning');
+                    return;
+                }
+                
+                // 获取所有商家ID
+                const merchantIds = merchants.map(m => m.id);
+                
+                // 调用API检查关注状态
+                const response = await apiRequest('/api/merchants/check-follow-status', 'POST', {
+                    merchantIds: merchantIds
+                });
+                
+                if (response.success) {
+                    // 更新商家数据中的关注状态
+                    merchants.forEach(merchant => {
+                        if (response.result[merchant.id]) {
+                            merchant.followStatus = response.result[merchant.id];
+                        }
+                    });
+                    
+                    // 重新渲染商家列表
+                    renderMerchants();
+                    
+                    // 统计关注情况
+                    const followedCount = merchants.filter(m => m.followStatus && m.followStatus.followed).length;
+                    const totalCount = merchants.length;
+                    
+                    showAlert(`关注状态刷新完成！\n已关注: ${followedCount}/${totalCount} 个商家`);
+                } else {
+                    throw new Error(response.message || '检查关注状态失败');
+                }
+            } catch (error) {
+                showAlert('刷新关注状态失败: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 刷新单个商家关注状态
+        async function refreshSingleMerchantFollowStatus(merchantId) {
+            try {
+                showLoading();
+                
+                const merchant = merchants.find(m => m.id == merchantId);
+                if (!merchant) {
+                    showAlert('商家不存在', 'error');
+                    return;
+                }
+                
+                // 调用API检查单个商家的关注状态
+                const response = await apiRequest('/api/merchants/check-follow-status', 'POST', {
+                    merchantIds: [merchantId]
+                });
+                
+                if (response.success && response.result[merchantId]) {
+                    // 更新该商家的关注状态
+                    merchant.followStatus = response.result[merchantId];
+                    
+                    // 重新渲染商家列表
+                    renderMerchants();
+                    
+                    // 显示检测结果
+                    const status = merchant.followStatus.followed ? '已关注机器人' : '未关注机器人';
+                    const reason = merchant.followStatus.reason ? ` (${merchant.followStatus.reason})` : '';
+                    showAlert(`商家 ${merchant.teacher_name} 的关注状态：${status}${reason}`, 
+                             merchant.followStatus.followed ? 'success' : 'warning');
+                } else {
+                    throw new Error(response.message || '检查关注状态失败');
+                }
+            } catch (error) {
+                showAlert(`检测商家关注状态失败: ${error.message}`, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
     </script>
 </body>
 </html> 

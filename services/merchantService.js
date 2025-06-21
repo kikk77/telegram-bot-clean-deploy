@@ -14,7 +14,7 @@ class MerchantService {
             
             if (!merchant) {
                 // 检查是否是绑定码
-                const bindCode = dbOperations.getBindCodeByCode(message);
+                const bindCode = dbOperations.getBindCode(message);
                 if (bindCode && !bindCode.used) {
                     // 开始绑定流程
                     await this.startBindingProcess(userId, bindCode, username, firstName, lastName);
@@ -35,21 +35,19 @@ class MerchantService {
     // 开始绑定流程
     async startBindingProcess(userId, bindCode, username, firstName, lastName) {
         try {
-            // 创建商家记录
+            // 创建商家记录 - 使用createMerchantSimple方法
             const merchantData = {
                 user_id: userId,
                 username: username,
-                first_name: firstName,
-                last_name: lastName,
                 bind_code: bindCode.code,
                 bind_step: 1,
                 status: 'binding'
             };
             
-            const merchantId = dbOperations.createMerchant(merchantData);
+            const merchantId = dbOperations.createMerchantSimple(merchantData);
             
             // 标记绑定码为已使用
-            dbOperations.markBindCodeAsUsed(bindCode.id, userId, username);
+            dbOperations.useBindCode(bindCode.code, userId);
             
             // 发送绑定成功消息
             await this.bot.sendMessage(userId, `✅ 绑定码验证成功！
@@ -113,7 +111,7 @@ class MerchantService {
             
             // 更新商家地区信息
             dbOperations.updateMerchantRegion(merchant.id, regionId);
-            dbOperations.updateMerchantBindStep(merchant.id, 2);
+            dbOperations.updateMerchantBindStep(merchant.user_id, 2);
             
             this.bot.answerCallbackQuery(query.id, { text: `已选择地区: ${region.name}` });
             
@@ -157,7 +155,7 @@ class MerchantService {
         try {
             // 更新艺名
             dbOperations.updateMerchantTeacherName(merchant.id, teacherName);
-            dbOperations.updateMerchantBindStep(merchant.id, 3);
+            dbOperations.updateMerchantBindStep(merchant.user_id, 3);
             
             await this.bot.sendMessage(merchant.user_id, `✅ 艺名设置完成: ${teacherName}
 
@@ -177,7 +175,7 @@ class MerchantService {
         try {
             // 更新联系方式
             dbOperations.updateMerchantContact(merchant.id, contact);
-            dbOperations.updateMerchantBindStep(merchant.id, 4);
+            dbOperations.updateMerchantBindStep(merchant.user_id, 4);
             
             await this.bot.sendMessage(merchant.user_id, `✅ 联系方式设置完成: ${contact}
 
@@ -212,7 +210,7 @@ class MerchantService {
             
             // 更新价格信息
             dbOperations.updateMerchantPrices(merchant.id, pPrice, ppPrice);
-            dbOperations.updateMerchantBindStep(merchant.id, 5);
+            dbOperations.updateMerchantBindStep(merchant.user_id, 5);
             dbOperations.updateMerchantStatus(merchant.id, 'active');
             
             const region = dbOperations.getRegionById(merchant.region_id);

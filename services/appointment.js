@@ -126,6 +126,7 @@ class AppointmentService {
                 user_name: userFullName,
                 user_username: username,
                 merchant_id: merchant.id,
+                merchant_user_id: merchant.user_id,
                 teacher_name: merchant.teacher_name,
                 teacher_contact: merchant.contact,
                 course_content: courseContent,
@@ -207,7 +208,7 @@ class AppointmentService {
                 // 创建预约会话
                 const bookingSessionId = dbOperations.createBookingSession(userId, merchantId, bookType);
                 
-                // 发送通知给商家
+                // 发送通知给商家 - 只有绑定了真实ID的商家才能收到通知
                 if (merchant.user_id) {
                     const merchantNotification = `老师您好，
 用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您预约${bookTypeText}课程

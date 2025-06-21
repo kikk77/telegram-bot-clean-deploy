@@ -199,13 +199,27 @@ function handleFileDownload(req, res, pathname) {
 function handleApiRequest(req, res, pathname, method) {
     let body = '';
     
+    // 解析查询参数
+    const url = require('url');
+    const parsedUrl = url.parse(req.url, true);
+    const queryParams = parsedUrl.query || {};
+    
     req.on('data', chunk => {
         body += chunk.toString();
     });
 
     req.on('end', async () => {
         try {
-            const data = body ? JSON.parse(body) : {};
+            let data = {};
+            
+            // 对于GET请求，使用查询参数
+            if (method === 'GET') {
+                data = queryParams;
+            } else {
+                // 对于POST/PUT/DELETE请求，使用body数据
+                data = body ? JSON.parse(body) : {};
+            }
+            
             const response = await processApiRequest(pathname, method, data);
             
             res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -220,6 +234,45 @@ function handleApiRequest(req, res, pathname, method) {
 
 // API请求路由处理
 async function processApiRequest(pathname, method, data) {
+    // 优先使用ApiService处理API请求
+    if (pathname.startsWith('/api/')) {
+        try {
+            // 延迟加载ApiService，避免循环依赖问题
+            let apiService;
+            try {
+                apiService = require('./apiService');
+            } catch (requireError) {
+                console.log('ApiService暂不可用，使用原有逻辑处理请求');
+                // 继续使用原有的处理逻辑
+            }
+            
+            if (apiService) {
+                // 正确分离query和body参数
+                const query = method === 'GET' ? data : {};
+                const body = method !== 'GET' ? data : {};
+                
+                const result = await apiService.handleRequest(method, pathname, query, body);
+                
+                // 如果ApiService成功处理了请求，直接返回结果
+                if (result && result.success === true) {
+                    return result;
+                }
+                
+                // 如果ApiService返回404，说明路由不存在，继续使用原有逻辑
+                if (result && result.status === 404) {
+                    console.log(`ApiService未处理请求: ${method} ${pathname}, 使用原有逻辑`);
+                } else {
+                    // 如果是其他错误，直接返回错误
+                    console.log(`ApiService处理请求失败: ${method} ${pathname}`, result);
+                    return result;
+                }
+            }
+        } catch (error) {
+            console.error('ApiService处理失败:', error);
+            // 如果ApiService处理失败，继续使用原有的处理逻辑
+        }
+    }
+    
     // 绑定码管理API
     if (pathname === '/api/bind-codes') {
         if (method === 'GET') {
@@ -229,20 +282,162 @@ async function processApiRequest(pathname, method, data) {
             await loadCacheData();
             return { success: true, data: result };
         } else if (method === 'DELETE') {
-            dbOperations.deleteBindCode(data.id);
-            await loadCacheData();
-            return { success: true };
+            try {
+                // 检查绑定码是否存在
+                const bindCode = dbOperations.getBindCodeById(data.id);
+                if (!bindCode) {
+                    return { success: false, error: '绑定码不存在' };
+                }
+                
+                // 检查是否已被使用
+                if (bindCode.used_by) {
+                    return { 
+                        success: false, 
+                        error: '绑定码已被使用，无法删除。如需强制删除，请使用强制删除功能。',
+                        code: 'BIND_CODE_IN_USE'
+                    };
+                }
+                
+                // 删除未使用的绑定码
+                const result = dbOperations.deleteBindCode(data.id);
+                await loadCacheData();
+                
+                return { 
+                    success: true, 
+                    message: '绑定码删除成功',
+                    deletedCount: result.changes
+                };
+            } catch (error) {
+                console.error('删除绑定码失败:', error);
+                return { success: false, error: error.message };
+            }
+        }
+    }
+
+    // 处理单个绑定码的删除和强制删除
+    if (pathname.match(/^\/api\/bind-codes\/\d+$/)) {
+        const bindCodeId = pathname.split('/')[3];
+        
+        if (method === 'DELETE') {
+            try {
+                // 检查绑定码是否存在
+                const bindCode = dbOperations.getBindCodeById(bindCodeId);
+                if (!bindCode) {
+                    return { success: false, error: '绑定码不存在' };
+                }
+                
+                // 检查是否已被使用
+                if (bindCode.used_by) {
+                    return { 
+                        success: false, 
+                        error: '绑定码已被使用，无法删除。如需强制删除，请使用强制删除功能。',
+                        code: 'BIND_CODE_IN_USE'
+                    };
+                }
+                
+                // 删除未使用的绑定码
+                const result = dbOperations.deleteBindCode(bindCodeId);
+                await loadCacheData();
+                
+                return { 
+                    success: true, 
+                    message: '绑定码删除成功',
+                    deletedCount: result.changes
+                };
+            } catch (error) {
+                console.error('删除绑定码失败:', error);
+                return { success: false, error: error.message };
+            }
         }
     }
 
     // 强制删除绑定码API
-    if (pathname === '/api/bind-codes/force-delete' && method === 'DELETE') {
+    if (pathname.match(/^\/api\/bind-codes\/\d+\/force$/)) {
+        const bindCodeId = pathname.split('/')[3];
+        
+        if (method === 'DELETE') {
+            try {
+                // 检查绑定码是否存在
+                const bindCode = dbOperations.getBindCodeById(bindCodeId);
+                if (!bindCode) {
+                    return { success: false, error: '绑定码不存在' };
+                }
+                
+                let deletedMerchant = false;
+                
+                // 如果绑定码已被使用，需要先处理相关的商家记录
+                if (bindCode.used_by) {
+                    // 查找使用此绑定码的商家
+                    const { db } = require('../config/database');
+                    const merchant = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(bindCode.code);
+                    if (merchant) {
+                        console.log(`强制删除绑定码：同时删除关联的商家 ID: ${merchant.id}`);
+                        dbOperations.deleteMerchant(merchant.id);
+                        deletedMerchant = true;
+                    }
+                }
+                
+                // 删除绑定码
+                const result = dbOperations.deleteBindCode(bindCodeId);
+                await loadCacheData();
+                
+                return { 
+                    success: true, 
+                    message: deletedMerchant ? '已强制删除绑定码及相关商家记录' : '绑定码删除成功',
+                    deletedCount: result.changes,
+                    deletedMerchant
+                };
+            } catch (error) {
+                console.error('强制删除绑定码失败:', error);
+                return { success: false, error: error.message };
+            }
+        }
+    }
+
+    // 批量删除测试绑定码API
+    if (pathname === '/api/bind-codes/batch-delete-test' && method === 'DELETE') {
         try {
-            // 直接操作数据库，然后重新加载缓存
-            dbOperations.deleteBindCode(data.id);
+            // 获取所有描述包含"测试"的绑定码
+            const { db } = require('../config/database');
+            const testBindCodes = db.prepare(`
+                SELECT * FROM bind_codes 
+                WHERE description LIKE '%测试%' OR description LIKE '%test%'
+            `).all();
+            
+            let deletedCount = 0;
+            let deletedMerchants = 0;
+            
+            for (const bindCode of testBindCodes) {
+                try {
+                    // 如果绑定码已被使用，先删除相关商家
+                    if (bindCode.used_by) {
+                        const merchant = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(bindCode.code);
+                        if (merchant) {
+                            dbOperations.deleteMerchant(merchant.id);
+                            deletedMerchants++;
+                        }
+                    }
+                    
+                    // 删除绑定码
+                    const result = dbOperations.deleteBindCode(bindCode.id);
+                    if (result.changes > 0) {
+                        deletedCount++;
+                    }
+                } catch (error) {
+                    console.error(`删除测试绑定码 ${bindCode.code} 失败:`, error);
+                }
+            }
+            
             await loadCacheData();
-            return { success: true, message: '绑定码已强制删除' };
+            
+            return { 
+                success: true, 
+                message: `批量删除成功！删除了 ${deletedCount} 个测试绑定码${deletedMerchants > 0 ? `，${deletedMerchants} 个相关商家` : ''}`,
+                deletedCount,
+                deletedMerchants
+            };
         } catch (error) {
+            console.error('批量删除测试绑定码失败:', error);
             return { success: false, error: error.message };
         }
     }
@@ -282,6 +477,59 @@ async function processApiRequest(pathname, method, data) {
     if (pathname === '/api/merchants') {
         if (method === 'GET') {
             return { success: true, data: dbOperations.getAllMerchants() };
+        } else if (method === 'POST') {
+            try {
+                if (!data.teacher_name || !data.username) {
+                    return { success: false, error: '商家名称和用户名不能为空' };
+                }
+                
+                let bindCode;
+                let bindCodeRecord;
+                
+                // 如果提供了绑定码，验证其有效性
+                if (data.bind_code) {
+                    bindCodeRecord = dbOperations.getBindCode(data.bind_code);
+                    if (!bindCodeRecord) {
+                        return { success: false, error: '提供的绑定码无效或已被使用' };
+                    }
+                    bindCode = data.bind_code;
+                } else {
+                    // 如果没有提供绑定码，自动创建一个
+                    bindCodeRecord = dbOperations.createBindCode(`管理员创建: ${data.teacher_name}`);
+                    if (!bindCodeRecord) {
+                        return { success: false, error: '创建绑定码失败' };
+                    }
+                    bindCode = bindCodeRecord.code;
+                }
+                
+                // 创建商家记录（管理员创建的商家暂时不设置user_id，等待用户绑定）
+                const merchantData = {
+                    user_id: null, // 等待用户使用绑定码绑定时获取真实ID
+                    username: data.username.replace('@', ''),
+                    bind_code: bindCode,
+                    bind_step: 5, // 直接设置为完成状态
+                    status: 'active',
+                    teacher_name: data.teacher_name
+                };
+                
+                const merchantId = dbOperations.createMerchantSimple(merchantData);
+                
+                if (!merchantId) {
+                    return { success: false, error: '创建商家记录失败' };
+                }
+                
+                await loadCacheData();
+                
+                return { 
+                    success: true, 
+                    merchantId, 
+                    bindCode: bindCode,
+                    message: '商家创建成功，等待用户使用绑定码进行绑定'
+                };
+            } catch (error) {
+                console.error('创建商家失败:', error);
+                return { success: false, error: '创建商家失败: ' + error.message };
+            }
         }
     }
 
@@ -333,6 +581,11 @@ async function processApiRequest(pathname, method, data) {
         } else {
             // 使用原有的基本信息更新方法
             dbOperations.updateMerchant(merchantId, data.teacherName, data.regionId, data.contact);
+        }
+
+        // 如果包含绑定码，单独更新绑定码
+        if (data.bindCode !== undefined) {
+            dbOperations.updateMerchantBindCode(merchantId, data.bindCode);
         }
         
         await loadCacheData();
@@ -447,203 +700,7 @@ async function processApiRequest(pathname, method, data) {
         };
     }
 
-    // 使用ApiService处理新的API路由
-    if (pathname.startsWith('/api/')) {
-        try {
-            const apiService = require('./apiService');
-            const parsedUrl = require('url').parse(`http://localhost${pathname}`, true);
-            const result = await apiService.handleRequest(method, parsedUrl.pathname, parsedUrl.query, data);
-            return result;
-        } catch (error) {
-            console.error('ApiService处理失败:', error);
-            throw error;
-        }
-    }
-
-    // 商家预约统计API
-    if (pathname === '/api/merchant-bookings' && method === 'GET') {
-        const bookingStats = dbOperations.getMerchantBookingStats();
-        return {
-            success: true,
-            data: bookingStats
-        };
-    }
-
-    // 消息统计API
-    if (pathname === '/api/message-stats' && method === 'GET') {
-        const messageStats = dbOperations.getMessageStats();
-        return {
-            success: true,
-            data: messageStats
-        };
-    }
-
-    // 最近预约记录API
-    if (pathname === '/api/recent-bookings' && method === 'GET') {
-        const recentBookings = dbOperations.getRecentBookings(20);
-        return {
-            success: true,
-            data: recentBookings
-        };
-    }
-
-    // 按钮点击统计API
-    if (pathname === '/api/button-stats' && method === 'GET') {
-        const buttonStats = dbOperations.getButtonClickStats();
-        return {
-            success: true,
-            data: buttonStats
-        };
-    }
-
-    // 评价管理API
-    if (pathname === '/api/evaluations' && method === 'GET') {
-        const evaluations = dbOperations.getAllEvaluations();
-        return {
-            success: true,
-            data: evaluations
-        };
-    }
-
-    // 评价详情API
-    if (pathname.match(/^\/api\/evaluations\/\d+$/) && method === 'GET') {
-        const evaluationId = pathname.split('/')[3];
-        const evaluation = dbOperations.getEvaluationDetails(evaluationId);
-        if (!evaluation) {
-            return {
-                success: false,
-                error: '订单不存在或无评价数据'
-            };
-        }
-        return {
-            success: true,
-            data: evaluation
-        };
-    }
-
-    // 评价统计API
-    if (pathname === '/api/evaluation-stats' && method === 'GET') {
-        const stats = dbOperations.getEvaluationStats();
-        return {
-            success: true,
-            data: stats
-        };
-    }
-
-    // 订单评价API
-    if (pathname === '/api/order-evaluations' && method === 'GET') {
-        const orderEvaluations = dbOperations.getOrderEvaluations();
-        return {
-            success: true,
-            data: orderEvaluations
-        };
-    }
-
-    // 订单管理API - 使用apiService提供正确的数据处理
-    if (pathname === '/api/orders' && method === 'GET') {
-        try {
-            const apiService = require('./apiService');
-            const result = await apiService.getOrders({ query: {} });
-            return result;
-        } catch (error) {
-            console.error('获取订单列表失败:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    // 订单统计API
-    if (pathname === '/api/stats/optimized' && method === 'GET') {
-        try {
-            const apiService = require('./apiService');
-            const result = await apiService.getOptimizedStats({ query: {} });
-            return result;
-        } catch (error) {
-            console.error('获取优化统计失败:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    // 简单计数API
-    if (pathname.startsWith('/api/simple-count/') && method === 'GET') {
-        try {
-            const tableName = pathname.split('/')[3];
-            const apiService = require('./apiService');
-            const result = await apiService.getSimpleCount({ params: { table: tableName } });
-            return result;
-        } catch (error) {
-            console.error('获取简单计数失败:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    // 图表API路由
-    if (pathname === '/api/charts/orders-trend' && method === 'GET') {
-        try {
-            const apiService = require('./apiService');
-            const result = await apiService.getOrdersTrendChart({ query: {} });
-            return result;
-        } catch (error) {
-            console.error('获取订单趋势图表失败:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    if (pathname === '/api/charts/region-distribution' && method === 'GET') {
-        try {
-            const apiService = require('./apiService');
-            const result = await apiService.getRegionDistributionChart({ query: {} });
-            return result;
-        } catch (error) {
-            console.error('获取地区分布图表失败:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    if (pathname === '/api/charts/price-distribution' && method === 'GET') {
-        try {
-            const apiService = require('./apiService');
-            const result = await apiService.getPriceDistributionChart({ query: {} });
-            return result;
-        } catch (error) {
-            console.error('获取价格分布图表失败:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    if (pathname === '/api/charts/status-distribution' && method === 'GET') {
-        try {
-            const apiService = require('./apiService');
-            const result = await apiService.getStatusDistributionChart({ query: {} });
-            return result;
-        } catch (error) {
-            console.error('获取状态分布图表失败:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    // 订单详情API
-    if (pathname.match(/^\/api\/orders\/\d+$/) && method === 'GET') {
-        try {
-            const orderId = pathname.split('/')[3];
-            const apiService = require('./apiService');
-            const result = await apiService.getOrderById({ params: { id: orderId } });
-            return {
-                success: true,
-                ...result
-            };
-        } catch (error) {
-            console.error('获取订单详情失败:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    // 测试发送API
+    // 测试发送API - 需要在通用API处理器之前处理
     if (pathname === '/api/test-send' && method === 'POST') {
         try {
             const botService = global.botService;
@@ -693,16 +750,13 @@ async function processApiRequest(pathname, method, data) {
                 // 使用统一的Bot用户名获取机制
                 try {
                     botUsername = await botService.getBotUsername();
-                                 } catch (error) {
+                } catch (error) {
                     console.error('获取bot用户名失败:', error);
-                    // 根据环境选择默认值
-                    const nodeEnv = process.env.NODE_ENV || 'development';
-                    if (nodeEnv === 'production') {
-                        botUsername = 'xiaojisystembot'; // Railway生产环境
-                    } else if (nodeEnv === 'staging') {
-                        botUsername = 'xiaoji_daniao_bot'; // 测试环境
-                    } else {
-                        botUsername = 'xiaojisystembot'; // 开发环境默认
+                    // 从环境变量获取bot用户名
+                    botUsername = process.env.BOT_USERNAME;
+                    if (!botUsername) {
+                        console.error('❌ BOT_USERNAME 环境变量未设置');
+                        return { success: false, error: 'Bot配置未设置，请联系管理员' };
                     }
                 }
                 
@@ -818,6 +872,162 @@ async function processApiRequest(pathname, method, data) {
                 success: false, 
                 error: `发送失败: ${error.message}` 
             };
+        }
+    }
+
+    // 商家预约统计API
+    if (pathname === '/api/merchant-bookings' && method === 'GET') {
+        const bookingStats = dbOperations.getMerchantBookingStats();
+        return {
+            success: true,
+            data: bookingStats
+        };
+    }
+
+    // 消息统计API
+    if (pathname === '/api/message-stats' && method === 'GET') {
+        const messageStats = dbOperations.getMessageStats();
+        return {
+            success: true,
+            data: messageStats
+        };
+    }
+
+    // 最近预约记录API
+    if (pathname === '/api/recent-bookings' && method === 'GET') {
+        const recentBookings = dbOperations.getRecentBookings(20);
+        return {
+            success: true,
+            data: recentBookings
+        };
+    }
+
+    // 按钮点击统计API
+    if (pathname === '/api/button-stats' && method === 'GET') {
+        const buttonStats = dbOperations.getButtonClickStats();
+        return {
+            success: true,
+            data: buttonStats
+        };
+    }
+
+    // 评价管理API
+    if (pathname === '/api/evaluations' && method === 'GET') {
+        const evaluations = dbOperations.getAllEvaluations();
+        return {
+            success: true,
+            data: evaluations
+        };
+    }
+
+    // 评价详情API
+    if (pathname.match(/^\/api\/evaluations\/\d+$/) && method === 'GET') {
+        const evaluationId = pathname.split('/')[3];
+        const evaluation = dbOperations.getEvaluationDetails(evaluationId);
+        if (!evaluation) {
+            return {
+                success: false,
+                error: '订单不存在或无评价数据'
+            };
+        }
+        return {
+            success: true,
+            data: evaluation
+        };
+    }
+
+    // 评价统计API
+    if (pathname === '/api/evaluation-stats' && method === 'GET') {
+        const stats = dbOperations.getEvaluationStats();
+        return {
+            success: true,
+            data: stats
+        };
+    }
+
+    // 订单评价API
+    if (pathname === '/api/order-evaluations' && method === 'GET') {
+        const orderEvaluations = dbOperations.getOrderEvaluations();
+        return {
+            success: true,
+            data: orderEvaluations
+        };
+    }
+
+    // 简单计数API
+    if (pathname.startsWith('/api/simple-count/') && method === 'GET') {
+        try {
+            const tableName = pathname.split('/')[3];
+            const apiService = require('./apiService');
+            const result = await apiService.getSimpleCount({ params: { table: tableName } });
+            return result;
+        } catch (error) {
+            console.error('获取简单计数失败:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 图表API路由
+    if (pathname === '/api/charts/orders-trend' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getOrdersTrendChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取订单趋势图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    if (pathname === '/api/charts/region-distribution' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getRegionDistributionChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取地区分布图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    if (pathname === '/api/charts/price-distribution' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getPriceDistributionChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取价格分布图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    if (pathname === '/api/charts/status-distribution' && method === 'GET') {
+        try {
+            const apiService = require('./apiService');
+            const result = await apiService.getStatusDistributionChart({ query: {} });
+            return result;
+        } catch (error) {
+            console.error('获取状态分布图表失败:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 订单详情API
+    if (pathname.match(/^\/api\/orders\/\d+$/) && method === 'GET') {
+        try {
+            const orderId = pathname.split('/')[3];
+            const apiService = require('./apiService');
+            const result = await apiService.getOrderById({ params: { id: orderId } });
+            return {
+                success: true,
+                ...result
+            };
+        } catch (error) {
+            console.error('获取订单详情失败:', error);
+            return { success: false, error: error.message };
         }
     }
 

@@ -39,6 +39,9 @@ class ApiService {
         // 基础数据接口
         this.routes.set('GET /api/regions', this.getRegions.bind(this));
         this.routes.set('GET /api/merchants', this.getMerchants.bind(this));
+        this.routes.set('POST /api/merchants', this.createMerchant.bind(this));
+        this.routes.set('PUT /api/merchants/:id/status', this.toggleMerchantStatus.bind(this));
+        this.routes.set('POST /api/merchants/check-follow-status', this.checkMerchantsFollowStatus.bind(this));
 
         // 排名接口
         this.routes.set('GET /api/rankings/merchants', this.getMerchantRankings.bind(this));
@@ -56,9 +59,14 @@ class ApiService {
         // 数据刷新接口
         this.routes.set('POST /api/refresh-data', this.refreshAllData.bind(this));
 
+        // 绑定码接口
+        this.routes.set('GET /api/bind-codes', this.getBindCodes.bind(this));
+        this.routes.set('POST /api/bind-codes', this.createBindCode.bind(this));
+        this.routes.set('DELETE /api/bind-codes/:id', this.deleteBindCode.bind(this));
+        this.routes.set('DELETE /api/bind-codes/:id/force', this.forceDeleteBindCode.bind(this));
 
         
-        console.log('API路由设置完成，共', Object.keys(this.routes).length, '个路由');
+        console.log('API路由设置完成，共', this.routes.size, '个路由');
     }
 
     // 处理HTTP请求
@@ -530,6 +538,16 @@ class ApiService {
                     bs.user_course_status,
                     bs.merchant_course_status,
                     bs.updated_at as completion_time,
+                    -- 计算真实状态
+                    CASE 
+                        WHEN bs.user_course_status = 'completed' THEN 'completed'
+                        WHEN bs.user_course_status = 'incomplete' THEN 'incomplete'
+                        WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
+                        WHEN o.status = 'attempting' THEN 'attempting'
+                        WHEN o.status = 'failed' THEN 'failed'
+                        WHEN o.status = 'cancelled' THEN 'cancelled'
+                        ELSE 'pending'
+                    END as real_status,
                     -- 检查用户评价是否存在
                     (SELECT CASE WHEN COUNT(*) > 0 THEN 'completed' ELSE 'pending' END 
                      FROM evaluations 
@@ -568,33 +586,17 @@ class ApiService {
                     }
                 }
 
-                // 确定订单真实状态
-                let realStatus = 'pending'; // 默认状态
-                if (order.user_course_status === 'completed') {
-                    realStatus = 'completed';
-                } else if (order.user_course_status === 'incomplete') {
-                    realStatus = 'incomplete';
-                } else if (order.user_course_status === 'confirmed' || order.status === 'confirmed') {
-                    realStatus = 'confirmed';
-                } else if (order.status === 'attempting') {
-                    realStatus = 'attempting';
-                } else if (order.status === 'failed') {
-                    realStatus = 'failed';
-                } else if (order.status === 'cancelled') {
-                    realStatus = 'cancelled';
-                }
-
                 return {
                     ...order,
                     order_number: order.id,
                     actual_price: actualPrice,
                     price: actualPrice,
-                    status: realStatus,
+                    status: order.real_status, // 使用SQL计算的状态
                     merchant_name: order.actual_merchant_name || order.teacher_name,
                     region_name: order.region_name || '未知地区',
-                                    // 添加评价状态字段 - 基于evaluations表的实际数据
-                user_evaluation_status: this.getUserEvaluationStatus(order.booking_session_id),
-                merchant_evaluation_status: this.getMerchantEvaluationStatus(order.booking_session_id)
+                    // 添加评价状态字段 - 基于evaluations表的实际数据
+                    user_evaluation_status: this.getUserEvaluationStatus(order.booking_session_id),
+                    merchant_evaluation_status: this.getMerchantEvaluationStatus(order.booking_session_id)
                 };
             });
 
@@ -850,25 +852,135 @@ class ApiService {
     // 获取商家列表
     async getMerchants() {
         try {
-            const merchants = db.prepare(`
-                SELECT 
-                    m.id,
-                    m.teacher_name,
-                    m.username,
-                    m.region_id,
-                    m.contact,
-                    m.price1,
-                    m.price2,
-                    COALESCE(r.name, '未知地区') as region_name
-                FROM merchants m
-                LEFT JOIN regions r ON m.region_id = r.id
-                WHERE m.status = 'active'
-                ORDER BY m.teacher_name
-            `).all();
-
+            const merchants = dbOperations.getAllMerchants();
             return { data: merchants };
         } catch (error) {
-            throw new Error('获取商家列表失败: ' + error.message);
+            console.error('获取商家数据失败:', error);
+            throw new Error('获取商家数据失败: ' + error.message);
+        }
+    }
+
+    // 创建新商家
+    async createMerchant({ body }) {
+        try {
+            if (!body.teacher_name || !body.username) {
+                throw new Error('商家名称和用户名不能为空');
+            }
+            
+            let bindCode;
+            let bindCodeRecord;
+            
+            // 如果提供了绑定码，验证其有效性
+            if (body.bind_code) {
+                bindCodeRecord = dbOperations.getBindCode(body.bind_code);
+                if (!bindCodeRecord) {
+                    throw new Error('提供的绑定码无效或已被使用');
+                }
+                bindCode = body.bind_code;
+            } else {
+                // 如果没有提供绑定码，自动创建一个
+                bindCodeRecord = dbOperations.createBindCode(`管理员创建: ${body.teacher_name}`);
+                if (!bindCodeRecord) {
+                    throw new Error('创建绑定码失败');
+                }
+                bindCode = bindCodeRecord.code;
+            }
+            
+            // 创建商家记录（管理员创建的商家暂时不设置user_id，等待用户绑定）
+            const merchantData = {
+                user_id: null, // 等待用户使用绑定码绑定时获取真实ID
+                username: body.username.replace('@', ''),
+                bind_code: bindCode,
+                bind_step: 5, // 直接设置为完成状态
+                status: 'active',
+                teacher_name: body.teacher_name
+            };
+            
+            const merchantId = dbOperations.createMerchantSimple(merchantData);
+            
+            if (!merchantId) {
+                throw new Error('创建商家记录失败');
+            }
+            
+            // 管理员创建的商家不自动标记绑定码为已使用，等待用户主动绑定
+            
+            return { 
+                success: true, 
+                merchantId, 
+                bindCode: bindCode,
+                message: '商家创建成功，商家需要使用绑定码进行绑定以获取通知功能'
+            };
+        } catch (error) {
+            console.error('创建商家失败:', error);
+            throw new Error('创建商家失败: ' + error.message);
+        }
+    }
+    
+    // 获取绑定码
+    async getBindCodes() {
+        try {
+            const bindCodes = dbOperations.getAllBindCodes();
+            return { data: bindCodes };
+        } catch (error) {
+            console.error('获取绑定码失败:', error);
+            throw new Error('获取绑定码失败: ' + error.message);
+        }
+    }
+    
+    // 创建绑定码
+    async createBindCode({ body }) {
+        try {
+            const description = body.description || '管理员创建';
+            const code = dbOperations.createBindCode(description);
+            return code;
+        } catch (error) {
+            console.error('创建绑定码失败:', error);
+            throw new Error('创建绑定码失败: ' + error.message);
+        }
+    }
+    
+    // 删除绑定码
+    async deleteBindCode({ params }) {
+        try {
+            const result = dbOperations.deleteBindCode(params.id);
+            return { success: true, result };
+        } catch (error) {
+            console.error('删除绑定码失败:', error);
+            throw new Error('删除绑定码失败: ' + error.message);
+        }
+    }
+    
+    // 强制删除绑定码（包括已使用的）
+    async forceDeleteBindCode({ params }) {
+        try {
+            // 首先检查绑定码是否存在
+            const bindCode = dbOperations.getBindCodeById(params.id);
+            if (!bindCode) {
+                throw new Error('绑定码不存在');
+            }
+            
+            // 如果绑定码已被使用，需要先处理相关的商家记录
+            if (bindCode.used_by) {
+                // 查找使用此绑定码的商家
+                const merchant = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(bindCode.code);
+                if (merchant) {
+                    // 删除商家记录（这会触发级联删除）
+                    console.log(`强制删除绑定码：同时删除关联的商家 ID: ${merchant.id}`);
+                    dbOperations.deleteMerchant(merchant.id);
+                }
+            }
+            
+            // 删除绑定码
+            const result = dbOperations.deleteBindCode(params.id);
+            
+            return { 
+                success: true, 
+                result,
+                message: bindCode.used_by ? '已强制删除绑定码及相关商家记录' : '绑定码删除成功'
+            };
+        } catch (error) {
+            console.error('强制删除绑定码失败:', error);
+            throw new Error('强制删除绑定码失败: ' + error.message);
         }
     }
 
@@ -1044,6 +1156,7 @@ class ApiService {
             }
         }
 
+        // 基础筛选条件
         if (query.dateFrom) filters.dateFrom = query.dateFrom;
         if (query.dateTo) filters.dateTo = query.dateTo;
         if (query.regionId) filters.regionId = query.regionId;
@@ -1051,6 +1164,15 @@ class ApiService {
         if (query.merchantId) filters.merchantId = query.merchantId;
         if (query.status) filters.status = query.status;
         if (query.courseType) filters.courseType = query.courseType;
+        
+        // 新增搜索条件
+        if (query.search) filters.search = query.search.trim();
+        if (query.orderId) filters.orderId = query.orderId;
+        if (query.userName && query.userName.trim()) filters.userName = query.userName.trim();
+        if (query.merchantName && query.merchantName.trim()) filters.merchantName = query.merchantName.trim();
+        if (query.minPrice && !isNaN(query.minPrice)) filters.minPrice = parseFloat(query.minPrice);
+        if (query.maxPrice && !isNaN(query.maxPrice)) filters.maxPrice = parseFloat(query.maxPrice);
+        if (query.evaluationStatus) filters.evaluationStatus = query.evaluationStatus;
 
         return filters;
     }
@@ -1126,19 +1248,165 @@ class ApiService {
             }
         }
 
-        // 状态筛选
+        // 状态筛选 - 需要根据实际状态逻辑判断
         if (filters.status) {
-            conditions.push('o.status = ?');
-            params.push(filters.status);
+            const statusCondition = this.buildStatusCondition(filters.status);
+            if (statusCondition) {
+                conditions.push(statusCondition);
+            }
         }
 
-        // 课程类型筛选
+        // 课程类型筛选 - 精确匹配
         if (filters.courseType) {
-            conditions.push('o.course_content LIKE ?');
-            params.push(`%${filters.courseType}%`);
+            conditions.push('o.course_content = ?');
+            params.push(filters.courseType);
+        }
+
+        // 全文搜索 - 支持搜索订单号、用户名、商家名、课程内容
+        if (filters.search) {
+            conditions.push(`(
+                CAST(o.id AS TEXT) LIKE ? OR 
+                o.user_username LIKE ? OR 
+                o.user_name LIKE ? OR 
+                m.teacher_name LIKE ? OR 
+                m.username LIKE ? OR 
+                o.course_content LIKE ? OR
+                CAST(o.actual_price AS TEXT) LIKE ? OR
+                CAST(o.price_range AS TEXT) LIKE ?
+            )`);
+            const searchTerm = `%${filters.search}%`;
+            params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+        }
+
+        // 精确订单号搜索
+        if (filters.orderId) {
+            conditions.push('CAST(o.id AS TEXT) = ?');
+            params.push(filters.orderId.toString());
+        }
+
+        // 用户名搜索
+        if (filters.userName) {
+            conditions.push('(o.user_username LIKE ? OR o.user_name LIKE ?)');
+            const userSearchTerm = `%${filters.userName}%`;
+            params.push(userSearchTerm, userSearchTerm);
+        }
+
+        // 商家名搜索
+        if (filters.merchantName) {
+            conditions.push('(m.teacher_name LIKE ? OR m.username LIKE ?)');
+            const merchantSearchTerm = `%${filters.merchantName}%`;
+            params.push(merchantSearchTerm, merchantSearchTerm);
+        }
+
+        // 价格范围筛选
+        if (filters.minPrice && !isNaN(filters.minPrice)) {
+            conditions.push(`(
+                (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) >= ?) OR
+                (o.price_range IS NOT NULL AND CAST(o.price_range AS REAL) >= ?) OR
+                (o.course_content = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) >= ?) OR
+                (o.course_content = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) >= ?)
+            )`);
+            params.push(filters.minPrice, filters.minPrice, filters.minPrice, filters.minPrice);
+        }
+
+        if (filters.maxPrice && !isNaN(filters.maxPrice)) {
+            conditions.push(`(
+                (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) <= ?) OR
+                (o.price_range IS NOT NULL AND CAST(o.price_range AS REAL) <= ?) OR
+                (o.course_content = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) <= ?) OR
+                (o.course_content = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) <= ?)
+            )`);
+            params.push(filters.maxPrice, filters.maxPrice, filters.maxPrice, filters.maxPrice);
+        }
+
+        // 评价状态筛选
+        if (filters.evaluationStatus) {
+            switch (filters.evaluationStatus) {
+                case 'user_completed':
+                    conditions.push(`EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'user' 
+                        AND e.status = 'completed'
+                    )`);
+                    break;
+                case 'user_pending':
+                    conditions.push(`NOT EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'user' 
+                        AND e.status = 'completed'
+                    )`);
+                    break;
+                case 'merchant_completed':
+                    conditions.push(`EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'merchant' 
+                        AND e.status = 'completed'
+                    )`);
+                    break;
+                case 'merchant_pending':
+                    conditions.push(`NOT EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'merchant' 
+                        AND e.status = 'completed'
+                    )`);
+                    break;
+                case 'all_completed':
+                    conditions.push(`EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'user' 
+                        AND e.status = 'completed'
+                    ) AND EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'merchant' 
+                        AND e.status = 'completed'
+                    )`);
+                    break;
+                case 'none_completed':
+                    conditions.push(`NOT EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'user' 
+                        AND e.status = 'completed'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM evaluations e 
+                        WHERE e.booking_session_id = o.booking_session_id 
+                        AND e.evaluator_type = 'merchant' 
+                        AND e.status = 'completed'
+                    )`);
+                    break;
+            }
         }
 
         return { conditions, params };
+    }
+
+    // 构建状态筛选条件
+    buildStatusCondition(status) {
+        // 使用与SQL查询中相同的状态计算逻辑
+        switch (status) {
+            case 'completed':
+                return "bs.user_course_status = 'completed'";
+            case 'incomplete':
+                return "bs.user_course_status = 'incomplete'";
+            case 'confirmed':
+                return "(bs.user_course_status = 'confirmed' OR o.status = 'confirmed') AND bs.user_course_status != 'completed' AND bs.user_course_status != 'incomplete'";
+            case 'attempting':
+                return "o.status = 'attempting' AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))";
+            case 'failed':
+                return "o.status = 'failed' AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))";
+            case 'cancelled':
+                return "o.status = 'cancelled' AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))";
+            case 'pending':
+                return "(o.status IS NULL OR o.status = 'pending' OR (o.status NOT IN ('attempting', 'failed', 'cancelled', 'confirmed') AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))))";
+            default:
+                return null;
+        }
     }
 
     // Dashboard需要的基础API方法
@@ -1367,7 +1635,39 @@ class ApiService {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
+    // 商家接口
+    async toggleMerchantStatus({ params }) {
+        try {
+            const merchantId = params.id;
+            const status = params.status;
+            
+            const result = dbOperations.toggleMerchantStatus(merchantId, status);
+            
+            return {
+                success: true,
+                result
+            };
+        } catch (error) {
+            console.error('更新商家状态失败:', error);
+            throw new Error('更新商家状态失败: ' + error.message);
+        }
+    }
 
+    async checkMerchantsFollowStatus({ body }) {
+        try {
+            const merchantIds = body.merchantIds;
+            
+            const result = dbOperations.checkMerchantsFollowStatus(merchantIds);
+            
+            return {
+                success: true,
+                result
+            };
+        } catch (error) {
+            console.error('检查商家关注状态失败:', error);
+            throw new Error('检查商家关注状态失败: ' + error.message);
+        }
+    }
 }
 
 module.exports = new ApiService(); 

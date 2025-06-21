@@ -1764,6 +1764,187 @@ class OptimizedOrdersManager {
             console.error('高亮效果失败:', error);
         }
     }
+    // 刷新所有数据（增强版）
+    async refreshAllData() {
+        try {
+            this.showLoading(true);
+            
+            const response = await fetch('/api/refresh-data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // 清除所有缓存
+                this.clearCache();
+                
+                // 重新加载所有数据
+                await this.loadInitialData();
+                await this.loadAllCharts();
+                await this.loadOrders(1, false);
+                
+                this.showSuccessMessage('数据刷新成功！');
+            } else {
+                throw new Error(result.message || '刷新失败');
+            }
+        } catch (error) {
+            console.error('刷新数据失败:', error);
+            this.showError('刷新数据失败: ' + error.message);
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    // 显示导出模态框
+    showExportModal() {
+        const modal = document.getElementById('exportModal');
+        if (modal) {
+            modal.style.display = 'block';
+            this.loadExportHistory();
+        }
+    }
+
+    // 关闭导出模态框
+    closeExportModal() {
+        const modal = document.getElementById('exportModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    // 开始数据导出
+    async startDataExport() {
+        try {
+            const formatRadios = document.querySelectorAll('input[name="exportFormat"]');
+            let format = 'json';
+            for (const radio of formatRadios) {
+                if (radio.checked) {
+                    format = radio.value;
+                    break;
+                }
+            }
+
+            this.showLoading(true);
+            this.showSuccessMessage('开始导出数据，请稍候...');
+
+            const response = await fetch('/api/export/all-data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ format })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showSuccessMessage('数据导出成功！');
+                this.loadExportHistory(); // 刷新导出历史
+                
+                // 如果有下载链接，自动下载
+                if (result.data && result.data.exportPath) {
+                    const filename = result.data.exportPath.split('/').pop();
+                    this.downloadExportFile(filename);
+                }
+            } else {
+                throw new Error(result.message || '导出失败');
+            }
+        } catch (error) {
+            console.error('数据导出失败:', error);
+            this.showError('数据导出失败: ' + error.message);
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    // 加载导出历史
+    async loadExportHistory() {
+        try {
+            const response = await fetch('/api/export/history');
+            const result = await response.json();
+
+            const historyContainer = document.getElementById('exportHistory');
+            if (!historyContainer) return;
+
+            if (result.success && result.data && result.data.length > 0) {
+                historyContainer.innerHTML = result.data.map(item => `
+                    <div class="export-history-item">
+                        <div class="export-file-info">
+                            <div class="export-filename">${item.filename}</div>
+                            <div class="export-details">
+                                大小: ${item.size} | 创建时间: ${new Date(item.created).toLocaleString()}
+                            </div>
+                        </div>
+                        <div class="export-actions">
+                            <button class="btn btn-secondary" onclick="ordersManager.downloadExportFile('${item.filename}')">
+                                📥 下载
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                historyContainer.innerHTML = '<div class="loading-text">暂无导出历史</div>';
+            }
+        } catch (error) {
+            console.error('加载导出历史失败:', error);
+            const historyContainer = document.getElementById('exportHistory');
+            if (historyContainer) {
+                historyContainer.innerHTML = '<div class="loading-text">加载失败</div>';
+            }
+        }
+    }
+
+    // 下载导出文件
+    async downloadExportFile(filename) {
+        try {
+            // 直接创建下载链接
+            const link = document.createElement('a');
+            link.href = `/api/export/download/${filename}`;
+            link.download = filename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            this.showSuccessMessage('开始下载文件');
+        } catch (error) {
+            console.error('下载文件失败:', error);
+            this.showError('下载文件失败: ' + error.message);
+        }
+    }
+
+    // 清理旧的导出文件
+    async cleanupOldExports() {
+        try {
+            this.showLoading(true);
+            
+            const response = await fetch('/api/export/cleanup', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ keepCount: 5 })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showSuccessMessage(`已清理 ${result.data.deletedCount} 个旧文件`);
+                this.loadExportHistory(); // 刷新导出历史
+            } else {
+                throw new Error(result.message || '清理失败');
+            }
+        } catch (error) {
+            console.error('清理文件失败:', error);
+            this.showError('清理文件失败: ' + error.message);
+        } finally {
+            this.showLoading(false);
+        }
+    }
 }
 
 // 初始化管理器
@@ -1771,9 +1952,14 @@ const ordersManager = new OptimizedOrdersManager();
 
 // 全局方法（保持向后兼容）
 window.refreshData = () => ordersManager.refreshData();
+window.refreshAllData = () => ordersManager.refreshAllData();
 window.searchOrders = (query) => ordersManager.searchOrders(query);
 window.changePage = (direction) => ordersManager.changePage(direction);
 window.updateDashboard = () => ordersManager.updateDashboard();
+window.showExportModal = () => ordersManager.showExportModal();
+window.closeExportModal = () => ordersManager.closeExportModal();
+window.startDataExport = () => ordersManager.startDataExport();
+window.cleanupOldExports = () => ordersManager.cleanupOldExports();
 window.orderManager = ordersManager; // 提供全局访问
 
 console.log('订单管理系统优化版本已加载'); 

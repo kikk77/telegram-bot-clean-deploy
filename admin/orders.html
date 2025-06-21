@@ -186,6 +186,8 @@
                 <div class="section-actions">
                     <input type="text" id="searchInput" placeholder="搜索订单号、用户名、商家名..." onkeyup="searchOrders()">
                     <button class="btn btn-secondary" onclick="showAdvancedFilters()">🔍 高级筛选</button>
+                    <button class="btn btn-refresh" onclick="refreshAllData()" title="刷新数据">🔄 刷新数据</button>
+                    <button class="btn btn-export" onclick="showExportModal()" title="导出数据">📦 导出数据</button>
                 </div>
             </div>
 
@@ -305,6 +307,46 @@
             </div>
             <div class="modal-body" id="orderModalBody">
                 <!-- 动态加载订单详情 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据导出模态框 -->
+    <div id="exportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📦 数据导出</h3>
+                <span class="close" onclick="closeExportModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="export-section">
+                    <h4>🚀 一键导出所有数据</h4>
+                    <p>导出包含：订单数据、商家信息、用户数据、地区管理、绑定码管理等所有数据</p>
+                    <div class="export-options">
+                        <label>
+                            <input type="radio" name="exportFormat" value="json" checked>
+                            JSON格式 (推荐，便于恢复)
+                        </label>
+                        <label>
+                            <input type="radio" name="exportFormat" value="csv">
+                            CSV格式 (便于Excel查看)
+                        </label>
+                    </div>
+                    <button class="btn btn-primary" onclick="startDataExport()">🎯 开始导出</button>
+                </div>
+                
+                <div class="export-section">
+                    <h4>📁 导出历史</h4>
+                    <div id="exportHistory">
+                        <div class="loading-text">加载中...</div>
+                    </div>
+                </div>
+                
+                <div class="export-section">
+                    <h4>🧹 清理旧文件</h4>
+                    <p>自动清理旧的导出文件，保留最近5个</p>
+                    <button class="btn btn-secondary" onclick="cleanupOldExports()">清理旧文件</button>
+                </div>
             </div>
         </div>
     </div>

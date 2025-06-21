@@ -2,11 +2,13 @@ const orderService = require('./orderService');
 const evaluationService = require('./evaluationService');
 const dbOperations = require('../models/dbOperations');
 const { db } = require('../config/database');
+const DataExportService = require('./dataExportService');
 // statsService将在需要时延迟加载
 
 class ApiService {
     constructor() {
         this.routes = new Map();
+        this.dataExportService = new DataExportService();
         this.setupRoutes();
     }
 
@@ -45,9 +47,14 @@ class ApiService {
         // 简单计数接口
         this.routes.set('GET /api/simple-count/:table', this.getSimpleCount.bind(this));
 
-        // 导出接口 (暂时禁用，后续实现)
-        // this.routes.set('GET /api/export/orders', this.exportOrders.bind(this));
-        // this.routes.set('GET /api/export/stats', this.exportStats.bind(this));
+        // 数据导出接口
+        this.routes.set('POST /api/export/all-data', this.exportAllData.bind(this));
+        this.routes.set('GET /api/export/history', this.getExportHistory.bind(this));
+        this.routes.set('GET /api/export/download/:filename', this.downloadExport.bind(this));
+        this.routes.set('DELETE /api/export/cleanup', this.cleanupOldExports.bind(this));
+
+        // 数据刷新接口
+        this.routes.set('POST /api/refresh-data', this.refreshAllData.bind(this));
 
 
         
@@ -1240,6 +1247,124 @@ class ApiService {
             console.error('获取计数失败:', error);
             throw new Error('获取计数失败: ' + error.message);
         }
+    }
+
+    // 导出所有数据
+    async exportAllData({ body }) {
+        try {
+            const { format = 'json' } = body;
+            console.log('开始数据导出，格式:', format);
+            
+            const result = await this.dataExportService.exportAllData(format);
+            
+            return {
+                data: result,
+                message: '数据导出成功'
+            };
+        } catch (error) {
+            console.error('数据导出失败:', error);
+            throw new Error(`数据导出失败: ${error.message}`);
+        }
+    }
+
+    // 获取导出历史
+    async getExportHistory() {
+        try {
+            const history = this.dataExportService.getExportHistory();
+            
+            return {
+                data: history.map(item => ({
+                    filename: item.filename,
+                    size: this.formatFileSize(item.size),
+                    created: item.created.toISOString(),
+                    downloadUrl: `/api/export/download/${item.filename}`
+                })),
+                message: '获取导出历史成功'
+            };
+        } catch (error) {
+            console.error('获取导出历史失败:', error);
+            throw error;
+        }
+    }
+
+    // 下载导出文件
+    async downloadExport({ params }) {
+        try {
+            const { filename } = params;
+            const history = this.dataExportService.getExportHistory();
+            const exportFile = history.find(item => item.filename === filename);
+            
+            if (!exportFile) {
+                throw new Error('导出文件不存在');
+            }
+
+            return {
+                data: {
+                    filePath: exportFile.path,
+                    filename: exportFile.filename,
+                    size: exportFile.size
+                },
+                message: '文件准备就绪'
+            };
+        } catch (error) {
+            console.error('下载导出文件失败:', error);
+            throw error;
+        }
+    }
+
+    // 清理旧的导出文件
+    async cleanupOldExports({ body }) {
+        try {
+            const { keepCount = 5 } = body;
+            const deletedCount = this.dataExportService.cleanupOldExports(keepCount);
+            
+            return {
+                data: { deletedCount },
+                message: `已清理 ${deletedCount} 个旧导出文件`
+            };
+        } catch (error) {
+            console.error('清理导出文件失败:', error);
+            throw error;
+        }
+    }
+
+    // 刷新所有数据（重新加载缓存等）
+    async refreshAllData() {
+        try {
+            console.log('开始刷新所有数据...');
+            
+            // 清理可能的缓存
+            if (global.statsCache) {
+                global.statsCache.clear();
+            }
+            
+            // 重新计算统计数据
+            const stats = await this.getOptimizedStats({ query: {} });
+            
+            console.log('数据刷新完成');
+            
+            return {
+                data: {
+                    refreshTime: new Date().toISOString(),
+                    stats: stats.data
+                },
+                message: '数据刷新成功'
+            };
+        } catch (error) {
+            console.error('刷新数据失败:', error);
+            throw error;
+        }
+    }
+
+    // 格式化文件大小
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
 

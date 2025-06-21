@@ -98,6 +98,12 @@ function createHttpServer() {
             return;
         }
 
+        // 文件下载路由
+        if (pathname.startsWith('/api/export/download/') && method === 'GET') {
+            handleFileDownload(req, res, pathname);
+            return;
+        }
+
         // API路由
         if (pathname.startsWith('/api/')) {
             handleApiRequest(req, res, pathname, method);
@@ -144,6 +150,49 @@ function handleWebhookRequest(req, res) {
             res.end('OK'); // 总是返回200给Telegram
         }
     });
+}
+
+// 文件下载处理
+function handleFileDownload(req, res, pathname) {
+    try {
+        const filename = pathname.split('/').pop();
+        const path = require('path');
+        const filePath = path.join(__dirname, '../exports', filename);
+        
+        // 检查文件是否存在
+        if (!fs.existsSync(filePath)) {
+            res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ error: '文件不存在' }));
+            return;
+        }
+        
+        // 获取文件信息
+        const stats = fs.statSync(filePath);
+        
+        // 设置下载头
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', stats.size);
+        
+        // 创建文件流并传输
+        const fileStream = fs.createReadStream(filePath);
+        fileStream.pipe(res);
+        
+        fileStream.on('error', (error) => {
+            console.error('文件下载错误:', error);
+            if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ error: '文件下载失败' }));
+            }
+        });
+        
+        console.log(`📥 文件下载: ${filename} (${stats.size} bytes)`);
+        
+    } catch (error) {
+        console.error('文件下载处理错误:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: '下载处理失败' }));
+    }
 }
 
 // API请求处理
@@ -396,6 +445,19 @@ async function processApiRequest(pathname, method, data) {
                 ...stats
             }
         };
+    }
+
+    // 使用ApiService处理新的API路由
+    if (pathname.startsWith('/api/')) {
+        try {
+            const apiService = require('./apiService');
+            const parsedUrl = require('url').parse(`http://localhost${pathname}`, true);
+            const result = await apiService.handleRequest(method, parsedUrl.pathname, parsedUrl.query, data);
+            return result;
+        } catch (error) {
+            console.error('ApiService处理失败:', error);
+            throw error;
+        }
     }
 
     // 商家预约统计API

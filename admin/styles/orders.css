@@ -1196,6 +1196,117 @@
     transform: translateY(-1px);
 }
 
+.btn-refresh {
+    background: #10b981;
+    color: white;
+}
+
+.btn-refresh:hover {
+    background: #059669;
+    transform: translateY(-1px);
+}
+
+.btn-export {
+    background: #f59e0b;
+    color: white;
+}
+
+.btn-export:hover {
+    background: #d97706;
+    transform: translateY(-1px);
+}
+
+/* 导出模态框样式 */
+.export-section {
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.export-section h4 {
+    margin: 0 0 1rem 0;
+    color: #2c3e50;
+}
+
+.export-section p {
+    margin: 0 0 1rem 0;
+    color: #6c757d;
+}
+
+.export-options {
+    margin: 1rem 0;
+}
+
+.export-options label {
+    display: block;
+    margin: 0.5rem 0;
+    cursor: pointer;
+}
+
+.export-options input[type="radio"] {
+    margin-right: 0.5rem;
+}
+
+.export-history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+}
+
+.export-history-item:hover {
+    background: #f8f9fa;
+}
+
+.export-file-info {
+    flex: 1;
+}
+
+.export-filename {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.export-details {
+    font-size: 0.875rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+}
+
+.export-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* 通知动画 */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOutRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
 @keyframes fadeIn {
     from {
         opacity: 0;

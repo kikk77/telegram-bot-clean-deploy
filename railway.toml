@@ -4,7 +4,7 @@ watchPatterns = ["app.js", "services/**", "models/**"]
 buildCommand = "npm install"
 
 [deploy]
-startCommand = "npm start"
+startCommand = "chmod +x scripts/railway-deploy.sh && scripts/railway-deploy.sh && npm start"
 healthcheckPath = "/health"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"

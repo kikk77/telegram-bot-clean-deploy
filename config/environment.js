@@ -196,6 +196,37 @@ async function startApp() {
         console.log('   - 健康检查: 可用 (/health)');
         console.log('   - 数据库: 已初始化');
         
+        // 运行数据库迁移和数据一致性检查（生产环境必须执行）
+        if (isDeployment()) {
+            try {
+                console.log('🔄 执行数据库迁移和一致性检查...');
+                
+                // 使用现有的云数据管理器
+                const CloudDataManager = require('../utils/cloudDataManager');
+                const cloudManager = new CloudDataManager();
+                
+                // 执行健康检查
+                const healthCheck = await cloudManager.healthCheck();
+                if (healthCheck.issues.length > 0) {
+                    console.warn('⚠️ 发现数据库问题，但服务将继续运行');
+                    healthCheck.issues.forEach(issue => console.warn(`  - ${issue}`));
+                }
+                
+                // 创建数据快照（用于监控）
+                await cloudManager.createDataSnapshot();
+                
+                console.log('✅ 数据库迁移和一致性检查完成');
+            } catch (error) {
+                console.error('❌ 数据库检查失败:', error);
+                // 生产环境下不因检查失败而停止服务
+                if (nodeEnv === 'production') {
+                    console.warn('⚠️ 生产环境数据库检查失败，服务将继续运行');
+                } else {
+                    throw error;
+                }
+            }
+        }
+        
         // 如果环境变量配置完整，继续加载Bot相关功能
         if (hasRequiredVars && process.env.BOT_TOKEN) {
             console.log('🤖 启动Telegram Bot相关功能...');

@@ -393,29 +393,65 @@ const dbOperations = {
             }
             
             // 从交互记录中查找用户是否关注了机器人
+            // 使用大小写不敏感的查询
             const userRecord = db.prepare(`
                 SELECT user_id, username, first_name, last_name, timestamp
                 FROM interactions 
-                WHERE username = ? 
+                WHERE LOWER(username) = LOWER(?) 
                 ORDER BY timestamp DESC 
                 LIMIT 1
             `).get(merchant.username);
             
             if (userRecord) {
+                // 检查是否是有意义的交互（不仅仅是简单的点击）
+                const meaningfulInteraction = db.prepare(`
+                    SELECT COUNT(*) as count
+                    FROM interactions 
+                    WHERE LOWER(username) = LOWER(?) 
+                    AND action_type IN ('attack_click', 'book_p', 'book_pp', 'book_other', 'start')
+                `).get(merchant.username);
+                
+                const interactionCount = meaningfulInteraction?.count || 0;
+                
                 results[merchantId] = { 
                     followed: true, 
                     user_id: userRecord.user_id,
                     first_name: userRecord.first_name,
                     last_name: userRecord.last_name,
-                    last_interaction: userRecord.timestamp
+                    last_interaction: userRecord.timestamp,
+                    interaction_count: interactionCount,
+                    // 添加更详细的关注信息
+                    real_username: userRecord.username // 保存实际的用户名（可能有大小写差异）
                 };
                 
                 // 如果商家的user_id为空或0，更新它为真实的user_id
                 if (!merchant.user_id || merchant.user_id === 0) {
+                    // 检查是否已经有其他商家使用了这个user_id
+                    const existingMerchant = db.prepare('SELECT id, teacher_name FROM merchants WHERE user_id = ? AND id != ?').get(userRecord.user_id, merchantId);
+                    
+                    if (existingMerchant) {
+                        console.log(`⚠️ 商家 ${merchant.teacher_name} 无法更新user_id，因为用户ID ${userRecord.user_id} 已被商家 ${existingMerchant.teacher_name} (ID: ${existingMerchant.id}) 使用`);
+                        results[merchantId] = { 
+                            followed: false, 
+                            reason: `用户ID冲突：已被其他商家使用 (ID: ${existingMerchant.id})` 
+                        };
+                        continue;
+                    }
+                    
+                    console.log(`🔄 自动更新商家 ${merchant.teacher_name} 的user_id: ${userRecord.user_id}`);
                     this.updateMerchantUserId(merchantId, userRecord.user_id);
+                    
+                    // 同时更新用户名的大小写
+                    if (merchant.username !== userRecord.username) {
+                        console.log(`🔄 更新商家 ${merchant.teacher_name} 的用户名大小写: ${merchant.username} -> ${userRecord.username}`);
+                        this.updateMerchantUsername(merchantId, userRecord.username);
+                    }
                 }
+                
+                console.log(`✅ 检测到商家 ${merchant.teacher_name} 已关注机器人，交互次数: ${interactionCount}`);
             } else {
-                results[merchantId] = { followed: false, reason: '未关注机器人' };
+                results[merchantId] = { followed: false, reason: '未关注机器人或无交互记录' };
+                console.log(`❌ 商家 ${merchant.teacher_name} (${merchant.username}) 未找到关注记录`);
             }
         }
         
@@ -426,6 +462,18 @@ const dbOperations = {
     updateMerchantUserId(merchantId, userId) {
         const stmt = db.prepare('UPDATE merchants SET user_id = ? WHERE id = ?');
         const result = stmt.run(userId, merchantId);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 更新商家的用户名
+    updateMerchantUsername(merchantId, username) {
+        const stmt = db.prepare('UPDATE merchants SET username = ? WHERE id = ?');
+        const result = stmt.run(username, merchantId);
         
         // 清理相关缓存
         cache.set('all_merchants', null);

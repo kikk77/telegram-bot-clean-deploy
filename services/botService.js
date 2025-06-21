@@ -619,15 +619,37 @@ function initBotHandlers() {
             }
             
             try {
-                // 直接完成绑定，创建商家记录
-                const merchantName = username || `用户${userId}`;
-                const merchantId = dbOperations.createMerchantSimple({
-                    user_id: userId,
-                    username: username,
-                    bind_code: code,
-                    bind_step: 5,  // 直接设为完成状态
-                    status: 'active'
-                });
+                // 检查是否已有使用此绑定码的商家记录（管理员创建的）
+                const { db } = require('../config/database');
+                const existingMerchantWithCode = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(code);
+                
+                let merchantId;
+                
+                if (existingMerchantWithCode) {
+                    // 如果已有商家记录，更新其user_id和username
+                    console.log(`找到现有商家记录 ID: ${existingMerchantWithCode.id}，更新绑定信息`);
+                    
+                    const updateStmt = db.prepare(`
+                        UPDATE merchants 
+                        SET user_id = ?, username = ?, bind_step = 5, status = 'active'
+                        WHERE id = ?
+                    `);
+                    updateStmt.run(userId, username, existingMerchantWithCode.id);
+                    
+                    merchantId = existingMerchantWithCode.id;
+                    console.log(`更新现有商家记录成功: ${existingMerchantWithCode.teacher_name} -> 用户 ${userId} (${username})`);
+                } else {
+                    // 如果没有现有记录，创建新的商家记录
+                    console.log(`未找到现有商家记录，创建新的商家记录`);
+                    const merchantName = username || `用户${userId}`;
+                    merchantId = dbOperations.createMerchantSimple({
+                        user_id: userId,
+                        username: username,
+                        bind_code: code,
+                        bind_step: 5,  // 直接设为完成状态
+                        status: 'active'
+                    });
+                }
                 
                 // 标记绑定码为已使用
                 dbOperations.useBindCode(code, userId);
@@ -649,7 +671,7 @@ function initBotHandlers() {
                     bot.sendMessage(chatId, successMessage2);
                 }, 500); // 延迟500毫秒发送第二条消息
                 
-                console.log(`商家 ${userId} (${username}) 绑定成功，绑定码: ${code}`);
+                console.log(`商家 ${userId} (${username}) 绑定成功，绑定码: ${code}, 商家ID: ${merchantId}`);
                 
             } catch (error) {
                 console.error('绑定过程中出错:', error);
@@ -950,8 +972,9 @@ function initBotHandlers() {
                         // 创建预约会话
                         const bookingSessionId = dbOperations.createBookingSession(userId, merchantId, bookType);
                         
-                        // 发送通知给商家（异步）- 只有绑定了真实ID的商家才能收到通知
+                        // 发送通知给商家 - 优化逻辑处理管理员创建的商家
                         if (merchant.user_id) {
+                            // 正常绑定的商家，直接发送通知
                             const merchantNotification = `老师您好，
 用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您预约${bookTypeText}课程
 请及时关注私聊信息。
@@ -964,6 +987,13 @@ function initBotHandlers() {
                             });
                             
                             console.log(`已通知商家 ${merchant.user_id}，用户 ${fullName} (${username}) 预约了 ${bookTypeText}`);
+                        } else {
+                            // 管理员创建但未绑定的商家，记录预约信息并提示用户
+                            console.log(`⚠️ 商家 ${merchant.teacher_name} (ID: ${merchantId}) 尚未绑定Telegram账户，无法接收通知`);
+                            console.log(`📋 预约信息已记录：用户 ${fullName} (${username}) 预约了 ${bookTypeText}`);
+                            
+                            // 可以考虑发送到管理员群组或记录到特殊表中
+                            // 这里先记录日志，后续可以扩展为更完善的通知机制
                         }
                         
                         // 记录交互（异步）
@@ -1469,8 +1499,9 @@ async function handleRebookFlow(userId, data, query) {
                     return;
                 }
                 
-                // 发送通知给商家 - 只有绑定了真实ID的商家才能收到通知
+                // 发送通知给商家 - 优化逻辑处理管理员创建的商家
                 if (merchant.user_id) {
+                    // 正常绑定的商家，直接发送通知
                     const merchantNotification = `老师您好，
 用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您重新预约${bookTypeText}课程
 请及时关注私聊信息。
@@ -1483,6 +1514,13 @@ async function handleRebookFlow(userId, data, query) {
                     });
                     
                     console.log(`已通知商家 ${merchant.user_id}，用户 ${fullName} (${username}) 重新预约了 ${bookTypeText}`);
+                } else {
+                    // 管理员创建但未绑定的商家，记录预约信息并提示用户
+                    console.log(`⚠️ 商家 ${merchant.teacher_name} (ID: ${merchantId}) 尚未绑定Telegram账户，无法接收通知`);
+                    console.log(`📋 重新预约信息已记录：用户 ${fullName} (${username}) 重新预约了 ${bookTypeText}`);
+                    
+                    // 可以考虑发送到管理员群组或记录到特殊表中
+                    // 这里先记录日志，后续可以扩展为更完善的通知机制
                 }
                 
                 // 生成联系方式链接

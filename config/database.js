@@ -100,15 +100,26 @@ function initDatabase() {
         db.exec(`
             CREATE TABLE IF NOT EXISTS db_meta (
                 key TEXT PRIMARY KEY,
-                value TEXT
+                value TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
             )
         `);
         
         const currentVersion = db.prepare('SELECT value FROM db_meta WHERE key = ?').get('db_version')?.value || '1.0.0';
         console.log(`📋 当前数据库版本: ${currentVersion}`);
         
-        // 设置或更新数据库版本
-        db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('db_version', '1.1.0');
+        // 记录数据库初始化信息
+        const now = Math.floor(Date.now() / 1000);
+        db.prepare('INSERT OR REPLACE INTO db_meta (key, value, updated_at) VALUES (?, ?, ?)').run('last_init', now.toString(), now);
+        db.prepare('INSERT OR REPLACE INTO db_meta (key, value, updated_at) VALUES (?, ?, ?)').run('environment', nodeEnv, now);
+        
+        // 设置或更新数据库版本（不在这里强制更新，由迁移系统管理）
+        const versionExists = db.prepare('SELECT COUNT(*) as count FROM db_meta WHERE key = ?').get('db_version').count > 0;
+        if (!versionExists) {
+            db.prepare('INSERT INTO db_meta (key, value) VALUES (?, ?)').run('db_version', '1.0.0');
+            console.log('📋 初始化数据库版本为: 1.0.0');
+        }
     } catch (error) {
         console.warn('⚠️ 数据库版本检查失败:', error.message);
     }

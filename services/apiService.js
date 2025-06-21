@@ -904,10 +904,29 @@ class ApiService {
                 bindCode = bindCodeRecord.code;
             }
             
-            // 创建商家记录（管理员创建的商家暂时不设置user_id，等待用户绑定）
+            // 尝试通过用户名自动检测Telegram ID
+            let detectedUserId = null;
+            const username = body.username.replace('@', '');
+            
+            try {
+                // 方法1：尝试查找数据库中是否有相同用户名的记录（不区分大小写）
+                const existingUser = db.prepare('SELECT user_id FROM merchants WHERE LOWER(username) = LOWER(?) AND user_id IS NOT NULL LIMIT 1').get(username);
+                if (existingUser && existingUser.user_id) {
+                    detectedUserId = existingUser.user_id;
+                    console.log(`✅ 从数据库中找到用户ID: ${detectedUserId} (通过历史记录)`);
+                }
+                
+                if (!detectedUserId) {
+                    console.log(`⚠️ 无法自动检测用户名 @${username} 的Telegram ID，将等待用户主动绑定`);
+                }
+            } catch (detectionError) {
+                console.log(`⚠️ 自动检测用户ID失败: ${detectionError.message}`);
+            }
+            
+            // 创建商家记录
             const merchantData = {
-                user_id: null, // 等待用户使用绑定码绑定时获取真实ID
-                username: body.username.replace('@', ''),
+                user_id: detectedUserId, // 如果检测到了就直接设置，否则为null等待绑定
+                username: username,
                 bind_code: bindCode,
                 bind_step: 5, // 直接设置为完成状态
                 status: 'active',
@@ -920,13 +939,21 @@ class ApiService {
                 throw new Error('创建商家记录失败');
             }
             
-            // 管理员创建的商家不自动标记绑定码为已使用，等待用户主动绑定
+            // 如果检测到了用户ID，标记绑定码为已使用
+            if (detectedUserId) {
+                dbOperations.useBindCode(bindCode, detectedUserId);
+            }
+            
+            const message = detectedUserId 
+                ? `商家创建成功，已自动检测到Telegram ID: ${detectedUserId}` 
+                : '商家创建成功，等待用户使用绑定码进行绑定';
             
             return { 
                 success: true, 
                 merchantId, 
                 bindCode: bindCode,
-                message: '商家创建成功，商家需要使用绑定码进行绑定以获取通知功能'
+                detectedUserId,
+                message
             };
         } catch (error) {
             console.error('创建商家失败:', error);

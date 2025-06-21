@@ -208,8 +208,9 @@ class AppointmentService {
                 // 创建预约会话
                 const bookingSessionId = dbOperations.createBookingSession(userId, merchantId, bookType);
                 
-                // 发送通知给商家 - 只有绑定了真实ID的商家才能收到通知
+                // 发送通知给商家 - 优化逻辑处理管理员创建的商家
                 if (merchant.user_id) {
+                    // 正常绑定的商家，直接发送通知
                     const merchantNotification = `老师您好，
 用户名称 ${fullName}（${username}）即将与您进行联系。他想跟您预约${bookTypeText}课程
 请及时关注私聊信息。
@@ -222,6 +223,13 @@ class AppointmentService {
                     });
                     
                     console.log(`已通知商家 ${merchant.user_id}，用户 ${fullName} (${username}) 预约了 ${bookTypeText}`);
+                } else {
+                    // 管理员创建但未绑定的商家，记录预约信息并提示用户
+                    console.log(`⚠️ 商家 ${merchant.teacher_name} (ID: ${merchantId}) 尚未绑定Telegram账户，无法接收通知`);
+                    console.log(`📋 预约信息已记录：用户 ${fullName} (${username}) 预约了 ${bookTypeText}`);
+                    
+                    // 可以考虑发送到管理员群组或记录到特殊表中
+                    // 这里先记录日志，后续可以扩展为更完善的通知机制
                 }
                 
                 // 生成联系方式链接

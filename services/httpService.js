@@ -399,16 +399,13 @@ async function processApiRequest(pathname, method, data) {
                 
                 let deletedMerchant = false;
                 
-                // 如果绑定码已被使用，需要先处理相关的商家记录
-                if (bindCode.used_by) {
-                    // 查找使用此绑定码的商家
-                    const { db } = require('../config/database');
-                    const merchant = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(bindCode.code);
-                    if (merchant) {
-                        console.log(`强制删除绑定码：同时删除关联的商家 ID: ${merchant.id}`);
-                        dbOperations.deleteMerchant(merchant.id);
-                        deletedMerchant = true;
-                    }
+                // 查找使用此绑定码的商家（无论绑定码是否标记为已使用）
+                const { db } = require('../config/database');
+                const merchant = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(bindCode.code);
+                if (merchant) {
+                    console.log(`强制删除绑定码：同时删除关联的商家 ID: ${merchant.id} (${merchant.teacher_name})`);
+                    dbOperations.deleteMerchant(merchant.id);
+                    deletedMerchant = true;
                 }
                 
                 // 删除绑定码
@@ -536,10 +533,49 @@ async function processApiRequest(pathname, method, data) {
                     bindCode = bindCodeRecord.code;
                 }
                 
-                // 创建商家记录（管理员创建的商家暂时不设置user_id，等待用户绑定）
+                // 尝试通过用户名自动检测Telegram ID
+                let detectedUserId = null;
+                const username = data.username.replace('@', '');
+                
+                try {
+                    const botService = getBotService();
+                    if (botService && botService.bot) {
+                        // 尝试通过用户名获取用户信息
+                        console.log(`🔍 尝试检测用户名 @${username} 的Telegram ID...`);
+                        
+                        // 方法1：尝试通过Chat API获取用户信息
+                        try {
+                            const chatInfo = await botService.bot.getChat(`@${username}`);
+                            if (chatInfo && chatInfo.id) {
+                                detectedUserId = chatInfo.id;
+                                console.log(`✅ 成功检测到用户ID: ${detectedUserId} (通过Chat API)`);
+                            }
+                        } catch (chatError) {
+                            console.log(`⚠️ Chat API检测失败: ${chatError.message}`);
+                        }
+                        
+                        // 方法2：如果Chat API失败，尝试查找数据库中是否有相同用户名的记录
+                        if (!detectedUserId) {
+                            const { db } = require('../config/database');
+                            const existingUser = db.prepare('SELECT user_id FROM merchants WHERE LOWER(username) = LOWER(?) AND user_id IS NOT NULL LIMIT 1').get(username);
+                            if (existingUser && existingUser.user_id) {
+                                detectedUserId = existingUser.user_id;
+                                console.log(`✅ 从数据库中找到用户ID: ${detectedUserId} (通过历史记录)`);
+                            }
+                        }
+                        
+                        if (!detectedUserId) {
+                            console.log(`⚠️ 无法自动检测用户名 @${username} 的Telegram ID，将等待用户主动绑定`);
+                        }
+                    }
+                } catch (detectionError) {
+                    console.log(`⚠️ 自动检测用户ID失败: ${detectionError.message}`);
+                }
+                
+                // 创建商家记录
                 const merchantData = {
-                    user_id: null, // 等待用户使用绑定码绑定时获取真实ID
-                    username: data.username.replace('@', ''),
+                    user_id: detectedUserId, // 如果检测到了就直接设置，否则为null等待绑定
+                    username: username,
                     bind_code: bindCode,
                     bind_step: 5, // 直接设置为完成状态
                     status: 'active',
@@ -552,13 +588,23 @@ async function processApiRequest(pathname, method, data) {
                     return { success: false, error: '创建商家记录失败' };
                 }
                 
+                // 如果检测到了用户ID，标记绑定码为已使用
+                if (detectedUserId) {
+                    dbOperations.useBindCode(bindCode, detectedUserId);
+                }
+                
                 await safeLoadCacheData();
+                
+                const message = detectedUserId 
+                    ? `商家创建成功，已自动检测到Telegram ID: ${detectedUserId}` 
+                    : '商家创建成功，等待用户使用绑定码进行绑定';
                 
                 return { 
                     success: true, 
                     merchantId, 
                     bindCode: bindCode,
-                    message: '商家创建成功，等待用户使用绑定码进行绑定'
+                    detectedUserId,
+                    message
                 };
             } catch (error) {
                 console.error('创建商家失败:', error);

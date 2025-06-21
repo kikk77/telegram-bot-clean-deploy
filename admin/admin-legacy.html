@@ -1423,7 +1423,22 @@
                 let followStatus = '';
                 if (merchant.followStatus) {
                     if (merchant.followStatus.followed) {
-                        followStatus = `<span class="badge success" title="用户ID: ${merchant.followStatus.user_id}">✅ 已关注</span>`;
+                        const userInfo = [];
+                        if (merchant.followStatus.first_name) {
+                            userInfo.push(`姓名: ${merchant.followStatus.first_name}${merchant.followStatus.last_name || ''}`);
+                        }
+                        if (merchant.followStatus.real_username) {
+                            userInfo.push(`用户名: @${merchant.followStatus.real_username}`);
+                        }
+                        if (merchant.followStatus.user_id) {
+                            userInfo.push(`用户ID: ${merchant.followStatus.user_id}`);
+                        }
+                        if (merchant.followStatus.interaction_count) {
+                            userInfo.push(`交互次数: ${merchant.followStatus.interaction_count}`);
+                        }
+                        
+                        const tooltipText = userInfo.join('\\n');
+                        followStatus = `<span class="badge success" title="${tooltipText}">✅ 已关注</span>`;
                     } else {
                         followStatus = `<span class="badge danger" title="${merchant.followStatus.reason}">❌ 未关注</span>`;
                     }
@@ -1437,6 +1452,8 @@
                         <strong>👨‍🏫 ${teacherName}</strong>
                         <div style="color: #666; font-size: 14px; margin-top: 5px;">
                             用户名: @${username} | 地区: ${regionName} | 联系方式: ${contact}
+                            ${merchant.followStatus && merchant.followStatus.followed && merchant.followStatus.first_name ? 
+                              `<br/>真实姓名: ${merchant.followStatus.first_name}${merchant.followStatus.last_name || ''}` : ''}
                         </div>
                         <div style="margin-top: 5px;">
                             <span class="badge ${status === 'active' ? 'success' : 'danger'}">${status === 'active' ? '启用' : '禁用'}</span>
@@ -2537,9 +2554,17 @@
                 if (response.bindCode) {
                     message += `\n绑定码：${response.bindCode}`;
                 }
-                message += '\n商家需要使用绑定码主动绑定才会收到通知。';
                 
-                showAlert(message);
+                // 显示自动检测结果
+                if (response.detectedUserId) {
+                    message += `\n✅ 已自动检测到Telegram ID: ${response.detectedUserId}`;
+                    message += '\n商家现在可以直接收到预约通知！';
+                } else {
+                    message += '\n⚠️ 未能自动检测到Telegram ID';
+                    message += '\n商家需要使用绑定码主动绑定才会收到通知。';
+                }
+                
+                showAlert(message, response.detectedUserId ? 'success' : 'warning');
                 closeNewMerchantModal();
                 
                 // 清空表单

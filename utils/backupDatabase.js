@@ -105,7 +105,10 @@ function restoreFromJSON(backupPath) {
 function createScheduledBackup() {
     const now = new Date();
     const timestamp = now.toISOString().replace(/[:.]/g, '-').split('T')[0];
-    const backupDir = path.join(__dirname, '../backups');
+    
+    // Railway环境使用持久化目录
+    const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME ? true : false;
+    const backupDir = isRailway ? '/app/backups' : path.join(__dirname, '../backups');
     
     // 确保备份目录存在
     if (!fs.existsSync(backupDir)) {
@@ -114,6 +117,44 @@ function createScheduledBackup() {
     
     const backupPath = path.join(backupDir, `backup-${timestamp}.json`);
     return backupToJSON(backupPath);
+}
+
+// Railway部署前备份
+function createPreDeployBackup() {
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:.]/g, '-');
+    
+    const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME ? true : false;
+    const backupDir = isRailway ? '/app/backups' : path.join(__dirname, '../backups');
+    
+    // 确保备份目录存在
+    if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+    }
+    
+    const backupPath = path.join(backupDir, `pre-deploy-backup-${timestamp}.json`);
+    console.log('🚀 创建部署前备份...');
+    
+    const backup = backupToJSON(backupPath);
+    
+    // 同时创建数据库文件的直接备份
+    try {
+        const { db } = require('../config/database');
+        const nodeEnv = process.env.NODE_ENV || 'development';
+        const dbFileName = nodeEnv === 'staging' ? 'marketing_bot_staging.db' : 'marketing_bot.db';
+        const dataDir = isRailway ? '/app/data' : path.join(__dirname, '..', 'data');
+        const dbPath = path.join(dataDir, dbFileName);
+        
+        if (fs.existsSync(dbPath)) {
+            const dbBackupPath = path.join(backupDir, `pre-deploy-${dbFileName}-${timestamp}`);
+            fs.copyFileSync(dbPath, dbBackupPath);
+            console.log(`✅ 数据库文件备份: ${dbBackupPath}`);
+        }
+    } catch (error) {
+        console.warn('⚠️ 数据库文件备份失败:', error.message);
+    }
+    
+    return backup;
 }
 
 // 如果直接运行此脚本
@@ -142,6 +183,10 @@ if (require.main === module) {
             createScheduledBackup();
             break;
             
+        case 'pre-deploy':
+            createPreDeployBackup();
+            break;
+            
         default:
             console.log(`
 数据库备份工具使用说明:
@@ -154,6 +199,9 @@ if (require.main === module) {
 
 创建定期备份:
   node backupDatabase.js scheduled
+
+创建部署前备份:
+  node backupDatabase.js pre-deploy
             `);
     }
 }
@@ -161,5 +209,6 @@ if (require.main === module) {
 module.exports = {
     backupToJSON,
     restoreFromJSON,
-    createScheduledBackup
+    createScheduledBackup,
+    createPreDeployBackup
 }; 

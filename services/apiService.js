@@ -10,6 +10,24 @@ class ApiService {
         this.routes = new Map();
         this.dataExportService = new DataExportService();
         this.setupRoutes();
+        
+        // 请求缓存
+        this.requestCache = new Map();
+        this.cacheTimeout = 2 * 60 * 1000; // 2分钟缓存
+        
+        // 定期清理过期缓存
+        setInterval(() => {
+            const now = Date.now();
+            for (const [key, data] of this.requestCache.entries()) {
+                if (now - data.timestamp > this.cacheTimeout) {
+                    this.requestCache.delete(key);
+                }
+            }
+        }, 60 * 1000); // 每分钟清理一次
+        
+        // 延迟加载服务
+        this.dataExportService = null;
+        this.dataImportService = null;
     }
 
     setupRoutes() {
@@ -1667,6 +1685,24 @@ class ApiService {
             console.error('检查商家关注状态失败:', error);
             throw new Error('检查商家关注状态失败: ' + error.message);
         }
+    }
+
+    // 获取缓存或执行函数
+    async getCachedOrExecute(cacheKey, executeFn, customTimeout = null) {
+        const timeout = customTimeout || this.cacheTimeout;
+        const cached = this.requestCache.get(cacheKey);
+        
+        if (cached && (Date.now() - cached.timestamp) < timeout) {
+            return { ...cached.data, fromCache: true };
+        }
+        
+        const result = await executeFn();
+        this.requestCache.set(cacheKey, {
+            data: result,
+            timestamp: Date.now()
+        });
+        
+        return { ...result, fromCache: false };
     }
 }
 

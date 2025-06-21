@@ -67,6 +67,31 @@ const environmentConfigs = {
 // 获取当前环境配置
 const config = environmentConfigs[nodeEnv] || environmentConfigs.development;
 
+// 日志级别配置
+const logLevel = nodeEnv === 'production' ? 'error' : 'debug';
+
+// 日志输出函数
+const logger = {
+    debug: (...args) => {
+        if (logLevel === 'debug') {
+            console.log(...args);
+        }
+    },
+    info: (...args) => {
+        if (['debug', 'info'].includes(logLevel)) {
+            console.log(...args);
+        }
+    },
+    warn: (...args) => {
+        if (['debug', 'info', 'warn'].includes(logLevel)) {
+            console.warn(...args);
+        }
+    },
+    error: (...args) => {
+        console.error(...args);
+    }
+};
+
 // 验证必需的环境变量
 function validateConfig() {
     const requiredVars = ['BOT_TOKEN', 'BOT_USERNAME'];
@@ -90,23 +115,23 @@ function validateConfig() {
 
 // 显示当前配置
 function displayConfig() {
-    console.log('\n🔧 当前环境配置:');
-    console.log(`📊 环境: ${config.environment}`);
-    console.log(`🌐 端口: ${config.port}`);
-    console.log(`📝 日志级别: ${config.logLevel}`);
-    console.log(`💾 数据库文件: ${config.dbFileName}`);
-    console.log(`🤖 Bot用户名: ${config.botUsername || '未配置'}`);
-    console.log(`👥 群组ID: ${config.groupChatId || '未配置'}`);
+    logger.info('\n🔧 当前环境配置:');
+    logger.info(`📊 环境: ${config.environment}`);
+    logger.info(`🌐 端口: ${config.port}`);
+    logger.info(`📝 日志级别: ${config.logLevel}`);
+    logger.info(`💾 数据库文件: ${config.dbFileName}`);
+    logger.info(`🤖 Bot用户名: ${config.botUsername || '未配置'}`);
+    logger.info(`👥 群组ID: ${config.groupChatId || '未配置'}`);
     
     if (config.features.enableTestMode) {
-        console.log('🧪 测试模式已启用');
+        logger.info('🧪 测试模式已启用');
     }
     
     if (config.features.enableDebugLogs) {
-        console.log('🐛 调试日志已启用');
+        logger.info('🐛 调试日志已启用');
     }
     
-    console.log('');
+    logger.info('');
 }
 
 // 获取特定功能配置
@@ -160,9 +185,8 @@ async function startApp() {
         // 初始化基础数据（仅地区配置）
         initBasicData();
         
-        // 始终启动HTTP服务器和管理后台
-        const { createHttpServer } = require('../services/httpService');
-        createHttpServer();
+        // HTTP服务器已在app.js中启动，这里不需要重复创建
+        console.log('🌐 HTTP服务器使用app.js中的实例');
         
         console.log('✅ 基础服务初始化完成！');
         console.log('🎯 基础服务状态:');
@@ -241,8 +265,10 @@ async function startApp() {
     }
 }
 
+// 导出配置和工具函数
 module.exports = {
     config,
+    logger,
     nodeEnv,
     validateConfig,
     displayConfig,

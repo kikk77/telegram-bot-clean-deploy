@@ -58,12 +58,17 @@ server.listen(PORT, '0.0.0.0', () => {
 // 启动完整应用服务
 async function startFullApplication() {
     try {
-        // 关闭临时健康检查服务器
-        server.close(() => {
-            console.log(`🔄 临时健康检查服务器已关闭，启动完整服务...`);
-        });
+        console.log(`🔄 开始启动完整应用服务...`);
         
-        // 启动完整的应用（包括HTTP服务器、Bot服务、API等）
+        // 不关闭HTTP服务器，而是扩展其功能
+        // 将HTTP服务器的处理函数替换为完整的API处理器
+        const { handleHttpRequest } = require('./services/httpService');
+        
+        // 重新设置请求处理器
+        server.removeAllListeners('request');
+        server.on('request', handleHttpRequest);
+        
+        // 启动完整的应用（Bot服务、调度器等，但不包括HTTP服务器）
         await startApp();
         
     } catch (error) {

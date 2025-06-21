@@ -64,6 +64,13 @@ let scheduledTasks = [];
 let bindCodes = [];
 let regions = [];
 
+// 快速查找索引
+let merchantsMap = new Map();
+let regionsMap = new Map();
+
+// 播报倒计时管理器
+const broadcastTimers = new Map(); // 存储用户的播报倒计时
+
 // 内存映射管理 - 添加自动清理机制
 // 用户绑定状态变量已移除（绑定流程已简化）
 const userMessageHistory = new Map(); // 用户消息历史记录
@@ -305,21 +312,13 @@ async function handleBackButton(userId, messageType, data = {}) {
     }
 }
 
-// 加载缓存数据 - 优化版本
+// 优化的缓存加载函数
 async function loadCacheData() {
     const startTime = Date.now();
     
     try {
-        // 并行加载所有数据，提升性能
-        const [
-            loadedMerchants,
-            loadedButtons,
-            loadedMessageTemplates,
-            loadedTriggerWords,
-            loadedScheduledTasks,
-            loadedBindCodes,
-            loadedRegions
-        ] = await Promise.all([
+        // 使用Promise.allSettled确保即使部分加载失败也能继续
+        const results = await Promise.allSettled([
             Promise.resolve(dbOperations.getAllMerchants()),
             Promise.resolve(dbOperations.getButtons()),
             Promise.resolve(dbOperations.getMessageTemplates()),
@@ -329,17 +328,27 @@ async function loadCacheData() {
             Promise.resolve(dbOperations.getAllRegions())
         ]);
         
-        // 赋值到全局变量
-        merchants = loadedMerchants || [];
-        buttons = loadedButtons || [];
-        messageTemplates = loadedMessageTemplates || [];
-        triggerWords = loadedTriggerWords || [];
-        scheduledTasks = loadedScheduledTasks || [];
-        bindCodes = loadedBindCodes || [];
-        regions = loadedRegions || [];
+        // 处理加载结果
+        merchants = results[0].status === 'fulfilled' ? results[0].value || [] : [];
+        buttons = results[1].status === 'fulfilled' ? results[1].value || [] : [];
+        messageTemplates = results[2].status === 'fulfilled' ? results[2].value || [] : [];
+        triggerWords = results[3].status === 'fulfilled' ? results[3].value || [] : [];
+        scheduledTasks = results[4].status === 'fulfilled' ? results[4].value || [] : [];
+        bindCodes = results[5].status === 'fulfilled' ? results[5].value || [] : [];
+        regions = results[6].status === 'fulfilled' ? results[6].value || [] : [];
+        
+        // 统计失败的加载操作
+        const failedLoads = results.filter(r => r.status === 'rejected');
+        if (failedLoads.length > 0) {
+            console.warn(`⚠️ ${failedLoads.length} 个缓存加载失败:`, failedLoads.map(r => r.reason));
+        }
         
         const loadTime = Date.now() - startTime;
         console.log(`✅ 缓存数据加载完成 (${loadTime}ms) - 商家: ${merchants.length}, 按钮: ${buttons.length}, 模板: ${messageTemplates.length}, 触发词: ${triggerWords.length}, 任务: ${scheduledTasks.length}, 绑定码: ${bindCodes.length}, 地区: ${regions.length}`);
+        
+        // 建立快速查找索引
+        merchantsMap = new Map(merchants.map(m => [m.id, m]));
+        regionsMap = new Map(regions.map(r => [r.id, r]));
         
     } catch (error) {
         console.error('❌ 缓存数据加载失败:', error);
@@ -351,6 +360,8 @@ async function loadCacheData() {
         scheduledTasks = scheduledTasks || [];
         bindCodes = bindCodes || [];
         regions = regions || [];
+        merchantsMap = merchantsMap || new Map();
+        regionsMap = regionsMap || new Map();
     }
 }
 
@@ -1180,7 +1191,8 @@ function initBotHandlers() {
                 if (data.includes('联系') || data.includes('contact')) {
                     await bot.sendMessage(userId, `📞 感谢您的咨询，我们会尽快回复您！`);
                 } else {
-                    await bot.sendMessage(userId, `✅ 操作已处理`);
+                    // 不再显示"操作已处理"，避免干扰正常流程
+                    console.log(`跳过未知callback处理: ${data}`);
                 }
             } catch (error) {
                 console.error('发送默认响应失败:', error);
@@ -2522,26 +2534,8 @@ async function handleUserEvaluationConfirm(userId, data, query) {
             // 清理内存状态
             userEvaluationStates.delete(userId);
             
-            // 发送完成消息
-            const message = `🎉 恭喜您完成一次评价～ 
-经管理员审核后为您添加积分，等级会自动更新！
-————————————————
-是否在大群播报本次出击记录？`;
-            
-            const keyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '实名播报', callback_data: `broadcast_real_${evaluationId}` },
-                        { text: '匿名播报', callback_data: `broadcast_anon_${evaluationId}` }
-                    ]
-                ]
-            };
-            
-            await sendMessageWithoutDelete(userId, message, { 
-                reply_markup: keyboard 
-            }, 'user_evaluation_complete', {
-                evaluationId
-            });
+            // 直接调用播报选择函数
+            await showBroadcastChoice(userId, evaluationId);
         }
         
     } catch (error) {
@@ -2615,6 +2609,11 @@ async function handleMerchantDetailCommentInput(userId, text, evalSession) {
         
         // 发送完成消息
         await bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
+        
+        // 商家详细评价完成后，直接进入播报选择流程
+        setTimeout(async () => {
+            await showBroadcastChoice(userId, evaluationId);
+        }, 1000);
         
         console.log(`=== 商家详细评价文字输入调试结束 ===`);
         
@@ -3191,6 +3190,35 @@ async function showBroadcastChoice(userId, evaluationId) {
             evaluationId
         });
         
+        // 清除之前的倒计时（如果存在）
+        const existingTimer = broadcastTimers.get(userId);
+        if (existingTimer) {
+            clearTimeout(existingTimer.timeoutId);
+            broadcastTimers.delete(userId);
+        }
+        
+        // 5分钟后自动匿名播报（后端逻辑，不显示给用户）
+        const timeoutId = setTimeout(async () => {
+            try {
+                console.log(`用户 ${userId} 播报选择超时，自动执行匿名播报`);
+                
+                // 清除倒计时
+                broadcastTimers.delete(userId);
+                
+                // 自动执行匿名播报
+                await handleAnonymousBroadcast(userId, evaluationId, { from: { username: null } });
+                
+            } catch (error) {
+                console.error('自动匿名播报失败:', error);
+            }
+        }, 300000); // 5分钟 = 300000毫秒
+        
+        // 保存倒计时信息
+        broadcastTimers.set(userId, {
+            evaluationId,
+            timeoutId
+        });
+        
     } catch (error) {
         console.error('显示播报选择失败:', error);
     }
@@ -3199,6 +3227,13 @@ async function showBroadcastChoice(userId, evaluationId) {
 // 处理播报选择
 async function handleBroadcastChoice(userId, data, query) {
     try {
+        // 清除用户的倒计时（如果存在）
+        const existingTimer = broadcastTimers.get(userId);
+        if (existingTimer) {
+            clearTimeout(existingTimer.timeoutId);
+            broadcastTimers.delete(userId);
+        }
+        
         if (data.startsWith('broadcast_real_')) {
             const evaluationId = data.replace('broadcast_real_', '');
             await handleRealBroadcast(userId, evaluationId, query);

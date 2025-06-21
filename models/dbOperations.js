@@ -1108,6 +1108,44 @@ const dbOperations = {
             
             return result;
         });
+    },
+
+    // 批量获取商家信息（优化版本）
+    getBatchMerchants(merchantIds) {
+        if (!merchantIds || merchantIds.length === 0) return [];
+        
+        const cacheKey = `batch_merchants_${merchantIds.sort().join('_')}`;
+        const cached = cache.get(cacheKey);
+        if (cached) return cached;
+        
+        const placeholders = merchantIds.map(() => '?').join(',');
+        const stmt = db.prepare(`
+            SELECT m.*, r.name as region_name 
+            FROM merchants m 
+            LEFT JOIN regions r ON m.region_id = r.id 
+            WHERE m.id IN (${placeholders})
+        `);
+        const result = stmt.all(...merchantIds);
+        cache.set(cacheKey, result, 2 * 60 * 1000); // 2分钟缓存
+        return result;
+    },
+
+    // 批量更新商家状态
+    batchUpdateMerchantStatus(updates) {
+        const transaction = db.transaction((updates) => {
+            const stmt = db.prepare('UPDATE merchants SET status = ? WHERE id = ?');
+            for (const update of updates) {
+                stmt.run(update.status, update.id);
+            }
+        });
+        
+        const result = transaction(updates);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
     }
 };
 

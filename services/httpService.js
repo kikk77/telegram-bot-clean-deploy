@@ -2,127 +2,163 @@ const http = require('http');
 const fs = require('fs');
 const url = require('url');
 const dbOperations = require('../models/dbOperations');
-const { bot, loadCacheData, getCacheData } = require('./botService');
+// 延迟加载botService避免循环依赖
+let botService = null;
+function getBotService() {
+    if (!botService) {
+        try {
+            botService = require('./botService');
+        } catch (error) {
+            console.warn('BotService暂不可用:', error.message);
+            return null;
+        }
+    }
+    return botService;
+}
+
+// 安全的缓存重载函数
+async function safeLoadCacheData() {
+    try {
+        const bs = getBotService();
+        if (bs && bs.loadCacheData) {
+            await bs.loadCacheData();
+        } else {
+            console.log('跳过缓存重载 - BotService未就绪');
+        }
+    } catch (error) {
+        console.warn('缓存重载失败:', error.message);
+    }
+}
+const zlib = require('zlib'); // 添加压缩支持
 
 const PORT = process.env.PORT || 3000;
 
+// 响应压缩配置
+const COMPRESSION_THRESHOLD = 1024; // 1KB以上才压缩
+const CACHE_MAX_AGE = 300; // 5分钟缓存
+
+// HTTP请求处理函数
+function handleHttpRequest(req, res) {
+    const parsedUrl = url.parse(req.url, true);
+    const pathname = parsedUrl.pathname;
+    const method = req.method;
+
+    // 设置CORS头
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+    }
+
+    // 处理具体的路由
+    handleRoutes(req, res, pathname, method);
+}
+
+// 路由处理函数
+function handleRoutes(req, res, pathname, method) {
+    // 静态文件服务
+    if (pathname === '/' || pathname === '/admin') {
+        const path = require('path');
+        const adminPath = path.join(__dirname, '..', 'admin', 'admin-legacy.html');
+        fs.readFile(adminPath, 'utf8', (err, data) => {
+            if (err) {
+                console.error('读取管理后台文件失败:', err);
+                res.writeHead(404);
+                res.end('Admin file not found');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(data);
+        });
+        return;
+    }
+
+    // 静态资源服务（CSS, JS文件）
+    if (pathname.startsWith('/admin/')) {
+        const path = require('path');
+        const filePath = path.join(__dirname, '..', pathname);
+        const ext = path.extname(filePath);
+        
+        let contentType = 'text/plain';
+        if (ext === '.css') contentType = 'text/css';
+        else if (ext === '.js') contentType = 'application/javascript';
+        else if (ext === '.html') contentType = 'text/html';
+        
+        fs.readFile(filePath, 'utf8', (err, data) => {
+            if (err) {
+                res.writeHead(404);
+                res.end('File not found');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': contentType + '; charset=utf-8' });
+            res.end(data);
+        });
+        return;
+    }
+
+    // Webhook路由 - Telegram Bot更新
+    if (pathname === '/webhook' && method === 'POST') {
+        handleWebhookRequest(req, res);
+        return;
+    }
+
+    // 健康检查端点
+    if (pathname === '/health' && method === 'GET') {
+        console.log(`🩺 健康检查请求 - ${new Date().toISOString()}`);
+        
+        // 检查关键服务状态
+        const dbStatus = checkDatabaseConnection();
+        const botStatus = checkBotStatus();
+        
+        const healthStatus = {
+            success: dbStatus.connected && botStatus.connected,
+            status: dbStatus.connected && botStatus.connected ? 'healthy' : 'unhealthy',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            services: {
+                database: dbStatus,
+                telegram_bot: botStatus
+            },
+            environment: process.env.NODE_ENV || 'development'
+        };
+        
+        const statusCode = healthStatus.success ? 200 : 503;
+        console.log(`🩺 健康检查响应 - 状态: ${healthStatus.status} (${statusCode})`);
+        
+        res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(healthStatus));
+        return;
+    }
+
+    // 文件下载路由
+    if (pathname.startsWith('/api/export/download/') && method === 'GET') {
+        handleFileDownload(req, res, pathname);
+        return;
+    }
+
+    // API路由
+    if (pathname.startsWith('/api/')) {
+        handleApiRequest(req, res, pathname, method);
+        return;
+    }
+
+    // 404 - 返回JSON格式响应
+    console.log(`❌ 404 - 路径不存在: ${pathname}`);
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ 
+        error: 'Not Found',
+        availableEndpoints: ['/health', '/admin', '/api/*', '/webhook']
+    }));
+}
+
 // HTTP服务器和管理后台API
 function createHttpServer() {
-    const server = http.createServer((req, res) => {
-        const parsedUrl = url.parse(req.url, true);
-        const pathname = parsedUrl.pathname;
-        const method = req.method;
-
-        // 设置CORS头
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-        if (method === 'OPTIONS') {
-            res.writeHead(200);
-            res.end();
-            return;
-        }
-
-        // 静态文件服务
-        if (pathname === '/' || pathname === '/admin') {
-            const path = require('path');
-            const adminPath = path.join(__dirname, '..', 'admin', 'admin-legacy.html');
-            fs.readFile(adminPath, 'utf8', (err, data) => {
-                if (err) {
-                    console.error('读取管理后台文件失败:', err);
-                    res.writeHead(404);
-                    res.end('Admin file not found');
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-                res.end(data);
-            });
-            return;
-        }
-
-        // 静态资源服务（CSS, JS文件）
-        if (pathname.startsWith('/admin/')) {
-            const path = require('path');
-            const filePath = path.join(__dirname, '..', pathname);
-            const ext = path.extname(filePath);
-            
-            let contentType = 'text/plain';
-            if (ext === '.css') contentType = 'text/css';
-            else if (ext === '.js') contentType = 'application/javascript';
-            else if (ext === '.html') contentType = 'text/html';
-            
-            fs.readFile(filePath, 'utf8', (err, data) => {
-                if (err) {
-                    res.writeHead(404);
-                    res.end('File not found');
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': contentType + '; charset=utf-8' });
-                res.end(data);
-            });
-            return;
-        }
-
-        // Webhook路由 - Telegram Bot更新
-        if (pathname === '/webhook' && method === 'POST') {
-            handleWebhookRequest(req, res);
-            return;
-        }
-
-        // 健康检查端点
-        if (pathname === '/health' && method === 'GET') {
-            console.log(`🩺 健康检查请求 - ${new Date().toISOString()}`);
-            
-            // 检查关键服务状态
-            const dbStatus = checkDatabaseConnection();
-            const botStatus = checkBotStatus();
-            
-            const healthStatus = {
-                success: dbStatus.connected && botStatus.connected,
-                status: dbStatus.connected && botStatus.connected ? 'healthy' : 'unhealthy',
-                timestamp: new Date().toISOString(),
-                uptime: process.uptime(),
-                services: {
-                    database: dbStatus,
-                    telegram_bot: botStatus
-                },
-                environment: process.env.NODE_ENV || 'development'
-            };
-            
-            const statusCode = healthStatus.success ? 200 : 503;
-            console.log(`🩺 健康检查响应 - 状态: ${healthStatus.status} (${statusCode})`);
-            
-            res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify(healthStatus));
-            return;
-        }
-
-        // 文件下载路由
-        if (pathname.startsWith('/api/export/download/') && method === 'GET') {
-            handleFileDownload(req, res, pathname);
-            return;
-        }
-
-        // API路由
-        if (pathname.startsWith('/api/')) {
-            handleApiRequest(req, res, pathname, method);
-            return;
-        }
-
-        // 404 - 返回JSON格式响应
-        console.log(`❌ 404 - 路径不存在: ${pathname}`);
-        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ 
-            error: 'Not Found',
-            availableEndpoints: ['/health', '/admin', '/api/*', '/webhook']
-        }));
-    });
-
-    server.listen(PORT, () => {
-        console.log(`🚀 HTTP服务器启动在端口 ${PORT}`);
-        console.log(`📱 管理后台: http://localhost:${PORT}/admin`);
-    });
+    const server = http.createServer(handleHttpRequest);
+    return server;
 }
 
 // Webhook请求处理 - 处理Telegram更新
@@ -222,12 +258,10 @@ function handleApiRequest(req, res, pathname, method) {
             
             const response = await processApiRequest(pathname, method, data);
             
-            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify(response));
+            sendResponse(res, 200, response, 'application/json');
         } catch (error) {
             console.error('API请求处理错误:', error);
-            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify({ success: false, error: error.message }));
+            sendResponse(res, 500, { success: false, error: error.message }, 'application/json');
         }
     });
 }
@@ -279,7 +313,7 @@ async function processApiRequest(pathname, method, data) {
             return { success: true, data: dbOperations.getAllBindCodes() };
         } else if (method === 'POST') {
             const result = dbOperations.createBindCode(data.description);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true, data: result };
         } else if (method === 'DELETE') {
             try {
@@ -300,7 +334,7 @@ async function processApiRequest(pathname, method, data) {
                 
                 // 删除未使用的绑定码
                 const result = dbOperations.deleteBindCode(data.id);
-                await loadCacheData();
+                await safeLoadCacheData();
                 
                 return { 
                     success: true, 
@@ -337,7 +371,7 @@ async function processApiRequest(pathname, method, data) {
                 
                 // 删除未使用的绑定码
                 const result = dbOperations.deleteBindCode(bindCodeId);
-                await loadCacheData();
+                await safeLoadCacheData();
                 
                 return { 
                     success: true, 
@@ -379,7 +413,7 @@ async function processApiRequest(pathname, method, data) {
                 
                 // 删除绑定码
                 const result = dbOperations.deleteBindCode(bindCodeId);
-                await loadCacheData();
+                await safeLoadCacheData();
                 
                 return { 
                     success: true, 
@@ -428,7 +462,7 @@ async function processApiRequest(pathname, method, data) {
                 }
             }
             
-            await loadCacheData();
+            await safeLoadCacheData();
             
             return { 
                 success: true, 
@@ -448,16 +482,16 @@ async function processApiRequest(pathname, method, data) {
             return { success: true, data: dbOperations.getAllRegions() };
         } else if (method === 'POST') {
             const result = dbOperations.createRegion(data.name, data.sortOrder);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'PUT') {
             dbOperations.updateRegion(data.id, data.name, data.sortOrder);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true };
         } else if (method === 'DELETE') {
             try {
             dbOperations.deleteRegion(data.id);
-            await loadCacheData();
+            await safeLoadCacheData();
                 return { success: true, message: '地区删除成功' };
             } catch (error) {
                 console.error('删除地区失败:', error);
@@ -518,7 +552,7 @@ async function processApiRequest(pathname, method, data) {
                     return { success: false, error: '创建商家记录失败' };
                 }
                 
-                await loadCacheData();
+                await safeLoadCacheData();
                 
                 return { 
                     success: true, 
@@ -549,7 +583,7 @@ async function processApiRequest(pathname, method, data) {
             console.log(`✅ 商家删除成功，影响行数: ${result.changes}`);
             
             // 重新加载缓存数据
-            await loadCacheData();
+            await safeLoadCacheData();
             console.log(`🔄 缓存数据已重新加载`);
             
             return { success: true, message: '商家删除成功', deletedId: merchantId };
@@ -563,7 +597,7 @@ async function processApiRequest(pathname, method, data) {
     if (pathname.match(/^\/api\/merchants\/\d+\/reset$/) && method === 'POST') {
         const merchantId = pathname.split('/')[3];
         dbOperations.resetMerchantBind(merchantId);
-        await loadCacheData();
+        await safeLoadCacheData();
         return { success: true };
     }
 
@@ -588,7 +622,7 @@ async function processApiRequest(pathname, method, data) {
             dbOperations.updateMerchantBindCode(merchantId, data.bindCode);
         }
         
-        await loadCacheData();
+        await safeLoadCacheData();
         return { success: true };
     }
 
@@ -596,7 +630,7 @@ async function processApiRequest(pathname, method, data) {
     if (pathname.match(/^\/api\/merchants\/\d+\/toggle-status$/) && method === 'POST') {
         const merchantId = pathname.split('/')[3];
         dbOperations.toggleMerchantStatus(merchantId);
-        await loadCacheData();
+        await safeLoadCacheData();
         return { success: true };
     }
 
@@ -606,11 +640,11 @@ async function processApiRequest(pathname, method, data) {
             return { success: true, data: dbOperations.getButtons() };
         } else if (method === 'POST') {
             const result = dbOperations.createButton(data.title, data.message, data.merchantId);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'DELETE') {
             dbOperations.deleteButton(data.id);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true };
         }
     }
@@ -623,17 +657,17 @@ async function processApiRequest(pathname, method, data) {
             const result = dbOperations.createMessageTemplate(
                 data.name, data.content, data.imageUrl, data.buttonsConfig
             );
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'PUT') {
             dbOperations.updateMessageTemplate(
                 data.id, data.name, data.content, data.imageUrl, data.buttonsConfig
             );
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true };
         } else if (method === 'DELETE') {
             dbOperations.deleteMessageTemplate(data.id);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true };
         }
     }
@@ -646,11 +680,11 @@ async function processApiRequest(pathname, method, data) {
             const result = dbOperations.createTriggerWord(
                 data.word, data.templateId, data.matchType, data.chatId
             );
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'DELETE') {
             dbOperations.deleteTriggerWord(data.id);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true };
         }
     }
@@ -664,11 +698,11 @@ async function processApiRequest(pathname, method, data) {
                 data.name, data.templateId, data.chatId, data.scheduleType,
                 data.scheduleTime, data.sequenceOrder, data.sequenceDelay
             );
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true, data: { id: result } };
         } else if (method === 'DELETE') {
             dbOperations.deleteScheduledTask(data.id);
-            await loadCacheData();
+            await safeLoadCacheData();
             return { success: true };
         }
     }
@@ -1125,8 +1159,9 @@ function checkDatabaseConnection() {
 // 检查机器人状态
 function checkBotStatus() {
     try {
+        const bs = getBotService();
         // 检查bot实例是否存在且已初始化
-        if (!bot || !bot.token) {
+        if (!bs || !bs.bot || !bs.bot.token) {
             return {
                 connected: false,
                 error: 'Bot未初始化'
@@ -1136,8 +1171,8 @@ function checkBotStatus() {
         // 检查bot是否正在运行
         return {
             connected: true,
-            token_prefix: bot.token.substring(0, 5) + '...',
-            webhook_info: bot.hasOpenWebHook ? 'active' : 'inactive'
+            token_prefix: bs.bot.token.substring(0, 5) + '...',
+            webhook_info: bs.bot.hasOpenWebHook ? 'active' : 'inactive'
         };
     } catch (error) {
         console.error('Bot状态检查失败:', error);
@@ -1151,7 +1186,8 @@ function checkBotStatus() {
 // 发送消息到群组
 async function sendMessageToGroup(groupId, message, options = {}) {
     try {
-        if (!bot) {
+        const bs = getBotService();
+        if (!bs || !bs.bot) {
             throw new Error('Bot实例未初始化');
         }
         
@@ -1160,7 +1196,7 @@ async function sendMessageToGroup(groupId, message, options = {}) {
             ...options
         };
         
-        const result = await bot.sendMessage(groupId, message, sendOptions);
+        const result = await bs.bot.sendMessage(groupId, message, sendOptions);
         return {
             success: true,
             messageId: result.message_id,
@@ -1178,7 +1214,8 @@ async function sendMessageToGroup(groupId, message, options = {}) {
 // 发送消息到用户
 async function sendMessageToUser(userId, message, options = {}) {
     try {
-        if (!bot) {
+        const bs = getBotService();
+        if (!bs || !bs.bot) {
             throw new Error('Bot实例未初始化');
         }
         
@@ -1187,7 +1224,7 @@ async function sendMessageToUser(userId, message, options = {}) {
             ...options
         };
         
-        const result = await bot.sendMessage(userId, message, sendOptions);
+        const result = await bs.bot.sendMessage(userId, message, sendOptions);
         return {
             success: true,
             messageId: result.message_id,
@@ -1202,8 +1239,84 @@ async function sendMessageToUser(userId, message, options = {}) {
     }
 }
 
+// 压缩响应数据
+function compressResponse(data, acceptEncoding) {
+    if (!acceptEncoding || data.length < COMPRESSION_THRESHOLD) {
+        return { data, encoding: null };
+    }
+    
+    if (acceptEncoding.includes('gzip')) {
+        return { data: zlib.gzipSync(data), encoding: 'gzip' };
+    } else if (acceptEncoding.includes('deflate')) {
+        return { data: zlib.deflateSync(data), encoding: 'deflate' };
+    }
+    
+    return { data, encoding: null };
+}
+
+// 设置缓存头功能已整合到sendResponse函数中
+
+function sendResponse(res, statusCode, data, contentType = 'application/json') {
+    try {
+        // 检查响应是否已经发送
+        if (res.headersSent) {
+            console.log('响应头已发送，跳过重复发送');
+            return;
+        }
+        
+        let responseData;
+        
+        if (contentType === 'application/json') {
+            responseData = JSON.stringify(data);
+        } else {
+            responseData = data;
+        }
+        
+        // 应用压缩
+        const acceptEncoding = res.req.headers['accept-encoding'] || '';
+        const compressed = compressResponse(Buffer.from(responseData), acceptEncoding);
+        
+        // 构建响应头
+        const headers = {
+            'Content-Type': contentType,
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Content-Length': compressed.data.length
+        };
+        
+        // 添加压缩编码头
+        if (compressed.encoding) {
+            headers['Content-Encoding'] = compressed.encoding;
+        }
+        
+        // 对于GET请求的API数据，添加缓存头
+        if (res.req.method === 'GET' && res.req.url.startsWith('/api/')) {
+            headers['Cache-Control'] = `public, max-age=${CACHE_MAX_AGE}`;
+            headers['ETag'] = `"${Date.now()}"`;
+        }
+        
+        // 设置响应头并发送数据
+        res.writeHead(statusCode, headers);
+        res.end(compressed.data);
+        
+    } catch (error) {
+        console.error('发送响应失败:', error);
+        // 只有在响应头未发送时才尝试发送错误响应
+        if (!res.headersSent) {
+            try {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: '服务器内部错误' }));
+            } catch (secondError) {
+                console.error('发送错误响应也失败:', secondError);
+            }
+        }
+    }
+}
+
 module.exports = {
     createHttpServer,
+    handleHttpRequest,
     processApiRequest,
     sendMessageToGroup,
     sendMessageToUser,

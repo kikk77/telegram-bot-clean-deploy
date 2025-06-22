@@ -171,12 +171,12 @@ async function startApp() {
         
         displayConfig();
         
-        // 导入并初始化数据库
-        const { initDatabase } = require('./database');
+        // 导入数据库（数据库在require时自动初始化）
+        const { db } = require('./database');
         const { initBasicData } = require('../utils/initData');
         
-        // 初始化数据库
-        initDatabase();
+        // 数据库已在导入时自动初始化
+        console.log('✅ 数据库连接已建立');
         
         // 初始化基础数据（仅地区配置）
         initBasicData();

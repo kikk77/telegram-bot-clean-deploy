@@ -60,6 +60,14 @@ function handleHttpRequest(req, res) {
 
 // 路由处理函数
 function handleRoutes(req, res, pathname, method) {
+    // favicon.ico 请求处理
+    if (pathname === '/favicon.ico') {
+        // 返回一个简单的透明1x1像素图标或404
+        res.writeHead(204); // No Content
+        res.end();
+        return;
+    }
+
     // 静态文件服务
     if (pathname === '/' || pathname === '/admin') {
         const path = require('path');
@@ -295,8 +303,11 @@ async function processApiRequest(pathname, method, data) {
                 // 如果ApiService返回404，说明路由不存在，继续使用原有逻辑
                 if (result && result.status === 404) {
                     console.log(`ApiService未处理请求: ${method} ${pathname}, 使用原有逻辑`);
+                } else if (result && result.success === false) {
+                    // 如果ApiService处理失败，也尝试使用原有逻辑作为备用
+                    console.log(`ApiService处理请求失败: ${method} ${pathname}，尝试使用原有逻辑`, result);
                 } else {
-                    // 如果是其他错误，直接返回错误
+                    // 只有成功的情况才直接返回
                     console.log(`ApiService处理请求失败: ${method} ${pathname}`, result);
                     return result;
                 }
@@ -348,8 +359,11 @@ async function processApiRequest(pathname, method, data) {
                 
                 return { 
                     success: true, 
+                    status: 200,
                     message: '绑定码删除成功',
-                    deletedCount: result.changes
+                    data: {
+                        deletedCount: result.changes
+                    }
                 };
             } catch (error) {
                 console.error('删除绑定码失败:', error);
@@ -369,8 +383,11 @@ async function processApiRequest(pathname, method, data) {
                 
                 return { 
                     success: true, 
+                    status: 200,
                     message: result.deletedMerchant ? '绑定码及相关商家记录已强制删除' : '绑定码已删除',
-                    deletedMerchant: result.deletedMerchant
+                    data: {
+                        deletedMerchant: result.deletedMerchant
+                    }
                 };
             } catch (error) {
                 console.error('强制删除绑定码失败:', error);
@@ -417,9 +434,12 @@ async function processApiRequest(pathname, method, data) {
             
             return { 
                 success: true, 
+                status: 200,
                 message: `批量删除成功！删除了 ${deletedCount} 个测试绑定码${deletedMerchants > 0 ? `，${deletedMerchants} 个相关商家` : ''}`,
-                deletedCount,
-                deletedMerchants
+                data: {
+                    deletedCount,
+                    deletedMerchants
+                }
             };
         } catch (error) {
             console.error('批量删除测试绑定码失败:', error);
@@ -1304,8 +1324,16 @@ function sendResponse(res, statusCode, data, contentType = 'application/json') {
         
         // 对于GET请求的API数据，添加缓存头
         if (res.req.method === 'GET' && res.req.url.startsWith('/api/')) {
-            headers['Cache-Control'] = `public, max-age=${CACHE_MAX_AGE}`;
-            headers['ETag'] = `"${Date.now()}"`;
+            // 对于经常变动的数据（如绑定码、商家等），禁用缓存
+            if (res.req.url.includes('/bind-codes') || res.req.url.includes('/merchants') || res.req.url.includes('/orders')) {
+                headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+                headers['Pragma'] = 'no-cache';
+                headers['Expires'] = '0';
+            } else {
+                // 其他相对稳定的数据可以短期缓存
+                headers['Cache-Control'] = `public, max-age=60`; // 1分钟缓存
+                headers['ETag'] = `"${Date.now()}"`;
+            }
         }
         
         // 设置响应头并发送数据

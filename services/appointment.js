@@ -59,14 +59,14 @@ class AppointmentService {
                     
                     await this.sendMessageWithoutDelete(userId, '✅ 约课成功！\n\n👩🏻‍🏫 上完课后返回此处\n\n✍🏻 完成老师课程评价\n\n😭 这将对老师有很大帮助！', {}, 'booking_success_confirmed');
                     
-                    // 延迟30分钟发送课程完成确认消息
+                    // 延迟10分钟发送课程完成确认消息
                     setTimeout(async () => {
                         const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
                         const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
                         const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
                         
                         await this.sendCourseCompletionCheck(userId, merchant.user_id, bookingSessionId, userFullName, username, merchant.teacher_name);
-                    }, 30 * 60 * 1000); // 30分钟 = 30 * 60 * 1000毫秒
+                    }, 10 * 60 * 1000); // 10分钟 = 10 * 60 * 1000毫秒
                     
                     console.log(`用户 ${userId} 确认约课成功，预约会话 ${bookingSessionId}，订单ID ${orderId}`);
                     

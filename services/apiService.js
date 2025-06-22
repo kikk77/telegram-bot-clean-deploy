@@ -988,8 +988,29 @@ class ApiService {
     // 删除绑定码
     async deleteBindCode({ params }) {
         try {
+            // 检查绑定码的依赖关系
+            const dependencies = dbOperations.checkBindCodeDependencies(params.id);
+            
+            if (!dependencies.exists) {
+                throw new Error('绑定码不存在');
+            }
+            
+            if (!dependencies.canDelete) {
+                const errorMsg = dependencies.merchant 
+                    ? `绑定码已被商家 ${dependencies.merchant.teacher_name} 使用，无法删除。如需强制删除，请使用强制删除功能。`
+                    : '绑定码已被使用，无法删除。如需强制删除，请使用强制删除功能。';
+                throw new Error(errorMsg);
+            }
+            
             const result = dbOperations.deleteBindCode(params.id);
-            return { success: true, result };
+            return { 
+                success: true, 
+                status: 200,
+                message: '绑定码删除成功',
+                data: {
+                    deletedCount: result.changes
+                }
+            };
         } catch (error) {
             console.error('删除绑定码失败:', error);
             throw new Error('删除绑定码失败: ' + error.message);
@@ -999,30 +1020,15 @@ class ApiService {
     // 强制删除绑定码（包括已使用的）
     async forceDeleteBindCode({ params }) {
         try {
-            // 首先检查绑定码是否存在
-            const bindCode = dbOperations.getBindCodeById(params.id);
-            if (!bindCode) {
-                throw new Error('绑定码不存在');
-            }
-            
-            // 如果绑定码已被使用，需要先处理相关的商家记录
-            if (bindCode.used_by) {
-                // 查找使用此绑定码的商家
-                const merchant = db.prepare('SELECT * FROM merchants WHERE bind_code = ?').get(bindCode.code);
-                if (merchant) {
-                    // 删除商家记录（这会触发级联删除）
-                    console.log(`强制删除绑定码：同时删除关联的商家 ID: ${merchant.id}`);
-                    dbOperations.deleteMerchant(merchant.id);
-                }
-            }
-            
-            // 删除绑定码
-            const result = dbOperations.deleteBindCode(params.id);
+            const result = dbOperations.forceDeleteBindCode(params.id);
             
             return { 
                 success: true, 
-                result,
-                message: bindCode.used_by ? '已强制删除绑定码及相关商家记录' : '绑定码删除成功'
+                status: 200,
+                message: result.deletedMerchant ? '绑定码及相关商家记录已强制删除' : '绑定码已删除',
+                data: {
+                    deletedMerchant: result.deletedMerchant
+                }
             };
         } catch (error) {
             console.error('强制删除绑定码失败:', error);

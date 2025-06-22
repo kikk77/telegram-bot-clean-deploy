@@ -43,7 +43,7 @@ async function testMerchantFollowStatus() {
                 console.log(`  📊 交互次数: ${interactionCount}`);
                 
                 // 检查关注状态
-                const followStatus = dbOperations.checkSingleMerchantFollowStatus(merchant.id);
+                const followStatus = await dbOperations.checkSingleMerchantFollowStatus(merchant.id);
                 console.log(`  📱 关注状态: ${followStatus.followed ? '✅ 已关注' : '❌ 未关注'}`);
                 if (followStatus.reason) {
                     console.log(`  📝 状态原因: ${followStatus.reason}`);
@@ -57,7 +57,7 @@ async function testMerchantFollowStatus() {
         // 3. 批量检查关注状态
         console.log('3️⃣ 批量检查关注状态...');
         const merchantIds = merchantsWithUsername.slice(0, 3).map(m => m.id);
-        const batchResults = dbOperations.checkMerchantsFollowStatus(merchantIds);
+        const batchResults = await dbOperations.checkMerchantsFollowStatus(merchantIds);
         
         console.log('📊 批量检查结果:');
         for (const [merchantId, result] of Object.entries(batchResults)) {

@@ -1703,7 +1703,7 @@ class ApiService {
         try {
             const merchantIds = body.merchantIds;
             
-            const result = dbOperations.checkMerchantsFollowStatus(merchantIds);
+            const result = await dbOperations.checkMerchantsFollowStatus(merchantIds);
             
             return {
                 success: true,
@@ -1729,7 +1729,7 @@ class ApiService {
             
             console.log(`🔍 测试商家关注状态: ${merchant.teacher_name} (${merchant.username})`);
             
-            const result = dbOperations.checkSingleMerchantFollowStatus(merchantId);
+            const result = await dbOperations.checkSingleMerchantFollowStatus(merchantId);
             
             // 添加详细的调试信息
             const debugInfo = {

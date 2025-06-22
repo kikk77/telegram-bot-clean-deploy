@@ -539,9 +539,28 @@ const dbOperations = {
         return result;
     },
 
-    // 检查商家关注状态
-    checkMerchantsFollowStatus(merchantIds) {
+    // 检查商家关注状态 - 使用 Telegram API getChatMember
+    async checkMerchantsFollowStatus(merchantIds) {
         const results = {};
+        
+        // 获取 Bot 实例
+        let bot = null;
+        try {
+            const botService = require('../services/botService');
+            if (botService && typeof botService.getBotInstance === 'function') {
+                bot = botService.getBotInstance();
+            }
+        } catch (error) {
+            console.error('无法获取Bot实例:', error);
+        }
+        
+        if (!bot) {
+            console.error('❌ Bot实例不可用，无法检测关注状态');
+            for (const merchantId of merchantIds) {
+                results[merchantId] = { followed: false, reason: 'Bot实例不可用' };
+            }
+            return results;
+        }
         
         for (const merchantId of merchantIds) {
             const merchant = this.getMerchantById(merchantId);
@@ -550,93 +569,134 @@ const dbOperations = {
                 continue;
             }
             
-            if (!merchant.username) {
-                results[merchantId] = { followed: false, reason: '未设置用户名' };
+            // 优先使用 user_id，如果没有则尝试通过用户名查找
+            let userId = merchant.user_id;
+            let username = merchant.username;
+            
+            // 如果没有 user_id，尝试从交互记录中获取
+            if (!userId || userId === 0) {
+                if (username) {
+                    const userRecord = this.getUserRecordByUsername(username);
+                    if (userRecord && userRecord.user_id) {
+                        userId = userRecord.user_id;
+                        console.log(`🔍 从交互记录中找到商家 ${merchant.teacher_name} 的user_id: ${userId}`);
+                        
+                        // 更新商家记录中的 user_id
+                        this.updateMerchantUserId(merchantId, userId);
+                    }
+                }
+            }
+            
+            if (!userId || userId === 0) {
+                results[merchantId] = { 
+                    followed: false, 
+                    reason: '缺少用户ID，请商家先与机器人交互',
+                    suggestion: '让商家发送 /start 命令给机器人'
+                };
+                console.log(`❌ 商家 ${merchant.teacher_name} (${username}) 缺少用户ID`);
                 continue;
             }
             
-            // 从交互记录中查找用户是否关注了机器人
-            // 使用大小写不敏感的查询
-            const userRecord = db.prepare(`
-                SELECT user_id, username, first_name, last_name, timestamp
-                FROM interactions 
-                WHERE LOWER(username) = LOWER(?) 
-                ORDER BY timestamp DESC 
-                LIMIT 1
-            `).get(merchant.username);
-            
-            if (userRecord) {
-                // 检查用户最近的状态，确保没有屏蔽机器人
-                const recentStatusStmt = db.prepare(`
-                    SELECT action_type, timestamp
-                    FROM interactions 
-                    WHERE user_id = ? AND action_type LIKE 'status_%' 
-                    ORDER BY timestamp DESC 
-                    LIMIT 1
-                `);
-                const recentStatus = recentStatusStmt.get(userRecord.user_id);
+            try {
+                console.log(`🔍 检测商家 ${merchant.teacher_name} (ID: ${userId}) 的关注状态...`);
                 
-                // 如果最近状态是kicked，说明用户屏蔽了机器人
-                if (recentStatus && recentStatus.action_type === 'status_kicked') {
+                // 使用 getChatMember API 检查用户状态
+                const chatMember = await bot.getChatMember(userId, userId);
+                
+                if (chatMember) {
+                    // 检查用户状态
+                    const status = chatMember.status;
+                    const user = chatMember.user;
+                    
+                    let followed = false;
+                    let reason = '';
+                    
+                    switch (status) {
+                        case 'creator':
+                        case 'administrator':
+                        case 'member':
+                            followed = true;
+                            reason = '用户可以与机器人正常交互';
+                            break;
+                        case 'restricted':
+                            followed = false;
+                            reason = '用户被限制与机器人交互';
+                            break;
+                        case 'left':
+                            followed = false;
+                            reason = '用户已停止机器人或删除对话';
+                            break;
+                        case 'kicked':
+                            followed = false;
+                            reason = '用户已屏蔽机器人';
+                            break;
+                        default:
+                            followed = false;
+                            reason = `未知状态: ${status}`;
+                    }
+                    
+                    results[merchantId] = {
+                        followed: followed,
+                        reason: reason,
+                        telegram_status: status,
+                        user_info: {
+                            id: user.id,
+                            username: user.username,
+                            first_name: user.first_name,
+                            last_name: user.last_name,
+                            is_bot: user.is_bot
+                        },
+                        detection_method: 'telegram_api',
+                        checked_at: Math.floor(Date.now() / 1000)
+                    };
+                    
+                    // 更新商家信息（如果用户名有变化）
+                    if (user.username && user.username !== merchant.username) {
+                        console.log(`🔄 更新商家 ${merchant.teacher_name} 的用户名: ${merchant.username} -> ${user.username}`);
+                        this.updateMerchantUsername(merchantId, user.username);
+                    }
+                    
+                    const statusIcon = followed ? '✅' : '❌';
+                    console.log(`${statusIcon} 商家 ${merchant.teacher_name} 检测结果: ${followed ? '已关注' : '未关注'} (${reason})`);
+                    
+                } else {
                     results[merchantId] = { 
                         followed: false, 
-                        reason: '用户已屏蔽机器人',
-                        last_status: 'kicked',
-                        last_status_time: recentStatus.timestamp
+                        reason: '无法获取用户信息',
+                        detection_method: 'telegram_api',
+                        checked_at: Math.floor(Date.now() / 1000)
                     };
-                    console.log(`❌ 商家 ${merchant.teacher_name} (${merchant.username}) 已屏蔽机器人`);
-                    continue;
+                    console.log(`❌ 商家 ${merchant.teacher_name} 无法获取用户信息`);
                 }
                 
-                // 检查是否是有意义的交互（不仅仅是简单的点击）
-                const meaningfulInteraction = db.prepare(`
-                    SELECT COUNT(*) as count
-                    FROM interactions 
-                    WHERE LOWER(username) = LOWER(?) 
-                    AND action_type IN ('attack_click', 'book_p', 'book_pp', 'book_other', 'start')
-                `).get(merchant.username);
+            } catch (error) {
+                console.error(`❌ 检测商家 ${merchant.teacher_name} 关注状态失败:`, error.message);
                 
-                const interactionCount = meaningfulInteraction?.count || 0;
+                // 分析错误类型
+                let reason = '检测失败';
+                let suggestion = '';
                 
-                results[merchantId] = { 
-                    followed: true, 
-                    user_id: userRecord.user_id,
-                    first_name: userRecord.first_name,
-                    last_name: userRecord.last_name,
-                    last_interaction: userRecord.timestamp,
-                    interaction_count: interactionCount,
-                    // 添加更详细的关注信息
-                    real_username: userRecord.username // 保存实际的用户名（可能有大小写差异）
+                if (error.message.includes('Bad Request: user not found')) {
+                    reason = '用户不存在或从未与机器人交互';
+                    suggestion = '让商家发送 /start 命令给机器人';
+                } else if (error.message.includes('Forbidden')) {
+                    reason = '机器人无权限访问用户信息';
+                    suggestion = '用户可能已屏蔽机器人';
+                } else if (error.message.includes('chat not found')) {
+                    reason = '对话不存在';
+                    suggestion = '让商家重新启动与机器人的对话';
+                } else {
+                    reason = `API调用失败: ${error.message}`;
+                }
+                
+                results[merchantId] = {
+                    followed: false,
+                    reason: reason,
+                    suggestion: suggestion,
+                    error: error.message,
+                    detection_method: 'telegram_api',
+                    checked_at: Math.floor(Date.now() / 1000)
                 };
-                
-                // 如果商家的user_id为空或0，更新它为真实的user_id
-                if (!merchant.user_id || merchant.user_id === 0) {
-                    // 检查是否已经有其他商家使用了这个user_id
-                    const existingMerchant = db.prepare('SELECT id, teacher_name FROM merchants WHERE user_id = ? AND id != ?').get(userRecord.user_id, merchantId);
-                    
-                    if (existingMerchant) {
-                        console.log(`⚠️ 商家 ${merchant.teacher_name} 无法更新user_id，因为用户ID ${userRecord.user_id} 已被商家 ${existingMerchant.teacher_name} (ID: ${existingMerchant.id}) 使用`);
-                        results[merchantId] = { 
-                            followed: false, 
-                            reason: `用户ID冲突：已被其他商家使用 (ID: ${existingMerchant.id})` 
-                        };
-                        continue;
-                    }
-                    
-                    console.log(`🔄 自动更新商家 ${merchant.teacher_name} 的user_id: ${userRecord.user_id}`);
-                    this.updateMerchantUserId(merchantId, userRecord.user_id);
-                    
-                    // 同时更新用户名的大小写
-                    if (merchant.username !== userRecord.username) {
-                        console.log(`🔄 更新商家 ${merchant.teacher_name} 的用户名大小写: ${merchant.username} -> ${userRecord.username}`);
-                        this.updateMerchantUsername(merchantId, userRecord.username);
-                    }
-                }
-                
-                console.log(`✅ 检测到商家 ${merchant.teacher_name} 已关注机器人，交互次数: ${interactionCount}`);
-            } else {
-                results[merchantId] = { followed: false, reason: '未关注机器人或无交互记录' };
-                console.log(`❌ 商家 ${merchant.teacher_name} (${merchant.username}) 未找到关注记录`);
             }
         }
         
@@ -644,23 +704,31 @@ const dbOperations = {
     },
 
     // 检查单个商家的关注状态（用于管理后台测试）
-    checkSingleMerchantFollowStatus(merchantId) {
-        const result = this.checkMerchantsFollowStatus([merchantId]);
+    async checkSingleMerchantFollowStatus(merchantId) {
+        const result = await this.checkMerchantsFollowStatus([merchantId]);
         return result[merchantId] || { followed: false, reason: '检查失败' };
     },
 
-    // 获取用户记录（通过用户名，支持大小写不敏感）
+    // 获取用户记录（通过用户名，支持大小写不敏感，自动处理@符号）
     getUserRecordByUsername(username) {
         if (!username) return null;
         
+        // 标准化用户名：移除 @ 符号
+        const normalizedUsername = username.replace(/^@/, '');
+        
+        // 尝试多种用户名格式匹配
         const stmt = db.prepare(`
             SELECT user_id, username, first_name, last_name, timestamp
             FROM interactions 
-            WHERE LOWER(username) = LOWER(?) 
+            WHERE LOWER(REPLACE(username, '@', '')) = LOWER(?) 
+            OR LOWER(username) = LOWER(?)
+            OR LOWER(username) = LOWER(?)
             ORDER BY timestamp DESC 
             LIMIT 1
         `);
-        return stmt.get(username);
+        
+        // 尝试匹配：不带@的用户名, 带@的用户名, 原始用户名
+        return stmt.get(normalizedUsername, '@' + normalizedUsername, username);
     },
 
     // 获取用户的交互次数

@@ -546,6 +546,18 @@ function initBotHandlers() {
         if (text && text.startsWith('/start')) {
             console.log(`收到/start命令: ${text}`);
             
+            // 记录用户交互
+            dbOperations.logInteraction(
+                userId,
+                username,
+                msg.from.first_name,
+                msg.from.last_name,
+                null,
+                null,
+                'start',
+                chatId
+            );
+            
             // 检查是否是商家联系流程
             if (text.includes(' merchant_')) {
                 const merchantId = text.split('merchant_')[1];
@@ -4319,6 +4331,8 @@ module.exports = {
     handleBackButton,
     getBotUsername,
     clearBotUsernameCache,
+    // 获取Bot实例
+    getBotInstance: () => bot,
     // 导出缓存数据的getter
     getCacheData: () => ({
         merchants,

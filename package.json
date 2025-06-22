@@ -5,6 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
+    "railway": "node scripts/railway-start.js",
     "dev": "./start-with-env.sh",
     "stop": "pkill -f 'node app.js'",
     "restart": "npm run stop && sleep 2 && npm start",

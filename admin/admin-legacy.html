@@ -743,13 +743,103 @@
     </div>
 
     <script>
+        // 全局变量
         let merchants = [];
+        let regions = [];
+        let bindCodes = [];
+        let botUsername = ''; // Bot用户名
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadMerchants();
+            loadRegions();
+            loadBindCodes();
+            loadBotUsername(); // 加载Bot用户名
+        });
+
+        // 加载Bot用户名
+        async function loadBotUsername() {
+            try {
+                const response = await fetch('/api/bot-username');
+                if (response.ok) {
+                    const data = await response.json();
+                    botUsername = data.username;
+                    window.BOT_USERNAME = botUsername; // 设置全局变量
+                    console.log('Bot用户名加载成功:', botUsername);
+                } else {
+                    console.error('获取Bot用户名失败:', response.status);
+                    botUsername = 'xiaojisystembot'; // 默认值
+                    window.BOT_USERNAME = botUsername;
+                }
+            } catch (error) {
+                console.error('加载Bot用户名失败:', error);
+                botUsername = 'xiaojisystembot'; // 默认值
+                window.BOT_USERNAME = botUsername;
+            }
+        }
+
+        // 复制商家URL链接
+        function copyMerchantUrl(url) {
+            if (navigator.clipboard && window.isSecureContext) {
+                // 现代浏览器支持Clipboard API
+                navigator.clipboard.writeText(url).then(() => {
+                    showAlert('链接已复制到剪贴板！', 'success');
+                }).catch(err => {
+                    console.error('复制失败:', err);
+                    fallbackCopyTextToClipboard(url);
+                });
+            } else {
+                // 旧浏览器的回退方案
+                fallbackCopyTextToClipboard(url);
+            }
+        }
+
+        // 回退的复制方法
+        function fallbackCopyTextToClipboard(text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            
+            // 避免在屏幕上显示
+            textArea.style.position = "fixed";
+            textArea.style.top = "0";
+            textArea.style.left = "0";
+            textArea.style.width = "2em";
+            textArea.style.height = "2em";
+            textArea.style.padding = "0";
+            textArea.style.border = "none";
+            textArea.style.outline = "none";
+            textArea.style.boxShadow = "none";
+            textArea.style.background = "transparent";
+            
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showAlert('链接已复制到剪贴板！', 'success');
+                } else {
+                    showAlert('复制失败，请手动复制链接', 'error');
+                }
+            } catch (err) {
+                console.error('Fallback: 复制失败', err);
+                showAlert('复制失败，请手动复制链接', 'error');
+            }
+            
+            document.body.removeChild(textArea);
+        }
+
+        // 测试商家URL链接
+        function openMerchantUrl(url) {
+            window.open(url, '_blank');
+            showAlert('已在新窗口打开测试链接', 'info');
+        }
+
         let buttons = [];
         let templates = [];
         let triggers = [];
         let tasks = [];
-        let bindCodes = [];
-        let regions = [];
         let buttonRowCount = 0;
 
         // 获取Bot用户名
@@ -1468,74 +1558,53 @@
             }
 
             container.innerHTML = merchants.map(merchant => {
-                const regionName = merchant.region_name || '未设置';
-                const teacherName = merchant.teacher_name || '未设置';
-                const contact = merchant.contact || '未设置';
-                const username = merchant.username || '未设置';
-                const bindCode = merchant.bind_code || '未设置';
-                const status = merchant.status || 'inactive';
-                const userId = merchant.user_id;
-                
-                // 关注状态显示
-                let followStatus = '';
-                if (merchant.followStatus) {
-                    if (merchant.followStatus.followed) {
-                        const userInfo = [];
-                        if (merchant.followStatus.first_name) {
-                            userInfo.push(`姓名: ${merchant.followStatus.first_name}${merchant.followStatus.last_name || ''}`);
-                        }
-                        if (merchant.followStatus.real_username) {
-                            userInfo.push(`用户名: @${merchant.followStatus.real_username}`);
-                        }
-                        if (merchant.followStatus.user_id) {
-                            userInfo.push(`用户ID: ${merchant.followStatus.user_id}`);
-                        }
-                        if (merchant.followStatus.interaction_count) {
-                            userInfo.push(`交互次数: ${merchant.followStatus.interaction_count}`);
-                        }
-                        
-                        const tooltipText = userInfo.join('\\n');
-                        followStatus = `<span class="badge success" title="${tooltipText}">✅ 已关注</span>`;
-                    } else {
-                        followStatus = `<span class="badge danger" title="${merchant.followStatus.reason}">❌ 未关注</span>`;
-                    }
-                } else {
-                    followStatus = `<span class="badge secondary">❓ 未检测</span>`;
-                }
+                // 生成商家跳转URL链接
+                const merchantUrl = `https://t.me/${window.BOT_USERNAME}?start=merchant_${merchant.id}`;
                 
                 return `
                 <div class="list-item">
                     <div class="list-item-content">
-                        <strong>👨‍🏫 ${teacherName}</strong>
-                        <div style="color: #666; font-size: 14px; margin-top: 5px;">
-                            用户名: @${username} | 地区: ${regionName} | 联系方式: ${contact}
-                            ${merchant.followStatus && merchant.followStatus.followed && merchant.followStatus.first_name ? 
-                              `<br/>真实姓名: ${merchant.followStatus.first_name}${merchant.followStatus.last_name || ''}` : ''}
+                        <strong>👨‍🏫 ${merchant.teacher_name || '未知老师'}</strong>
+                        <div class="merchant-info">
+                            <span class="info-item">📍 地区: ${merchant.region_name || '未设置'}</span>
+                            <span class="info-item">📞 联系方式: ${merchant.contact || '未设置'}</span>
+                            <span class="info-item">💰 价格: ${merchant.price1 || '未设置'}p / ${merchant.price2 || '未设置'}pp</span>
+                            <span class="info-item">👤 用户ID: ${merchant.user_id || '未绑定'}</span>
+                            <span class="info-item">📱 用户名: ${merchant.username ? '@' + merchant.username : '未设置'}</span>
+                            <span class="info-item">🔗 绑定码: ${merchant.bind_code || '无'}</span>
+                            <span class="info-item status-${merchant.status}">
+                                📊 状态: ${merchant.status === 'active' ? '✅ 激活' : '❌ 停用'}
+                            </span>
+                            <span class="info-item">
+                                📋 绑定步骤: ${merchant.bind_step}/5
+                            </span>
                         </div>
-                        <div style="margin-top: 5px;">
-                            <span class="badge ${status === 'active' ? 'success' : 'danger'}">${status === 'active' ? '启用' : '禁用'}</span>
-                            ${followStatus}
-                            <span class="badge info">绑定码: ${bindCode}</span>
-                            ${userId && userId > 0 ? `<span class="badge primary">ID: ${userId}</span>` : ''}
+                        <div style="margin-top: 10px; padding: 10px; background: #f0f8ff; border-radius: 5px; border-left: 4px solid #007bff;">
+                            <strong style="color: #007bff;">🔗 频道推广链接：</strong>
+                            <div style="margin-top: 5px;">
+                                <input type="text" value="${merchantUrl}" readonly 
+                                       style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px; font-family: monospace; font-size: 12px;" 
+                                       onclick="this.select()" title="点击选择全部">
+                            </div>
+                            <div style="margin-top: 5px; display: flex; gap: 5px;">
+                                <button class="btn btn-small" style="background: #28a745; color: white;" onclick="copyMerchantUrl('${merchantUrl}')">📋 复制链接</button>
+                                <button class="btn btn-small" style="background: #17a2b8; color: white;" onclick="openMerchantUrl('${merchantUrl}')">🔗 测试链接</button>
+                            </div>
+                            <div style="margin-top: 3px; font-size: 11px; color: #666;">
+                                💡 用户点击此链接可直接跳转到机器人查看商家信息并开始约课流程
+                            </div>
                         </div>
                     </div>
                     <div class="list-item-actions">
                         <button class="btn btn-primary btn-small" onclick="editMerchant(${merchant.id})">编辑</button>
-                        <button class="btn btn-info btn-small" onclick="refreshSingleMerchantFollowStatus(${merchant.id})" title="检测此商家的关注状态">
-                            🔄 检测关注
-                        </button>
-                        <button class="btn btn-secondary btn-small" onclick="testSingleMerchantFollowStatus(${merchant.id})" title="详细测试此商家的关注状态（调试用）">
-                            🔍 详细测试
-                        </button>
-                        <button class="btn ${status === 'active' ? 'btn-warning' : 'btn-success'} btn-small" 
-                                onclick="toggleMerchantStatus(${merchant.id})" 
-                                title="点击${status === 'active' ? '禁用' : '启用'}商家">
-                            ${status === 'active' ? '禁用' : '启用'}
+                        <button class="btn ${merchant.status === 'active' ? 'btn-warning' : 'btn-success'} btn-small" 
+                                onclick="toggleMerchantStatus(${merchant.id}, '${merchant.status}')">
+                            ${merchant.status === 'active' ? '停用' : '激活'}
                         </button>
                         <button class="btn btn-danger btn-small" onclick="deleteMerchant(${merchant.id})">删除</button>
                     </div>
                 </div>
-                `;
+            `;
             }).join('');
         }
 
@@ -1762,7 +1831,7 @@
         }
 
         // 暂停/启动商家
-        async function toggleMerchantStatus(id) {
+        async function toggleMerchantStatus(id, status) {
             console.log('toggleMerchantStatus 调用:', { id, idType: typeof id, merchantsLength: merchants.length, merchants });
             const merchant = merchants.find(m => m.id == id); // 使用松散比较，避免类型问题
             console.log('找到的商家:', merchant);
@@ -1772,7 +1841,7 @@
                 return;
             }
 
-            const action = merchant.status === 'active' ? '暂停' : '启动';
+            const action = status === 'active' ? '暂停' : '启动';
             
             // 验证管理员密码
             const password = prompt(`请输入管理员密码以${action}商家：`);

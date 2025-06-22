@@ -419,8 +419,12 @@ async function sendMessageTemplate(chatId, template, replyToMessageId = null) {
     }
 }
 
-// 触发词检测 - 优化版本
+// 触发词检测 - 优化版本 [暂时关闭]
 function checkTriggerWords(message, chatId) {
+    // 🚫 关键词监控功能已暂时关闭
+    // 如需启用，请取消下面代码的注释
+    
+    /*
     const text = message.text?.toLowerCase() || '';
     if (!text) return;
     
@@ -491,6 +495,7 @@ function checkTriggerWords(message, chatId) {
             break; // 只触发第一个匹配的触发词
         }
     }
+    */
 }
 
 // 处理文字输入（评价系统和触发词检查）
@@ -530,7 +535,9 @@ async function handleTextInput(userId, chatId, text, username) {
         return;
     }
     
-    // 检查触发词（仅群组消息）
+    // 检查触发词（仅群组消息）[暂时关闭]
+    // 🚫 关键词监控功能已暂时关闭
+    /*
     if (chatId < 0) { // 群组消息
         console.log(`群组消息 - chatId: ${chatId}, userId: ${userId}, text: "${text}"`);
         console.log(`当前触发词数量: ${triggerWords.length}, 模板数量: ${messageTemplates.length}`);
@@ -541,6 +548,7 @@ async function handleTextInput(userId, chatId, text, username) {
             message_id: Date.now() // 添加消息ID
         }, chatId);
     }
+    */
 }
 
 // 旧的绑定流程函数已移除（绑定流程已简化）

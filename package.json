@@ -5,22 +5,14 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "node app.js",
-    "test": "node start-local-test.js",
+    "dev": "./start-with-env.sh",
     "stop": "pkill -f 'node app.js'",
     "restart": "npm run stop && sleep 2 && npm start",
     "logs": "tail -f bot.log",
     "status": "ps aux | grep 'node app.js' | grep -v grep",
     "db:backup": "node utils/backupDatabase.js backup",
     "db:restore": "node utils/backupDatabase.js restore",
-    "db:backup-scheduled": "node utils/backupDatabase.js scheduled",
-    "deploy:help": "node scripts/deploy.js help",
-    "deploy:staging": "node scripts/deploy.js deploy staging",
-    "deploy:production": "node scripts/deploy.js deploy production",
-    "setup:staging": "node scripts/deploy.js setup staging",
-    "setup:production": "node scripts/deploy.js setup production",
-    "status:staging": "node scripts/deploy.js status staging",
-    "status:production": "node scripts/deploy.js status production"
+    "db:backup-scheduled": "node utils/backupDatabase.js scheduled"
   },
   "engines": {
     "node": ">=18.0.0",

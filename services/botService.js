@@ -2727,9 +2727,9 @@ async function handleMerchantDetailCommentInput(userId, text, evalSession) {
         // 发送完成消息
         await bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
         
-        // 商家详细评价完成后，直接进入播报选择流程
+        // 商家详细评价完成后，直接结束流程（商家不需要播报）
         setTimeout(async () => {
-            await showBroadcastChoice(userId, evaluationId);
+            await bot.sendMessage(userId, '欢迎下次为小鸡服务！');
         }, 1000);
         
         console.log(`=== 商家详细评价文字输入调试结束 ===`);
@@ -3598,7 +3598,9 @@ async function handleMerchantDetailEvaluationScoring(userId, data, query) {
             // 使用evaluationService，只更新状态，保留总体评分
             evaluationService.updateEvaluation(evaluationId, null, null, null, 'completed');
             
-            bot.sendMessage(userId, '感谢您的支持。欢迎下次使用。');
+            // 商家选择不进行详细评价后，直接结束流程（商家不需要播报）
+            await bot.sendMessage(userId, '🎉 评价提交成功！\n\n感谢老师您的评价～\n\n欢迎下次为小鸡服务！');
+            
             return;
             
         } else if (data.includes('_duration_')) {
@@ -3779,9 +3781,9 @@ async function handleMerchantDetailEvaluationConfirm(userId, data, query) {
             // 发送完成消息
             await bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
             
-            // 商家详细评价完成后，直接进入播报选择流程
+            // 商家详细评价完成后，直接结束流程（商家不需要播报）
             setTimeout(async () => {
-                await showBroadcastChoice(userId, evaluationId);
+                await bot.sendMessage(userId, '欢迎下次为小鸡服务！');
             }, 1000);
         }
         

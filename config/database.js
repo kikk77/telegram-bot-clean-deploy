@@ -488,11 +488,48 @@ class DatabaseManager {
     }
 }
 
+// 创建简单的内存缓存
+class SimpleCache {
+    constructor() {
+        this.cache = new Map();
+    }
+    
+    get(key) {
+        const item = this.cache.get(key);
+        if (!item) return null;
+        
+        if (Date.now() > item.expiry) {
+            this.cache.delete(key);
+            return null;
+        }
+        
+        return item.data;
+    }
+    
+    set(key, data, ttl = 5 * 60 * 1000) { // 默认5分钟过期
+        if (data === null || data === undefined) {
+            this.cache.delete(key);
+            return;
+        }
+        
+        this.cache.set(key, {
+            data: data,
+            expiry: Date.now() + ttl
+        });
+    }
+    
+    clear() {
+        this.cache.clear();
+    }
+}
+
 // 创建单例实例
 const dbManager = new DatabaseManager();
+const cache = new SimpleCache();
 
 module.exports = {
     db: dbManager.getDatabase(),
     dbManager: dbManager,
+    cache: cache,
     close: () => dbManager.close()
 };

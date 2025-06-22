@@ -366,26 +366,53 @@ function initDatabase() {
     db.exec(`
         CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            booking_session_id INTEGER NOT NULL,
+            booking_session_id INTEGER,
             user_id INTEGER NOT NULL,
             user_name TEXT NOT NULL,
             user_username TEXT,
             merchant_id INTEGER NOT NULL,
+            merchant_user_id INTEGER,
             teacher_name TEXT NOT NULL,
             teacher_contact TEXT,
+            course_type TEXT,
             course_content TEXT NOT NULL,
-            price TEXT,
-            booking_time TEXT NOT NULL,
-            status TEXT DEFAULT 'confirmed',
+            price_range TEXT,
+            status TEXT DEFAULT 'attempting',
             user_evaluation TEXT,
             merchant_evaluation TEXT,
             report_content TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (booking_session_id) REFERENCES booking_sessions (id),
             FOREIGN KEY (merchant_id) REFERENCES merchants (id)
         )
     `);
+
+    // 添加缺失的列到现有的orders表
+    try {
+        db.exec(`ALTER TABLE orders ADD COLUMN merchant_user_id INTEGER`);
+    } catch (e) { /* 列已存在 */ }
+    
+    try {
+        db.exec(`ALTER TABLE orders ADD COLUMN course_type TEXT`);
+    } catch (e) { /* 列已存在 */ }
+    
+    try {
+        db.exec(`ALTER TABLE orders ADD COLUMN price_range TEXT`);
+    } catch (e) { /* 列已存在 */ }
+    
+    // 修改已存在列的默认值和约束（如果需要）
+    try {
+        // 对于已存在的表，我们需要检查并修复数据类型
+        const tableInfo = db.prepare("PRAGMA table_info(orders)").all();
+        const hasCorrectCreatedAt = tableInfo.some(col => col.name === 'created_at' && col.type === 'INTEGER');
+        
+        if (!hasCorrectCreatedAt) {
+            console.log('⚠️ orders表结构需要更新，但为了数据安全，将保持现有结构');
+        }
+    } catch (e) { 
+        console.log('📝 orders表结构检查完成'); 
+    }
 
     console.log('✅ 数据库表初始化完成');
     

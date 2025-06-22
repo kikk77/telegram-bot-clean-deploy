@@ -126,9 +126,13 @@ Desktop.ini
 *.sqlite
 *.sqlite3
 marketing_bot.db
+*.db-shm
+*.db-wal
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/*.db-shm
+data/*.db-wal
 
 # Backup files
 backups/

@@ -95,20 +95,20 @@ const logger = {
 // 验证必需的环境变量
 function validateConfig() {
     const requiredVars = ['BOT_TOKEN', 'BOT_USERNAME'];
-    const missing = requiredVars.filter(varName => !process.env[varName]);
+    const missing = requiredVars.filter(varName => !process.env[varName] || process.env[varName] === 'your_local_bot_token_here' || process.env[varName] === 'your_local_bot_username_here');
     
     if (missing.length > 0) {
-        console.error(`❌ 缺少必需的环境变量: ${missing.join(', ')}`);
-        console.error(`💡 请在Railway Variables中设置这些环境变量`);
-        
         if (nodeEnv === 'production') {
-            console.error(`⚠️ 生产环境缺少必需环境变量，部分功能可能不可用`);
-            console.error(`🔧 请登录Railway控制台设置环境变量后重新部署`);
-            // 不直接退出，让健康检查服务继续运行
-            // process.exit(1);
+            console.error(`❌ 生产环境缺少必需的环境变量: ${missing.join(', ')}`);
+            console.error(`🔧 请在Railway Variables中设置这些环境变量:`);
+            console.error(`   - BOT_TOKEN: 从@BotFather获取的Bot Token`);
+            console.error(`   - BOT_USERNAME: Bot的用户名（不含@符号）`);
+            console.error(`   - GROUP_CHAT_ID: 播报群组的Chat ID`);
             throw new Error(`缺少必需的环境变量: ${missing.join(', ')}`);
         } else {
-            console.warn(`⚠️ 在${nodeEnv}环境中缺少环境变量，继续运行...`);
+            console.warn(`⚠️ 本地开发环境中部分环境变量未配置: ${missing.join(', ')}`);
+            console.warn(`💡 Telegram功能将使用测试模式`);
+            console.warn(`🔧 如需真实功能，请修改 start-with-env.sh 中的配置`);
         }
     }
 }

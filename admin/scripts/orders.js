@@ -1517,6 +1517,9 @@ class OptimizedOrdersManager {
                 ` : ''}
                 
                 <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="ordersManager.showManualBroadcastDialog('${order.id}')" style="margin-right: 10px;">
+                        📢 手动播报
+                    </button>
                     <button type="button" class="btn btn-secondary" onclick="this.closest('.order-details-modal').remove()">
                         关闭
                     </button>
@@ -2374,31 +2377,151 @@ class OptimizedOrdersManager {
 
     // 刷新订单数据（仅订单列表）
     async refreshOrdersData() {
+        console.log('正在刷新订单数据...');
+        this.clearCache('orders');
+        this.clearCache('stats');
+        await this.loadOrders(1, false);
+        await this.updateDashboard();
+        this.showSuccessMessage('订单数据已刷新');
+    }
+
+    // 显示手动播报对话框
+    showManualBroadcastDialog(orderId) {
         try {
-            const refreshBtn = document.querySelector('button[onclick="refreshOrdersData()"]');
-            const originalText = refreshBtn ? refreshBtn.innerHTML : '';
+            const modal = document.createElement('div');
+            modal.className = 'broadcast-dialog-modal';
+            modal.id = 'broadcastDialogModal';
             
-            if (refreshBtn) {
-                refreshBtn.innerHTML = '⏳ 刷新中...';
-                refreshBtn.disabled = true;
+            modal.innerHTML = `
+                <div class="modal-overlay"></div>
+                <div class="modal-container" style="max-width: 500px;">
+                    <div class="modal-header">
+                        <h3 class="modal-title">
+                            <span class="order-icon">📢</span>
+                            手动播报订单 #${orderId}
+                        </h3>
+                        <button class="modal-close" onclick="this.closest('.broadcast-dialog-modal').remove()">
+                            ×
+                        </button>
+                    </div>
+                    
+                    <div class="broadcast-dialog-content" style="padding: 1.5rem;">
+                        <div class="form-group">
+                            <label>播报类型：</label>
+                            <div class="radio-group" style="margin-top: 0.5rem;">
+                                <label style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                                    <input type="radio" name="broadcastType" value="real" checked style="margin-right: 0.5rem;">
+                                    实名播报（显示用户名）
+                                </label>
+                                <label style="display: flex; align-items: center;">
+                                    <input type="radio" name="broadcastType" value="anonymous" style="margin-right: 0.5rem;">
+                                    匿名播报（隐藏用户名）
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group" style="margin-top: 1rem;">
+                            <label>自定义播报消息（可选）：</label>
+                            <textarea id="customBroadcastMessage" rows="4" placeholder="留空则使用默认播报格式" 
+                                style="width: 100%; margin-top: 0.5rem; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+                        </div>
+                        
+                        <div class="broadcast-dialog-actions" style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="this.closest('.broadcast-dialog-modal').remove()">
+                                取消
+                            </button>
+                            <button class="btn btn-primary" onclick="ordersManager.executeManualBroadcast('${orderId}')">
+                                📢 立即播报
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // 移除现有对话框
+            const existingModal = document.getElementById('broadcastDialogModal');
+            if (existingModal) {
+                existingModal.remove();
             }
-            
-            // 清除订单相关缓存
-            this.clearCache('orders');
-            
-            // 重新加载订单数据
-            await this.loadOrders(this.currentPage, false);
-            
-            this.showSuccessMessage('订单数据刷新完成！');
-            
-            if (refreshBtn) {
-                refreshBtn.innerHTML = originalText;
-                refreshBtn.disabled = false;
-            }
-            
+
+            // 添加到页面
+            document.body.appendChild(modal);
+
+            // 点击背景关闭
+            modal.querySelector('.modal-overlay').addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal-overlay')) {
+                    modal.remove();
+                }
+            });
+
         } catch (error) {
-            console.error('刷新订单数据失败:', error);
-            this.showError('刷新订单数据失败: ' + error.message);
+            console.error('显示播报对话框失败:', error);
+            this.showError('显示播报对话框失败: ' + error.message);
+        }
+    }
+
+    // 执行手动播报
+    async executeManualBroadcast(orderId) {
+        try {
+            const modal = document.getElementById('broadcastDialogModal');
+            if (!modal) return;
+
+            // 获取播报类型
+            const broadcastTypeRadios = modal.querySelectorAll('input[name="broadcastType"]');
+            let broadcastType = 'real';
+            for (const radio of broadcastTypeRadios) {
+                if (radio.checked) {
+                    broadcastType = radio.value;
+                    break;
+                }
+            }
+
+            // 获取自定义消息
+            const customMessage = modal.querySelector('#customBroadcastMessage').value.trim();
+
+            console.log(`执行手动播报 - 订单ID: ${orderId}, 类型: ${broadcastType}, 自定义消息: ${customMessage}`);
+
+            // 显示加载状态
+            const executeButton = modal.querySelector('.btn-primary');
+            const originalText = executeButton.textContent;
+            executeButton.textContent = '播报中...';
+            executeButton.disabled = true;
+
+            // 发送播报请求
+            const response = await fetch('/api/manual-broadcast', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    orderId: orderId,
+                    broadcastType: broadcastType,
+                    customMessage: customMessage
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showSuccessMessage('播报成功！消息已发送到群组');
+                modal.remove();
+            } else {
+                throw new Error(result.error || result.message || '播报失败');
+            }
+
+        } catch (error) {
+            console.error('执行播报失败:', error);
+            this.showError('播报失败: ' + error.message);
+            
+            // 恢复按钮状态
+            const modal = document.getElementById('broadcastDialogModal');
+            if (modal) {
+                const executeButton = modal.querySelector('.btn-primary');
+                if (executeButton) {
+                    executeButton.textContent = '📢 立即播报';
+                    executeButton.disabled = false;
+                }
+            }
         }
     }
 }

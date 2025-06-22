@@ -271,7 +271,19 @@ async function handleBackButton(userId, messageType, data = {}) {
                 
             case 'user_evaluation':
                 // 返回到课程完成确认（只给当前用户发送，避免重复）
-                const userMessage = `是否完成该老师（${data.teacherName}）的课程？`;
+                // 获取老师联系方式
+                const userEvalBookingSession = dbOperations.getBookingSession(data.bookingSessionId);
+                let userEvalTeacherContact = data.teacherName; // 默认使用艺名
+                
+                if (userEvalBookingSession) {
+                    const userEvalMerchant = dbOperations.getMerchantById(userEvalBookingSession.merchant_id);
+                    if (userEvalMerchant && userEvalMerchant.contact) {
+                        // 确保联系方式有@符号
+                        userEvalTeacherContact = userEvalMerchant.contact.startsWith('@') ? userEvalMerchant.contact : `@${userEvalMerchant.contact}`;
+                    }
+                }
+                
+                const userMessage = `是否完成该老师（${data.teacherName} ${userEvalTeacherContact}）的课程？`;
                 const userKeyboard = {
                     inline_keyboard: [
                         [
@@ -1253,8 +1265,20 @@ function initBotHandlers() {
 // 发送课程完成确认消息
 async function sendCourseCompletionCheck(userId, merchantId, bookingSessionId, userFullName, username, teacherName) {
     try {
+        // 获取商家信息以获取联系方式
+        const bookingSession = dbOperations.getBookingSession(bookingSessionId);
+        let teacherContact = teacherName; // 默认使用艺名
+        
+        if (bookingSession) {
+            const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
+            if (merchant && merchant.contact) {
+                // 确保联系方式有@符号
+                teacherContact = merchant.contact.startsWith('@') ? merchant.contact : `@${merchant.contact}`;
+            }
+        }
+        
         // 给用户发送
-        const userMessage = `是否完成该老师（${teacherName}）的课程？`;
+        const userMessage = `是否完成该老师（${teacherName} ${teacherContact}）的课程？`;
         const userKeyboard = {
             inline_keyboard: [
                 [
@@ -1272,7 +1296,8 @@ async function sendCourseCompletionCheck(userId, merchantId, bookingSessionId, u
             merchantId,
             userFullName,
             username,
-            teacherName
+            teacherName,
+            teacherContact
         });
         
         // 给商家发送 - 只发送一次确认消息
@@ -1296,7 +1321,8 @@ async function sendCourseCompletionCheck(userId, merchantId, bookingSessionId, u
                 userId,
                 userFullName,
                 username,
-                teacherName
+                teacherName,
+                teacherContact
             });
         }
         
@@ -3930,8 +3956,16 @@ async function handleBackToCourseCompletion(userId, sessionId) {
                 
                 // 只给当前用户发送确认消息，避免重复发给商家
                 const isUser = userId === bookingSession.user_id;
+                
+                // 获取老师联系方式（用于用户消息）
+                let teacherContact = teacherName; // 默认使用艺名
+                if (merchant && merchant.contact) {
+                    // 确保联系方式有@符号
+                    teacherContact = merchant.contact.startsWith('@') ? merchant.contact : `@${merchant.contact}`;
+                }
+                
                 const message = isUser ? 
-                    `是否完成该老师（${teacherName}）的课程？` : 
+                    `是否完成该老师（${teacherName} ${teacherContact}）的课程？` : 
                     `是否完成该用户（${userFullName}）的课程？`;
                     
                 const keyboard = {

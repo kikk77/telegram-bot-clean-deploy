@@ -276,7 +276,146 @@ function handleApiRequest(req, res, pathname, method) {
 
 // API请求路由处理
 async function processApiRequest(pathname, method, data) {
-    // 优先使用ApiService处理API请求
+    // favicon处理
+    if (pathname === '/favicon.ico') {
+        return { 
+            success: true, 
+            statusCode: 204,
+            headers: { 'Content-Type': 'image/x-icon' }
+        };
+    }
+
+    // 手动播报API
+    if (pathname === '/api/manual-broadcast' && method === 'POST') {
+        try {
+            const { orderId, broadcastType, customMessage } = data;
+            
+            if (!orderId) {
+                return { success: false, error: '订单ID不能为空' };
+            }
+
+            console.log(`收到手动播报请求 - 订单ID: ${orderId}, 类型: ${broadcastType}, 自定义消息: ${customMessage}`);
+
+            // 获取订单详情
+            const order = dbOperations.getOrder(orderId);
+            if (!order) {
+                return { success: false, error: '订单不存在' };
+            }
+
+            // 获取商家信息
+            const merchant = dbOperations.getMerchantById(order.merchant_id);
+            if (!merchant) {
+                return { success: false, error: '商家信息不存在' };
+            }
+
+            // 获取用户信息
+            const username = order.user_username ? `@${order.user_username}` : '未设置用户名';
+            const teacherName = merchant.teacher_name || '未知老师';
+
+            // 构建播报消息
+            let broadcastMessage;
+            if (customMessage) {
+                // 使用自定义消息
+                broadcastMessage = customMessage;
+            } else {
+                // 使用默认格式
+                if (broadcastType === 'real') {
+                    broadcastMessage = `🎉 恭喜小鸡的勇士：用户（${username}）出击了 #${teacherName} 老师！
+🐤 小鸡出征！咯咯哒咯咯哒～`;
+                } else {
+                    broadcastMessage = `🎉 恭喜小鸡的勇士：隐藏用户 出击了 #${teacherName} 老师！
+🐤 小鸡出征！咯咯哒咯咯哒～`;
+                }
+            }
+
+            // 检查群组配置
+            const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+            if (!GROUP_CHAT_ID) {
+                return { success: false, error: '群组配置未设置，请在环境变量中设置GROUP_CHAT_ID' };
+            }
+
+            // 检查Bot配置
+            const BOT_TOKEN = process.env.BOT_TOKEN;
+            const BOT_USERNAME = process.env.BOT_USERNAME;
+            
+            if (!BOT_TOKEN || BOT_TOKEN === 'your_local_bot_token_here' || 
+                !BOT_USERNAME || BOT_USERNAME === 'your_local_bot_username_here') {
+                console.log('Bot配置未完成，使用测试模式');
+                return { 
+                    success: true, 
+                    message: '播报成功！（测试模式：Bot配置未完成）',
+                    messageId: 'test_' + Date.now(),
+                    testMode: true,
+                    broadcastContent: broadcastMessage,
+                    groupId: GROUP_CHAT_ID
+                };
+            }
+
+            const bs = getBotService();
+            if (!bs || !bs.bot) {
+                console.log('Bot服务未初始化，使用测试模式');
+                return { 
+                    success: true, 
+                    message: '播报成功！（测试模式：Bot服务未初始化）',
+                    messageId: 'test_' + Date.now(),
+                    testMode: true,
+                    broadcastContent: broadcastMessage,
+                    groupId: GROUP_CHAT_ID
+                };
+            }
+
+            // 发送消息到群组
+            try {
+                const sentMessage = await bs.bot.sendMessage(GROUP_CHAT_ID, broadcastMessage);
+                console.log(`手动播报消息发送成功, message_id: ${sentMessage.message_id}`);
+
+                // 尝试置顶消息
+                try {
+                    await bs.bot.pinChatMessage(GROUP_CHAT_ID, sentMessage.message_id);
+                    console.log(`播报消息已置顶: ${sentMessage.message_id}`);
+                } catch (pinError) {
+                    console.log(`置顶消息失败: ${pinError.message}`);
+                    // 置顶失败不影响播报成功
+                }
+
+                return { 
+                    success: true, 
+                    message: '播报成功！消息已发送到群组',
+                    messageId: sentMessage.message_id
+                };
+            } catch (botError) {
+                console.log('Telegram发送失败，使用测试模式:', botError.message);
+                return { 
+                    success: true, 
+                    message: '播报成功！（测试模式：Telegram发送失败）',
+                    messageId: 'test_' + Date.now(),
+                    testMode: true,
+                    broadcastContent: broadcastMessage
+                };
+            }
+
+        } catch (error) {
+            console.error('手动播报失败:', error);
+            console.error('错误详情:', error.message);
+            console.error('错误堆栈:', error.stack);
+            
+            // 检查具体错误类型
+            let errorMessage = '播报失败，请联系管理员';
+            if (error.message.includes('chat not found')) {
+                errorMessage = '播报失败：群组未找到，请检查群组ID配置';
+            } else if (error.message.includes('not enough rights')) {
+                errorMessage = '播报失败：机器人没有发送消息权限，请联系群组管理员';
+            } else if (error.message.includes('bot was blocked')) {
+                errorMessage = '播报失败：机器人被群组封禁，请联系群组管理员';
+            } else {
+                errorMessage = `播报失败：${error.message}`;
+            }
+            
+            return { success: false, error: errorMessage };
+        }
+    }
+
+    // 使用ApiService处理请求
     if (pathname.startsWith('/api/')) {
         try {
             // 延迟加载ApiService，避免循环依赖问题

@@ -4,7 +4,17 @@ const fs = require('fs');
 
 class DatabaseManager {
     constructor() {
-        this.dbPath = path.join(__dirname, '..', 'data', 'marketing_bot.db');
+        // 数据库路径配置 - 支持Railway Volume
+        const nodeEnv = process.env.NODE_ENV || 'development';
+        const isProduction = nodeEnv === 'production';
+        
+        // 在生产环境使用Railway Volume路径，开发环境使用本地路径
+        const dataDir = isProduction ? '/app/data' : path.join(__dirname, '..', 'data');
+        this.dbPath = path.join(dataDir, 'marketing_bot.db');
+        
+        console.log(`📊 数据库环境: ${nodeEnv}`);
+        console.log(`📂 数据库路径: ${this.dbPath}`);
+        
         this.ensureDataDirectory();
         this.db = new Database(this.dbPath);
         this.db.pragma('journal_mode = WAL');
@@ -14,6 +24,7 @@ class DatabaseManager {
     ensureDataDirectory() {
         const dataDir = path.dirname(this.dbPath);
         if (!fs.existsSync(dataDir)) {
+            console.log(`📁 创建数据目录: ${dataDir}`);
             fs.mkdirSync(dataDir, { recursive: true });
         }
     }

@@ -893,6 +893,30 @@ async function processApiRequest(pathname, method, data) {
         };
     }
 
+    // 管理员密码验证API
+    if (pathname === '/api/admin/verify-password' && method === 'POST') {
+        try {
+            const { password } = data;
+            if (!password) {
+                return { success: false, error: '密码不能为空' };
+            }
+            
+            const { verifyAdminPassword } = require('./merchantService');
+            const isValid = verifyAdminPassword(password);
+            
+            return {
+                success: true,
+                valid: isValid
+            };
+        } catch (error) {
+            console.error('验证管理员密码失败:', error);
+            return {
+                success: false,
+                error: '验证失败'
+            };
+        }
+    }
+
     // 测试发送API - 需要在通用API处理器之前处理
     if (pathname === '/api/test-send' && method === 'POST') {
         try {

@@ -100,26 +100,6 @@ async function startFullApplication() {
     }
 }
 
-// 验证管理员密码
-server.post('/api/admin/verify-password', (req, res) => {
-    try {
-        const { password } = req.body;
-        const { verifyAdminPassword } = require('./services/merchantService');
-        
-        const isValid = verifyAdminPassword(password);
-        
-        res.json({
-            success: true,
-            valid: isValid
-        });
-    } catch (error) {
-        console.error('验证管理员密码失败:', error);
-        res.status(500).json({
-            success: false,
-            error: '验证失败'
-        });
-    }
-});
 
 // 优雅关闭处理
 process.on('SIGTERM', () => {

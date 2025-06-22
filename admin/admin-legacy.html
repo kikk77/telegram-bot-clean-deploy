@@ -763,7 +763,8 @@
                 const response = await fetch('/api/bot-username');
                 if (response.ok) {
                     const data = await response.json();
-                    botUsername = data.username;
+                    // 兼容两种响应格式
+                    botUsername = data.username || data.data?.username || 'xiaojisystembot';
                     window.BOT_USERNAME = botUsername; // 设置全局变量
                     console.log('Bot用户名加载成功:', botUsername);
                 } else {

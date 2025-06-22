@@ -307,4 +307,13 @@ class MerchantService {
     }
 }
 
-module.exports = MerchantService; 
+// 验证管理员密码
+function verifyAdminPassword(password) {
+    const { dbManager } = require('../config/database');
+    return dbManager.verifyAdminPassword(password);
+}
+
+module.exports = {
+    MerchantService,
+    verifyAdminPassword
+}; 

@@ -60,6 +60,7 @@ class ApiService {
         this.routes.set('POST /api/merchants', this.createMerchant.bind(this));
         this.routes.set('PUT /api/merchants/:id/status', this.toggleMerchantStatus.bind(this));
         this.routes.set('POST /api/merchants/check-follow-status', this.checkMerchantsFollowStatus.bind(this));
+        this.routes.set('POST /api/merchants/test-follow-status', this.testSingleMerchantFollowStatus.bind(this));
 
         // 排名接口
         this.routes.set('GET /api/rankings/merchants', this.getMerchantRankings.bind(this));
@@ -1711,6 +1712,67 @@ class ApiService {
         } catch (error) {
             console.error('检查商家关注状态失败:', error);
             throw new Error('检查商家关注状态失败: ' + error.message);
+        }
+    }
+
+    async testSingleMerchantFollowStatus({ body }) {
+        try {
+            const { merchantId } = body;
+            if (!merchantId) {
+                throw new Error('请提供商家ID');
+            }
+            
+            const merchant = dbOperations.getMerchantById(merchantId);
+            if (!merchant) {
+                throw new Error('商家不存在');
+            }
+            
+            console.log(`🔍 测试商家关注状态: ${merchant.teacher_name} (${merchant.username})`);
+            
+            const result = dbOperations.checkSingleMerchantFollowStatus(merchantId);
+            
+            // 添加详细的调试信息
+            const debugInfo = {
+                merchant_info: {
+                    id: merchant.id,
+                    teacher_name: merchant.teacher_name,
+                    username: merchant.username,
+                    user_id: merchant.user_id
+                },
+                follow_status: result
+            };
+            
+            // 如果有用户名，查找交互记录
+            if (merchant.username) {
+                const userRecord = dbOperations.getUserRecordByUsername(merchant.username);
+                if (userRecord) {
+                    debugInfo.user_record = userRecord;
+                    debugInfo.interaction_count = dbOperations.getInteractionCount(userRecord.user_id);
+                    
+                    // 查找最近的状态更新
+                    const { db } = require('../config/database');
+                    const recentStatusStmt = db.prepare(`
+                        SELECT action_type, timestamp, first_name, last_name
+                        FROM interactions 
+                        WHERE user_id = ? AND action_type LIKE 'status_%' 
+                        ORDER BY timestamp DESC 
+                        LIMIT 5
+                    `);
+                    debugInfo.recent_status_updates = recentStatusStmt.all(userRecord.user_id);
+                } else {
+                    debugInfo.user_record = null;
+                    debugInfo.interaction_count = 0;
+                    debugInfo.recent_status_updates = [];
+                }
+            }
+            
+            return {
+                success: true,
+                result: debugInfo
+            };
+        } catch (error) {
+            console.error('测试商家关注状态失败:', error);
+            throw new Error('测试商家关注状态失败: ' + error.message);
         }
     }
 

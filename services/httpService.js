@@ -737,8 +737,8 @@ async function processApiRequest(pathname, method, data) {
     // 测试发送API - 需要在通用API处理器之前处理
     if (pathname === '/api/test-send' && method === 'POST') {
         try {
-            const botService = global.botService;
-            if (!botService) {
+            const bs = getBotService();
+            if (!bs || !bs.bot) {
                 return { success: false, error: 'Bot服务未初始化' };
             }
 
@@ -783,7 +783,12 @@ async function processApiRequest(pathname, method, data) {
                 
                 // 使用统一的Bot用户名获取机制
                 try {
-                    botUsername = await botService.getBotUsername();
+                    const bs = getBotService();
+                    if (bs && bs.getBotUsername) {
+                        botUsername = await bs.getBotUsername();
+                    } else {
+                        throw new Error('Bot服务未初始化');
+                    }
                 } catch (error) {
                     console.error('获取bot用户名失败:', error);
                     // 从环境变量获取bot用户名
@@ -856,7 +861,7 @@ async function processApiRequest(pathname, method, data) {
                 if (sendOptions.reply_markup) {
                     photoOptions.reply_markup = sendOptions.reply_markup;
                 }
-                result = await botService.bot.sendPhoto(targetChatId, sendOptions.photo, photoOptions);
+                result = await bs.bot.sendPhoto(targetChatId, sendOptions.photo, photoOptions);
             } else {
                 // 发送文本消息
                 const textOptions = {
@@ -865,7 +870,7 @@ async function processApiRequest(pathname, method, data) {
                 if (sendOptions.reply_markup) {
                     textOptions.reply_markup = sendOptions.reply_markup;
                 }
-                result = await botService.bot.sendMessage(targetChatId, messageContent, textOptions);
+                result = await bs.bot.sendMessage(targetChatId, messageContent, textOptions);
             }
 
             console.log('✅ 测试消息发送成功:', {
@@ -1068,7 +1073,14 @@ async function processApiRequest(pathname, method, data) {
     // 获取Bot用户名
     if (pathname === '/api/bot-username' && method === 'GET') {
         try {
-            const botUsername = await botService.getBotUsername();
+            const bs = getBotService();
+            if (!bs || !bs.getBotUsername) {
+                return {
+                    success: false,
+                    error: 'Bot服务未初始化'
+                };
+            }
+            const botUsername = await bs.getBotUsername();
             return {
                 success: true,
                 data: { username: botUsername }
@@ -1103,8 +1115,8 @@ async function processApiRequest(pathname, method, data) {
 function processWebhookUpdate(update) {
     try {
         // 获取Bot服务实例（通过全局引用或依赖注入）
-        const botService = global.botService;
-        if (!botService) {
+        const bs = getBotService();
+        if (!bs || !bs.bot) {
             console.error('❌ Bot服务实例不存在');
             return;
         }
@@ -1113,7 +1125,7 @@ function processWebhookUpdate(update) {
         if (update.message && update.message.text) {
             // 模拟bot.on('message')事件
             setImmediate(() => {
-                botService.bot.emit('message', update.message);
+                bs.bot.emit('message', update.message);
             });
         }
 
@@ -1121,14 +1133,14 @@ function processWebhookUpdate(update) {
         if (update.callback_query) {
             // 模拟bot.on('callback_query')事件
             setImmediate(() => {
-                botService.bot.emit('callback_query', update.callback_query);
+                bs.bot.emit('callback_query', update.callback_query);
             });
         }
 
         // 处理其他类型的更新
         if (update.inline_query) {
             setImmediate(() => {
-                botService.bot.emit('inline_query', update.inline_query);
+                bs.bot.emit('inline_query', update.inline_query);
             });
         }
 

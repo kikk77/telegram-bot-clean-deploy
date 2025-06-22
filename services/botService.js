@@ -4152,16 +4152,16 @@ async function handleBookingSuccessFlow(userId, data, query) {
                     orderId = await createOrderData(bookingSession, userId, query);
                 }
                 
-                // 清空本轮对话历史（包括联系老师消息）
-                await clearUserConversation(userId);
-                
                 await sendMessageWithoutDelete(userId, '✅ 约课成功！\n\n👩🏻‍🏫 上完课后返回此处\n\n✍🏻 完成老师课程评价\n\n😭 这将对老师有很大帮助！', {}, 'booking_success_confirmed');
                 
-                // 延迟30分钟发送课程完成确认消息
+                // 延迟30分钟发送课程完成确认消息，并在此时清空对话历史
                 setTimeout(async () => {
                     const merchant = dbOperations.getMerchantById(bookingSession.merchant_id);
                     const userFullName = `${query.from.first_name || ''} ${query.from.last_name || ''}`.trim() || '未设置名称';
                     const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+                    
+                    // 在发送课程完成检查前清空对话历史（包括小鸡出征消息）
+                    await clearUserConversation(userId);
                     
                     // 只有绑定了真实ID的商家才发送课程完成确认
                     if (merchant.user_id) {
@@ -4192,9 +4192,6 @@ async function handleBookingSuccessFlow(userId, data, query) {
                     dbOperations.updateOrderFields(existingOrder.id, updateData);
                     console.log(`✅ 更新订单状态为失败: 订单ID ${existingOrder.id}`);
                 }
-                
-                // 清空本轮对话历史（包括联系老师消息）
-                await clearUserConversation(userId);
                 
                 // 发送重新预约询问
                 await sendRebookingQuestionToUser(userId, bookingSessionId);

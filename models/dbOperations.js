@@ -566,6 +566,28 @@ const dbOperations = {
             `).get(merchant.username);
             
             if (userRecord) {
+                // 检查用户最近的状态，确保没有屏蔽机器人
+                const recentStatusStmt = db.prepare(`
+                    SELECT action_type, timestamp
+                    FROM interactions 
+                    WHERE user_id = ? AND action_type LIKE 'status_%' 
+                    ORDER BY timestamp DESC 
+                    LIMIT 1
+                `);
+                const recentStatus = recentStatusStmt.get(userRecord.user_id);
+                
+                // 如果最近状态是kicked，说明用户屏蔽了机器人
+                if (recentStatus && recentStatus.action_type === 'status_kicked') {
+                    results[merchantId] = { 
+                        followed: false, 
+                        reason: '用户已屏蔽机器人',
+                        last_status: 'kicked',
+                        last_status_time: recentStatus.timestamp
+                    };
+                    console.log(`❌ 商家 ${merchant.teacher_name} (${merchant.username}) 已屏蔽机器人`);
+                    continue;
+                }
+                
                 // 检查是否是有意义的交互（不仅仅是简单的点击）
                 const meaningfulInteraction = db.prepare(`
                     SELECT COUNT(*) as count
@@ -619,6 +641,39 @@ const dbOperations = {
         }
         
         return results;
+    },
+
+    // 检查单个商家的关注状态（用于管理后台测试）
+    checkSingleMerchantFollowStatus(merchantId) {
+        const result = this.checkMerchantsFollowStatus([merchantId]);
+        return result[merchantId] || { followed: false, reason: '检查失败' };
+    },
+
+    // 获取用户记录（通过用户名，支持大小写不敏感）
+    getUserRecordByUsername(username) {
+        if (!username) return null;
+        
+        const stmt = db.prepare(`
+            SELECT user_id, username, first_name, last_name, timestamp
+            FROM interactions 
+            WHERE LOWER(username) = LOWER(?) 
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        `);
+        return stmt.get(username);
+    },
+
+    // 获取用户的交互次数
+    getInteractionCount(userId) {
+        if (!userId) return 0;
+        
+        const stmt = db.prepare(`
+            SELECT COUNT(*) as count
+            FROM interactions 
+            WHERE user_id = ?
+        `);
+        const result = stmt.get(userId);
+        return result?.count || 0;
     },
 
     // 更新商家的用户ID

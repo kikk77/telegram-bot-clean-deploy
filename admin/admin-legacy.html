@@ -1492,6 +1492,9 @@
                         <button class="btn btn-info btn-small" onclick="refreshSingleMerchantFollowStatus(${merchant.id})" title="检测此商家的关注状态">
                             🔄 检测关注
                         </button>
+                        <button class="btn btn-secondary btn-small" onclick="testSingleMerchantFollowStatus(${merchant.id})" title="详细测试此商家的关注状态（调试用）">
+                            🔍 详细测试
+                        </button>
                         <button class="btn ${status === 'active' ? 'btn-warning' : 'btn-success'} btn-small" 
                                 onclick="toggleMerchantStatus(${merchant.id})" 
                                 title="点击${status === 'active' ? '禁用' : '启用'}商家">
@@ -2746,6 +2749,98 @@
                 }
             } catch (error) {
                 showAlert(`检测商家关注状态失败: ${error.message}`, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 测试单个商家详细关注状态（调试用）
+        async function testSingleMerchantFollowStatus(merchantId) {
+            try {
+                showLoading();
+                
+                const merchant = merchants.find(m => m.id == merchantId);
+                if (!merchant) {
+                    showAlert('商家不存在', 'error');
+                    return;
+                }
+                
+                console.log(`🔍 开始测试商家 ${merchant.teacher_name} (${merchant.username}) 的详细关注状态...`);
+                
+                // 调用详细测试API
+                const response = await apiRequest('/api/merchants/test-follow-status', 'POST', {
+                    merchantId: merchantId
+                });
+                
+                if (response.success) {
+                    const data = response.result;
+                    
+                    console.log('📊 详细测试结果:', data);
+                    
+                    // 构建详细信息显示
+                    let message = `商家详细关注状态测试结果：\n\n`;
+                    message += `商家信息：\n`;
+                    message += `- ID: ${data.merchant_info.id}\n`;
+                    message += `- 艺名: ${data.merchant_info.teacher_name}\n`;
+                    message += `- 用户名: ${data.merchant_info.username}\n`;
+                    message += `- 绑定的Telegram ID: ${data.merchant_info.user_id || '未绑定'}\n\n`;
+                    
+                    message += `关注状态：\n`;
+                    message += `- 状态: ${data.follow_status.followed ? '✅ 已关注' : '❌ 未关注'}\n`;
+                    if (data.follow_status.reason) {
+                        message += `- 原因: ${data.follow_status.reason}\n`;
+                    }
+                    if (data.follow_status.last_status) {
+                        message += `- 最近状态: ${data.follow_status.last_status}\n`;
+                    }
+                    
+                    if (data.user_record) {
+                        message += `\n用户记录：\n`;
+                        message += `- Telegram ID: ${data.user_record.user_id}\n`;
+                        message += `- 真实用户名: ${data.user_record.username}\n`;
+                        message += `- 姓名: ${data.user_record.first_name || ''} ${data.user_record.last_name || ''}\n`;
+                        message += `- 交互次数: ${data.interaction_count}\n`;
+                        
+                        if (data.recent_status_updates && data.recent_status_updates.length > 0) {
+                            message += `\n最近状态更新：\n`;
+                            data.recent_status_updates.forEach((update, index) => {
+                                const date = new Date(update.timestamp * 1000).toLocaleString();
+                                message += `${index + 1}. ${update.action_type} - ${date}\n`;
+                            });
+                        }
+                    } else {
+                        message += `\n❌ 未找到用户交互记录\n`;
+                        message += `这意味着用户名 @${data.merchant_info.username} 从未与机器人交互过。\n`;
+                    }
+                    
+                    // 添加建议
+                    message += `\n💡 建议：\n`;
+                    if (!data.user_record) {
+                        message += `1. 请确认用户名 @${data.merchant_info.username} 是否正确\n`;
+                        message += `2. 让商家主动发送 /start 命令给机器人\n`;
+                        message += `3. 商家需要先关注机器人才能收到通知\n`;
+                    } else if (!data.follow_status.followed) {
+                        if (data.follow_status.reason === '用户已屏蔽机器人') {
+                            message += `1. 商家已屏蔽机器人，需要重新启动机器人\n`;
+                            message += `2. 让商家在Telegram中搜索机器人并点击"开始"按钮\n`;
+                        } else {
+                            message += `1. 让商家发送 /start 命令给机器人\n`;
+                            message += `2. 确保商家与机器人有过有效交互\n`;
+                        }
+                    } else {
+                        message += `✅ 商家状态正常，可以正常接收预约通知！\n`;
+                    }
+                    
+                    // 根据状态选择alert类型
+                    const alertType = data.follow_status.followed ? 'success' : 'warning';
+                    showAlert(message, alertType);
+                    
+                } else {
+                    throw new Error(response.message || '测试失败');
+                }
+            } catch (error) {
+                console.error('测试商家详细状态失败:', error);
+                showAlert(`测试失败: ${error.message}`, 'error');
             } finally {
                 hideLoading();
             }

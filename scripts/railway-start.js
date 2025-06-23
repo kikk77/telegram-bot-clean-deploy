@@ -18,16 +18,58 @@ if (missingEnvs.length > 0) {
 // 设置NODE_ENV
 process.env.NODE_ENV = process.env.NODE_ENV || 'production';
 
-// 确保数据目录存在
+// 确保数据目录存在并修复权限
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 
-const dataDir = path.join(__dirname, '../data');
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-    console.log('📁 创建数据目录:', dataDir);
+const dataDir = '/app/data'; // 直接使用Volume挂载路径
+
+// 检查并修复权限
+try {
+    if (fs.existsSync(dataDir)) {
+        console.log('📁 数据目录存在:', dataDir);
+        
+        // 检查权限
+        try {
+            fs.accessSync(dataDir, fs.constants.W_OK);
+            console.log('✅ 数据目录权限正常');
+        } catch (permError) {
+            console.log('🔧 修复数据目录权限...');
+            
+            // 尝试修复权限
+            try {
+                exec('chmod 755 /app/data', (error, stdout, stderr) => {
+                    if (!error) {
+                        console.log('✅ 权限修复成功');
+                    } else {
+                        console.log('⚠️ 权限修复失败，但继续启动');
+                    }
+                });
+                
+                // 给一点时间让权限修复生效
+                setTimeout(() => {
+                    console.log('⏳ 等待权限修复生效...');
+                }, 500);
+            } catch (fixError) {
+                console.log('⚠️ 权限修复失败，但继续启动');
+            }
+        }
+    } else {
+        fs.mkdirSync(dataDir, { recursive: true });
+        console.log('📁 创建数据目录:', dataDir);
+    }
+} catch (error) {
+    console.log('⚠️ 数据目录处理失败，但继续启动:', error.message);
 }
 
 // 启动主应用
 console.log('🎯 启动主应用...');
-require('../app.js'); 
+
+async function startApp() {
+    // 等待权限修复完成
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    require('../app.js');
+}
+
+startApp(); 

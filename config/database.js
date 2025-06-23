@@ -29,16 +29,62 @@ class DatabaseManager {
         console.log(`📂 数据库路径: ${this.dbPath}`);
         
         this.ensureDataDirectory();
-        this.db = new Database(this.dbPath);
-        this.db.pragma('journal_mode = WAL');
-        this.initializeDatabase();
+        
+        // 尝试创建数据库连接
+        try {
+            console.log(`🔗 尝试连接数据库: ${this.dbPath}`);
+            this.db = new Database(this.dbPath);
+            console.log(`✅ 数据库连接成功`);
+            this.db.pragma('journal_mode = WAL');
+            this.initializeDatabase();
+        } catch (error) {
+            console.error(`❌ 数据库连接失败: ${error.message}`);
+            console.error(`❌ 错误代码: ${error.code}`);
+            console.error(`❌ 数据库路径: ${this.dbPath}`);
+            
+            // 检查数据库文件目录的详细信息
+            const dataDir = path.dirname(this.dbPath);
+            try {
+                const stats = fs.statSync(dataDir);
+                console.log(`📊 目录信息:`, {
+                    exists: true,
+                    isDirectory: stats.isDirectory(),
+                    mode: stats.mode.toString(8),
+                    uid: stats.uid,
+                    gid: stats.gid
+                });
+            } catch (dirError) {
+                console.error(`❌ 无法获取目录信息: ${dirError.message}`);
+            }
+            
+            throw error;
+        }
     }
 
     ensureDataDirectory() {
         const dataDir = path.dirname(this.dbPath);
+        console.log(`🔍 检查数据目录: ${dataDir}`);
+        
         if (!fs.existsSync(dataDir)) {
             console.log(`📁 创建数据目录: ${dataDir}`);
-            fs.mkdirSync(dataDir, { recursive: true });
+            try {
+                fs.mkdirSync(dataDir, { recursive: true });
+                console.log(`✅ 数据目录创建成功: ${dataDir}`);
+            } catch (error) {
+                console.error(`❌ 数据目录创建失败: ${error.message}`);
+                throw error;
+            }
+        } else {
+            console.log(`✅ 数据目录已存在: ${dataDir}`);
+        }
+        
+        // 检查目录权限
+        try {
+            fs.accessSync(dataDir, fs.constants.W_OK);
+            console.log(`✅ 数据目录具有写权限: ${dataDir}`);
+        } catch (error) {
+            console.error(`❌ 数据目录没有写权限: ${error.message}`);
+            throw error;
         }
     }
 

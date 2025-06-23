@@ -5,7 +5,8 @@ const fs = require('fs');
 class DatabaseManager {
     constructor() {
         // 数据库路径配置 - 支持Railway Volume
-        const nodeEnv = process.env.NODE_ENV || 'development';
+        // 优先读取NODE_ENV，如果没有则读取Railway环境名称
+        const nodeEnv = process.env.NODE_ENV || process.env.RAILWAY_ENVIRONMENT_NAME || 'development';
         const isProduction = nodeEnv === 'production';
         const isStaging = nodeEnv === 'staging';
         

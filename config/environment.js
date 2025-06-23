@@ -3,7 +3,8 @@
  * 支持 development, staging, production 环境
  */
 
-const nodeEnv = process.env.NODE_ENV || 'development';
+// 优先读取NODE_ENV，如果没有则读取Railway环境名称，最后默认为development
+const nodeEnv = process.env.NODE_ENV || process.env.RAILWAY_ENVIRONMENT_NAME || 'development';
 
 // 基础配置
 const baseConfig = {

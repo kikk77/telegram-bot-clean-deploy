@@ -1537,30 +1537,52 @@ class ApiService {
     }
 
     // Dashboard需要的基础API方法
-    async getBasicStats() {
+    async getBasicStats({ headers = {} }) {
         try {
+            // 检查是否需要强制刷新
+            const forceRefresh = headers['x-force-refresh'] === 'true';
+            
+            if (forceRefresh) {
+                console.log('🔄 强制刷新统计数据...');
+                // 清理所有可能的缓存
+                if (global.statsCache) {
+                    global.statsCache.clear();
+                }
+            }
+            
             // 获取各种基础统计数据
             const totalMerchants = db.prepare('SELECT COUNT(*) as count FROM merchants').get().count;
+            const activeMerchants = db.prepare('SELECT COUNT(*) as count FROM merchants WHERE status = "active"').get().count;
             const totalBindCodes = db.prepare('SELECT COUNT(*) as count FROM bind_codes').get().count;
             const totalRegions = db.prepare('SELECT COUNT(*) as count FROM regions').get().count;
             const totalTemplates = db.prepare('SELECT COUNT(*) as count FROM message_templates').get().count;
+            const totalOrders = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
+            const completedOrders = db.prepare('SELECT COUNT(*) as count FROM orders WHERE status = "completed"').get().count;
+            const pendingOrders = db.prepare('SELECT COUNT(*) as count FROM orders WHERE status IN ("attempting", "pending")').get().count;
             
             // 获取真实的点击统计 - 只统计用户点击"出击"按钮的次数
             const attackClicks = db.prepare('SELECT COUNT(*) as count FROM interactions WHERE action_type = ?').get('attack_click').count;
             const totalClicks = attackClicks; // 总点击数就是出击点击数
             
             console.log(`点击统计详情: 出击点击=${attackClicks}, 总点击数=${totalClicks}`);
+            console.log(`商家统计: 总数=${totalMerchants}, 活跃=${activeMerchants}`);
+            console.log(`订单统计: 总数=${totalOrders}, 完成=${completedOrders}, 待处理=${pendingOrders}`);
             
             // 获取交互统计
             const interactionStats = dbOperations.getInteractionStats();
             
             const stats = {
                 totalMerchants,
+                activeMerchants,
                 totalBindCodes,
                 totalRegions,
                 totalTemplates,
+                totalOrders,
+                completedOrders,
+                pendingOrders,
                 totalClicks,
                 attackClicks,
+                lastUpdated: new Date().toISOString(),
                 ...interactionStats
             };
             

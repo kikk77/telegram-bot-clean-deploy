@@ -315,8 +315,11 @@ class DatabaseManager {
         // 检查是否需要创建orders表
         this.migrateOrdersTable();
         
+        // 新增：强制修复数据一致性问题（针对显示都是2的问题）
+        this.repairDataConsistency();
+        
         // 更新到最新版本
-        this.setDbVersion('1.1.0');
+        this.setDbVersion('1.1.1'); // 升级版本号
         console.log('数据库迁移完成');
     }
 
@@ -465,6 +468,84 @@ class DatabaseManager {
             }
         } catch (error) {
             console.error('迁移orders表失败:', error);
+        }
+    }
+
+    // 新增：修复数据一致性问题
+    repairDataConsistency() {
+        console.log('🔧 修复数据一致性问题...');
+        
+        try {
+            // 1. 确保所有商家都有正确的状态
+            const merchantsWithoutStatus = this.db.prepare(`
+                SELECT id, teacher_name FROM merchants WHERE status IS NULL OR status = ''
+            `).all();
+            
+            if (merchantsWithoutStatus.length > 0) {
+                console.log(`修复 ${merchantsWithoutStatus.length} 个商家的状态`);
+                const updateMerchantStatus = this.db.prepare('UPDATE merchants SET status = ? WHERE id = ?');
+                for (const merchant of merchantsWithoutStatus) {
+                    updateMerchantStatus.run('active', merchant.id);
+                }
+            }
+            
+            // 2. 确保所有订单都有正确的状态
+            const ordersWithoutStatus = this.db.prepare(`
+                SELECT id, order_number FROM orders WHERE status IS NULL OR status = ''
+            `).all();
+            
+            if (ordersWithoutStatus.length > 0) {
+                console.log(`修复 ${ordersWithoutStatus.length} 个订单的状态`);
+                const updateOrderStatus = this.db.prepare('UPDATE orders SET status = ? WHERE id = ?');
+                for (const order of ordersWithoutStatus) {
+                    updateOrderStatus.run('pending', order.id);
+                }
+            }
+            
+            // 3. 重新计算并缓存统计数据
+            this.refreshStatisticsCache();
+            
+            console.log('✅ 数据一致性修复完成');
+            
+        } catch (error) {
+            console.error('数据一致性修复失败:', error);
+        }
+    }
+
+    // 新增：刷新统计缓存
+    refreshStatisticsCache() {
+        try {
+            console.log('🔄 刷新统计缓存...');
+            
+            // 清理可能存在的缓存表
+            const statsTables = ['order_stats', 'merchant_ratings', 'user_ratings'];
+            for (const table of statsTables) {
+                try {
+                    this.db.exec(`DELETE FROM ${table}`);
+                } catch (error) {
+                    // 表可能不存在，忽略错误
+                }
+            }
+            
+            // 强制触发统计重新计算
+            const totalMerchants = this.db.prepare('SELECT COUNT(*) as count FROM merchants').get().count;
+            const activeMerchants = this.db.prepare('SELECT COUNT(*) as count FROM merchants WHERE status = "active"').get().count;
+            const totalOrders = this.db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
+            const completedOrders = this.db.prepare('SELECT COUNT(*) as count FROM orders WHERE status = "completed"').get().count;
+            
+            console.log(`统计验证: 商家总数=${totalMerchants}, 活跃商家=${activeMerchants}, 订单总数=${totalOrders}, 完成订单=${completedOrders}`);
+            
+            // 将统计数据存储到元数据表，供前端快速读取
+            this.db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('stats_merchants_total', totalMerchants.toString());
+            this.db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('stats_merchants_active', activeMerchants.toString());
+            this.db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('stats_orders_total', totalOrders.toString());
+            this.db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('stats_orders_completed', completedOrders.toString());
+            this.db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('stats_last_update', Date.now().toString());
+            
+            console.log('✅ 统计缓存刷新完成');
+            
+        } catch (error) {
+            console.error('统计缓存刷新失败:', error);
         }
     }
 

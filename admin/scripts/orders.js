@@ -885,14 +885,22 @@ class OptimizedOrdersManager {
     // 更新仪表板
     async updateDashboard() {
         try {
-            // 清除统计相关的缓存，确保获取最新数据
-            this.clearCache('stats');
+            // 强制清除所有缓存，确保获取最新数据
+            this.clearCache(); // 清除所有缓存
+            
+            // 添加缓存清理头部，强制服务器端也清除缓存
+            const headers = {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+                'X-Force-Refresh': 'true'
+            };
             
             // 并行加载优化统计和基础统计
             const filters = this.getCurrentFilters();
             const [optimizedResponse, basicResponse] = await Promise.all([
-                this.fetchWithCache('/api/stats/optimized', filters, 0), // 不使用缓存
-                this.fetchWithCache('/api/stats', {}, 0) // 不使用缓存
+                fetch('/api/stats/optimized?' + new URLSearchParams(filters), { headers }).then(r => r.json()),
+                fetch('/api/stats?' + new URLSearchParams({}), { headers }).then(r => r.json())
             ]);
             
             // 处理不同的API返回格式

@@ -7,10 +7,22 @@ class DatabaseManager {
         // 数据库路径配置 - 支持Railway Volume
         const nodeEnv = process.env.NODE_ENV || 'development';
         const isProduction = nodeEnv === 'production';
+        const isStaging = nodeEnv === 'staging';
         
-        // 在生产环境使用Railway Volume路径，开发环境使用本地路径
-        const dataDir = isProduction ? '/app/data' : path.join(__dirname, '..', 'data');
-        this.dbPath = path.join(dataDir, 'marketing_bot.db');
+        // 根据环境选择数据目录和数据库文件名
+        const dataDir = (isProduction || isStaging) ? '/app/data' : path.join(__dirname, '..', 'data');
+        
+        // 不同环境使用不同的数据库文件
+        let dbFileName;
+        if (isProduction) {
+            dbFileName = 'marketing_bot.db';
+        } else if (isStaging) {
+            dbFileName = 'marketing_bot_staging.db';
+        } else {
+            dbFileName = 'marketing_bot_dev.db';
+        }
+        
+        this.dbPath = path.join(dataDir, dbFileName);
         
         console.log(`📊 数据库环境: ${nodeEnv}`);
         console.log(`📂 数据库路径: ${this.dbPath}`);

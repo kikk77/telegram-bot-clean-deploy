@@ -1,0 +1,46 @@
+# Railway Staging环境配置
+# 
+# 🧪 测试环境Bot配置说明：
+# 在Railway Variables中设置以下变量：
+# BOT_TOKEN=你的测试Bot Token
+# BOT_USERNAME=xiaoji_daniao_bot (测试Bot用户名)
+# GROUP_CHAT_ID=-1002793326688 (测试群组ID)
+# NODE_ENV=staging
+# ADMIN_PASSWORD=你的管理员密码
+#
+# ⚠️ 重要：确保：
+# 1. 测试Bot已添加到测试群组
+# 2. 测试Bot已获得群组管理员权限
+# 3. 与生产环境完全隔离
+
+[build]
+builder = "nixpacks"
+watchPatterns = ["app.js", "services/**", "models/**", "config/**"]
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npm run railway"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Volume配置 - 测试环境独立数据持久化
+[[deploy.volumes]]
+mountPath = "/app/data"
+name = "telegram-bot-staging-data"  # 独立的staging volume
+
+[env]
+NODE_ENV = "staging"
+PORT = "3000"
+
+[[ports]]
+port = 3000
+internal = false 
+
+[[ports]]
+port = 3001
+internal = false
+
+[variables]
+PORT_HEALTH = "3001" 

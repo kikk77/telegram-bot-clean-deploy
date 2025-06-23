@@ -39,13 +39,13 @@ const environmentConfigs = {
     
     staging: {
         ...baseConfig,
-        port: 3001,
+        port: process.env.PORT || 3001,
         logLevel: 'info',
         environment: 'staging',
         dbFileName: 'marketing_bot_staging.db',
         features: {
             enableDebugLogs: true,
-            enableTestMode: false,
+            enableTestMode: true,  // staging环境启用测试模式
             skipValidation: false
         }
     },

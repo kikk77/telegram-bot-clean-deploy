@@ -2729,6 +2729,13 @@ async function handleMerchantDetailCommentInput(userId, text, evalSession) {
             }
         }
         
+        // 删除之前的评价请求消息（包含"跳过文字评价"按钮的消息）
+        try {
+            await clearUserConversation(userId);
+        } catch (error) {
+            console.log('清理商家评价消息失败:', error);
+        }
+        
         // 删除评价会话
         dbOperations.deleteEvaluationSession(evalSession.id);
         
@@ -2792,6 +2799,13 @@ async function handleUserTextCommentInput(userId, text, evalSession) {
         
         console.log(`保存文字评价: "${text}"`);
         console.log(`更新后的scores:`, scores);
+        
+        // 删除之前的评价请求消息（包含"跳过文字评价"按钮的消息）
+        try {
+            await clearUserConversation(userId);
+        } catch (error) {
+            console.log('清理用户评价消息失败:', error);
+        }
         
         // 更新数据库中的文字评价
         if (userState) {

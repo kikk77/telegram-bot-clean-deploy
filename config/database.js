@@ -529,9 +529,9 @@ class DatabaseManager {
             
             // 强制触发统计重新计算
             const totalMerchants = this.db.prepare('SELECT COUNT(*) as count FROM merchants').get().count;
-            const activeMerchants = this.db.prepare('SELECT COUNT(*) as count FROM merchants WHERE status = "active"').get().count;
+            const activeMerchants = this.db.prepare("SELECT COUNT(*) as count FROM merchants WHERE status = 'active'").get().count;
             const totalOrders = this.db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
-            const completedOrders = this.db.prepare('SELECT COUNT(*) as count FROM orders WHERE status = "completed"').get().count;
+            const completedOrders = this.db.prepare("SELECT COUNT(*) as count FROM orders WHERE status = 'completed'").get().count;
             
             console.log(`统计验证: 商家总数=${totalMerchants}, 活跃商家=${activeMerchants}, 订单总数=${totalOrders}, 完成订单=${completedOrders}`);
             

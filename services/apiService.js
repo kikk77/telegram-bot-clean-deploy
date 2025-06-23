@@ -1552,13 +1552,13 @@ class ApiService {
             
             // 获取各种基础统计数据
             const totalMerchants = db.prepare('SELECT COUNT(*) as count FROM merchants').get().count;
-            const activeMerchants = db.prepare('SELECT COUNT(*) as count FROM merchants WHERE status = "active"').get().count;
+            const activeMerchants = db.prepare("SELECT COUNT(*) as count FROM merchants WHERE status = 'active'").get().count;
             const totalBindCodes = db.prepare('SELECT COUNT(*) as count FROM bind_codes').get().count;
             const totalRegions = db.prepare('SELECT COUNT(*) as count FROM regions').get().count;
             const totalTemplates = db.prepare('SELECT COUNT(*) as count FROM message_templates').get().count;
             const totalOrders = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
-            const completedOrders = db.prepare('SELECT COUNT(*) as count FROM orders WHERE status = "completed"').get().count;
-            const pendingOrders = db.prepare('SELECT COUNT(*) as count FROM orders WHERE status IN ("attempting", "pending")').get().count;
+            const completedOrders = db.prepare("SELECT COUNT(*) as count FROM orders WHERE status = 'completed'").get().count;
+            const pendingOrders = db.prepare("SELECT COUNT(*) as count FROM orders WHERE status IN ('attempting', 'pending')").get().count;
             
             // 获取真实的点击统计 - 只统计用户点击"出击"按钮的次数
             const attackClicks = db.prepare('SELECT COUNT(*) as count FROM interactions WHERE action_type = ?').get('attack_click').count;

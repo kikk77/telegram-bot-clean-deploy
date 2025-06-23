@@ -8,8 +8,15 @@ const mkdir = promisify(fs.mkdir);
 
 class DataExportService {
     constructor() {
-        this.dataPath = path.join(__dirname, '../data');
+        // 适应实际的数据库结构
+        const nodeEnv = process.env.NODE_ENV || 'development';
+        const isProduction = nodeEnv === 'production';
+        
+        // 在生产环境使用Railway Volume路径，开发环境使用本地路径
+        this.dataPath = isProduction ? '/app/data' : path.join(__dirname, '../data');
         this.exportPath = path.join(__dirname, '../exports');
+        this.dbPath = path.join(this.dataPath, 'marketing_bot.db');
+        
         this.ensureExportDirectory();
     }
 
@@ -31,25 +38,19 @@ class DataExportService {
             
             console.log('开始数据导出...');
             
-            // 1. 导出核心业务数据
-            await this.exportCoreData(exportDir, format);
+            // 1. 导出所有业务数据（从单一数据库）
+            await this.exportAllBusinessData(exportDir, format);
             
-            // 2. 导出模板配置数据
-            await this.exportTemplateData(exportDir, format);
-            
-            // 3. 导出用户交互数据（所有月份）
-            await this.exportUserData(exportDir, format);
-            
-            // 4. 导出数据库文件备份
+            // 2. 导出数据库文件备份
             await this.exportDatabaseFiles(exportDir);
             
-            // 5. 生成导出元数据
+            // 3. 生成导出元数据
             await this.generateExportMetadata(exportDir);
             
-            // 6. 创建压缩包
+            // 4. 创建压缩包
             const zipPath = await this.createZipArchive(exportDir, `export_${timestamp}.zip`);
             
-            // 7. 清理临时目录
+            // 5. 清理临时目录
             await this.cleanupDirectory(exportDir);
             
             console.log(`数据导出完成: ${zipPath}`);
@@ -67,76 +68,115 @@ class DataExportService {
         }
     }
 
-    // 导出核心业务数据
-    async exportCoreData(exportDir, format) {
-        const coreDbPath = path.join(this.dataPath, 'core.db');
-        if (!fs.existsSync(coreDbPath)) {
-            console.log('核心数据库不存在，跳过导出');
+    // 导出所有业务数据（从单一数据库）
+    async exportAllBusinessData(exportDir, format) {
+        if (!fs.existsSync(this.dbPath)) {
+            console.log('主数据库不存在，跳过导出');
             return;
         }
 
-        const db = new Database(coreDbPath, { readonly: true });
-        const coreDir = path.join(exportDir, 'core_data');
-        await mkdir(coreDir, { recursive: true });
-
+        const db = new Database(this.dbPath, { readonly: true });
+        
         try {
-            // 核心表列表
-            const coreTables = [
-                'regions',
-                'bind_codes', 
-                'merchants',
-                'booking_sessions',
-                'orders',
-                'evaluations',
-                'evaluation_sessions',
-                'order_stats',
-                'merchant_ratings',
-                'user_ratings'
-            ];
+            // 创建数据目录
+            const dataDir = path.join(exportDir, 'business_data');
+            await mkdir(dataDir, { recursive: true });
 
-            console.log('导出核心业务数据...');
+            // 获取所有表名
+            const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+            const tableNames = tables.map(t => t.name);
             
-            for (const table of coreTables) {
-                try {
-                    const data = db.prepare(`SELECT * FROM ${table}`).all();
-                    
-                    if (format === 'json') {
-                        await writeFile(
-                            path.join(coreDir, `${table}.json`),
-                            JSON.stringify(data, null, 2),
-                            'utf8'
-                        );
-                    } else if (format === 'csv') {
-                        await this.exportToCSV(data, path.join(coreDir, `${table}.csv`));
+            console.log(`发现 ${tableNames.length} 个数据表:`, tableNames);
+            
+            // 按类别分组导出表数据
+            const tableCategories = {
+                core_business: ['regions', 'bind_codes', 'merchants', 'orders', 'evaluations', 'booking_sessions', 'evaluation_sessions'],
+                configuration: ['message_templates', 'trigger_words', 'scheduled_tasks', 'buttons', 'db_meta'],
+                statistics: ['order_stats', 'merchant_ratings', 'user_ratings'],
+                interactions: ['user_bookings', 'user_evaluations', 'user_reports', 'merchant_orders', 'merchant_evaluations', 'interactions']
+            };
+
+            for (const [category, categoryTables] of Object.entries(tableCategories)) {
+                const categoryDir = path.join(dataDir, category);
+                await mkdir(categoryDir, { recursive: true });
+                
+                console.log(`导出 ${category} 数据...`);
+                
+                for (const tableName of categoryTables) {
+                    if (tableNames.includes(tableName)) {
+                        try {
+                            const data = db.prepare(`SELECT * FROM ${tableName}`).all();
+                            
+                            if (format === 'json') {
+                                await writeFile(
+                                    path.join(categoryDir, `${tableName}.json`),
+                                    JSON.stringify(data, null, 2),
+                                    'utf8'
+                                );
+                            } else if (format === 'csv') {
+                                await this.exportToCSV(data, path.join(categoryDir, `${tableName}.csv`));
+                            }
+                            
+                            console.log(`✓ 导出 ${tableName}: ${data.length} 条记录`);
+                        } catch (error) {
+                            console.log(`⚠ 表 ${tableName} 导出失败:`, error.message);
+                        }
                     }
-                    
-                    console.log(`✓ 导出 ${table}: ${data.length} 条记录`);
-                } catch (error) {
-                    console.log(`⚠ 表 ${table} 不存在或导出失败:`, error.message);
+                }
+            }
+
+            // 导出其他未分类的表
+            const uncategorizedTables = tableNames.filter(name => 
+                !Object.values(tableCategories).flat().includes(name)
+            );
+            
+            if (uncategorizedTables.length > 0) {
+                const otherDir = path.join(dataDir, 'other_tables');
+                await mkdir(otherDir, { recursive: true });
+                
+                console.log('导出其他表数据...');
+                for (const tableName of uncategorizedTables) {
+                    try {
+                        const data = db.prepare(`SELECT * FROM ${tableName}`).all();
+                        
+                        if (format === 'json') {
+                            await writeFile(
+                                path.join(otherDir, `${tableName}.json`),
+                                JSON.stringify(data, null, 2),
+                                'utf8'
+                            );
+                        }
+                        
+                        console.log(`✓ 导出 ${tableName}: ${data.length} 条记录`);
+                    } catch (error) {
+                        console.log(`⚠ 表 ${tableName} 导出失败:`, error.message);
+                    }
                 }
             }
 
             // 导出关键统计信息
-            await this.exportCoreStatistics(db, coreDir);
+            await this.exportDatabaseStatistics(db, dataDir);
 
         } finally {
             db.close();
         }
     }
 
-    // 导出核心统计信息
-    async exportCoreStatistics(db, coreDir) {
+    // 导出数据库统计信息
+    async exportDatabaseStatistics(db, dataDir) {
         const stats = {
             export_time: new Date().toISOString(),
             database_info: {
-                total_regions: this.safeQuery(db, 'SELECT COUNT(*) as count FROM regions').count || 0,
-                total_merchants: this.safeQuery(db, 'SELECT COUNT(*) as count FROM merchants').count || 0,
-                active_merchants: this.safeQuery(db, 'SELECT COUNT(*) as count FROM merchants WHERE status = "active"').count || 0,
-                total_orders: this.safeQuery(db, 'SELECT COUNT(*) as count FROM orders').count || 0,
-                completed_orders: this.safeQuery(db, 'SELECT COUNT(*) as count FROM orders o LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id WHERE bs.user_course_status = "completed"').count || 0,
-                total_evaluations: this.safeQuery(db, 'SELECT COUNT(*) as count FROM evaluations').count || 0,
-                unused_bind_codes: this.safeQuery(db, 'SELECT COUNT(*) as count FROM bind_codes WHERE used = 0').count || 0
+                total_regions: this.safeQuery(db, 'SELECT COUNT(*) as count FROM regions')?.count || 0,
+                total_merchants: this.safeQuery(db, 'SELECT COUNT(*) as count FROM merchants')?.count || 0,
+                active_merchants: this.safeQuery(db, 'SELECT COUNT(*) as count FROM merchants WHERE status = "active"')?.count || 0,
+                total_bind_codes: this.safeQuery(db, 'SELECT COUNT(*) as count FROM bind_codes')?.count || 0,
+                used_bind_codes: this.safeQuery(db, 'SELECT COUNT(*) as count FROM bind_codes WHERE used = 1')?.count || 0,
+                total_orders: this.safeQuery(db, 'SELECT COUNT(*) as count FROM orders')?.count || 0,
+                total_evaluations: this.safeQuery(db, 'SELECT COUNT(*) as count FROM evaluations')?.count || 0,
+                total_templates: this.safeQuery(db, 'SELECT COUNT(*) as count FROM message_templates')?.count || 0
             },
+            table_summary: this.getAllTableCounts(db),
             merchant_summary: this.safeQuery(db, `
                 SELECT 
                     r.name as region_name,
@@ -146,136 +186,48 @@ class DataExportService {
                 LEFT JOIN merchants m ON r.id = m.region_id 
                 GROUP BY r.id, r.name
                 ORDER BY merchant_count DESC
-            `) || [],
-            order_summary: this.safeQuery(db, `
-                SELECT 
-                    DATE(datetime(o.created_at, 'unixepoch')) as order_date,
-                    COUNT(*) as daily_orders,
-                    COUNT(CASE WHEN bs.user_course_status = 'completed' THEN 1 END) as completed_orders
-                FROM orders o
-                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
-                WHERE o.created_at >= strftime('%s', 'now', '-30 days')
-                GROUP BY DATE(datetime(o.created_at, 'unixepoch'))
-                ORDER BY order_date DESC
             `) || []
         };
 
         await writeFile(
-            path.join(coreDir, 'statistics.json'),
+            path.join(dataDir, 'database_statistics.json'),
             JSON.stringify(stats, null, 2),
             'utf8'
         );
 
-        console.log('✓ 导出核心统计信息');
+        console.log('✓ 导出数据库统计信息');
+    }
+
+    // 获取所有表的记录数
+    getAllTableCounts(db) {
+        try {
+            const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+            const counts = {};
+            
+            for (const table of tables) {
+                try {
+                    const result = db.prepare(`SELECT COUNT(*) as count FROM ${table.name}`).get();
+                    counts[table.name] = result.count;
+                } catch (error) {
+                    counts[table.name] = 'ERROR: ' + error.message;
+                }
+            }
+            
+            return counts;
+        } catch (error) {
+            console.error('获取表记录数失败:', error);
+            return {};
+        }
     }
 
     // 安全查询（防止表不存在错误）
     safeQuery(db, query) {
         try {
-            return db.prepare(query).get() || db.prepare(query).all();
+            const result = db.prepare(query).get();
+            return result || null;
         } catch (error) {
             console.log(`查询失败: ${query}`, error.message);
             return null;
-        }
-    }
-
-    // 导出模板配置数据
-    async exportTemplateData(exportDir, format) {
-        const templateDbPath = path.join(this.dataPath, 'templates.db');
-        if (!fs.existsSync(templateDbPath)) {
-            console.log('模板数据库不存在，跳过导出');
-            return;
-        }
-
-        const db = new Database(templateDbPath, { readonly: true });
-        const templateDir = path.join(exportDir, 'template_data');
-        await mkdir(templateDir, { recursive: true });
-
-        try {
-            const templateTables = [
-                'message_templates',
-                'trigger_words',
-                'scheduled_tasks',
-                'button_configs'
-            ];
-
-            console.log('导出模板配置数据...');
-
-            for (const table of templateTables) {
-                try {
-                    const data = db.prepare(`SELECT * FROM ${table}`).all();
-                    
-                    if (format === 'json') {
-                        await writeFile(
-                            path.join(templateDir, `${table}.json`),
-                            JSON.stringify(data, null, 2),
-                            'utf8'
-                        );
-                    }
-                    
-                    console.log(`✓ 导出 ${table}: ${data.length} 条记录`);
-                } catch (error) {
-                    console.log(`⚠ 表 ${table} 不存在或导出失败:`, error.message);
-                }
-            }
-
-        } finally {
-            db.close();
-        }
-    }
-
-    // 导出用户交互数据（所有月份）
-    async exportUserData(exportDir, format) {
-        const userDir = path.join(exportDir, 'user_data');
-        await mkdir(userDir, { recursive: true });
-
-        // 获取所有用户数据库文件
-        const userDbFiles = fs.readdirSync(this.dataPath)
-            .filter(file => file.match(/^users_\d{4}_\d{2}\.db$/));
-
-        console.log(`发现 ${userDbFiles.length} 个用户数据库文件`);
-
-        for (const dbFile of userDbFiles) {
-            const dbPath = path.join(this.dataPath, dbFile);
-            const db = new Database(dbPath, { readonly: true });
-            
-            try {
-                const monthDir = path.join(userDir, dbFile.replace('.db', ''));
-                await mkdir(monthDir, { recursive: true });
-
-                const userTables = [
-                    'user_bookings',
-                    'user_evaluations', 
-                    'user_reports',
-                    'merchant_orders',
-                    'merchant_evaluations',
-                    'interactions'
-                ];
-
-                console.log(`导出用户数据: ${dbFile}`);
-
-                for (const table of userTables) {
-                    try {
-                        const data = db.prepare(`SELECT * FROM ${table}`).all();
-                        
-                        if (data.length > 0) {
-                            if (format === 'json') {
-                                await writeFile(
-                                    path.join(monthDir, `${table}.json`),
-                                    JSON.stringify(data, null, 2),
-                                    'utf8'
-                                );
-                            }
-                            console.log(`  ✓ ${table}: ${data.length} 条记录`);
-                        }
-                    } catch (error) {
-                        console.log(`  ⚠ 表 ${table} 不存在或导出失败`);
-                    }
-                }
-
-            } finally {
-                db.close();
-            }
         }
     }
 
@@ -286,7 +238,7 @@ class DataExportService {
 
         console.log('备份数据库文件...');
 
-        // 获取所有数据库文件
+        // 获取所有数据库文件（包括WAL和SHM文件）
         const dbFiles = fs.readdirSync(this.dataPath)
             .filter(file => file.endsWith('.db') || file.endsWith('.db-wal') || file.endsWith('.db-shm'));
 
@@ -295,8 +247,10 @@ class DataExportService {
             const targetPath = path.join(dbBackupDir, dbFile);
             
             try {
-                fs.copyFileSync(sourcePath, targetPath);
-                console.log(`✓ 备份数据库文件: ${dbFile}`);
+                if (fs.existsSync(sourcePath)) {
+                    fs.copyFileSync(sourcePath, targetPath);
+                    console.log(`✓ 备份数据库文件: ${dbFile}`);
+                }
             } catch (error) {
                 console.log(`⚠ 备份失败: ${dbFile}`, error.message);
             }
@@ -308,32 +262,65 @@ class DataExportService {
         const metadata = {
             export_info: {
                 timestamp: new Date().toISOString(),
-                version: '1.0.0',
+                version: '1.1.0',
                 system: 'Telegram Bot - 小鸡预约系统',
-                export_type: 'complete_backup'
+                export_type: 'complete_backup',
+                database_structure: 'single_database',
+                main_database: 'marketing_bot.db'
             },
             file_structure: {
-                core_data: '核心业务数据（地区、商家、订单、评价等）',
-                template_data: '模板配置数据（消息模板、触发词等）',
-                user_data: '用户交互数据（按月分区）',
-                database_backup: '原始数据库文件备份'
+                business_data: {
+                    core_business: '核心业务数据（地区、商家、订单、评价等）',
+                    configuration: '配置数据（消息模板、触发词、按钮等）',
+                    statistics: '统计数据（评分汇总等）',
+                    interactions: '交互数据（用户预约、评价等）',
+                    other_tables: '其他未分类表数据'
+                },
+                database_backup: '原始数据库文件备份（marketing_bot.db及相关文件）',
+                database_statistics: '数据库统计信息和表记录数汇总'
             },
             restoration_guide: {
                 description: '数据恢复指南',
-                steps: [
-                    '1. 停止Bot服务',
-                    '2. 备份当前data目录',
-                    '3. 将database_backup中的文件复制到data目录',
-                    '4. 或者使用JSON文件通过导入脚本恢复数据',
-                    '5. 重启Bot服务',
-                    '6. 验证数据完整性'
-                ]
+                methods: {
+                    method1_database_files: {
+                        title: '方法1：直接恢复数据库文件（推荐）',
+                        steps: [
+                            '1. 停止Bot服务',
+                            '2. 备份当前data目录',
+                            '3. 将database_backup中的文件复制到data目录',
+                            '4. 重启Bot服务',
+                            '5. 验证数据完整性'
+                        ]
+                    },
+                    method2_json_import: {
+                        title: '方法2：使用JSON数据导入',
+                        steps: [
+                            '1. 停止Bot服务',
+                            '2. 备份当前数据库',
+                            '3. 使用导入脚本从business_data中的JSON文件恢复',
+                            '4. 重启Bot服务',
+                            '5. 验证数据完整性'
+                        ]
+                    }
+                }
+            },
+            railway_deployment: {
+                title: 'Railway云端部署恢复',
+                notes: [
+                    '在Railway中，数据存储在持久化Volume中',
+                    '可以通过Railway CLI或管理界面访问数据',
+                    '推荐定期导出数据作为备份',
+                    '系统支持自动数据迁移，无需手动操作'
+                ],
+                volume_path: '/app/data',
+                backup_frequency: '建议每月导出一次完整备份'
             },
             important_notes: [
                 '此备份包含所有用户数据和商家信息',
                 '恢复前请确保停止所有Bot服务',
                 '建议在测试环境先验证备份完整性',
-                '定期进行数据备份以防数据丢失'
+                '定期进行数据备份以防数据丢失',
+                '系统已内置自动数据迁移机制，升级时会自动处理数据兼容性'
             ]
         };
 

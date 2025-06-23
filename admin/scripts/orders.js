@@ -947,6 +947,8 @@ class OptimizedOrdersManager {
 
     // 更新指标卡片
     updateMetricCards(data) {
+        console.log('📊 收到的优化统计数据:', data);
+        
         const metrics = {
             totalOrders: data.totalOrders || 0,
             bookedOrders: data.bookedOrders || 0,
@@ -958,8 +960,11 @@ class OptimizedOrdersManager {
             completionRate: data.completionRate || 0
         };
 
+        console.log('📊 处理后的metrics:', metrics);
+
         Object.entries(metrics).forEach(([key, value]) => {
             const element = document.getElementById(key);
+            console.log(`📊 更新 ${key}:`, value, '元素:', element);
             
             if (element) {
                 if (key === 'avgPrice') {
@@ -971,124 +976,39 @@ class OptimizedOrdersManager {
                 } else {
                     element.textContent = value.toLocaleString();
                 }
+                console.log(`📊 ${key} 更新完成:`, element.textContent);
+            } else {
+                console.error(`📊 找不到元素 ${key}`);
             }
         });
     }
 
     // 更新基础统计数据
     updateBasicStats(data) {
+        console.log('🏪 收到的基础统计数据:', data);
+        
         const basicMetrics = {
             totalMerchants: data.totalMerchants || 0,
             totalBindCodes: data.totalBindCodes || 0,
             totalRegions: data.totalRegions || 0,
             totalTemplates: data.totalTemplates || 0,
-            totalClicks: data.totalClicks || 0,
-            attackClicks: data.attackClicks || 0
+            totalClicks: data.totalClicks || 0
         };
 
-        console.log('开始更新基础统计数据:', basicMetrics);
+        console.log('🏪 处理后的基础metrics:', basicMetrics);
 
-        // 直接通过ID更新新添加的基础统计元素
-        const statsMapping = {
-            'totalMerchants': basicMetrics.totalMerchants,
-            'totalBindCodes': basicMetrics.totalBindCodes,
-            'totalRegions': basicMetrics.totalRegions,
-            'totalTemplates': basicMetrics.totalTemplates,
-            'totalClicks': basicMetrics.totalClicks,
-            'attackClicks': basicMetrics.attackClicks
-        };
-
-        Object.entries(statsMapping).forEach(([id, value]) => {
+        // 直接通过ID更新基础统计元素
+        Object.entries(basicMetrics).forEach(([id, value]) => {
             const element = document.getElementById(id);
             if (element) {
-                element.textContent = value;
-                console.log(`通过ID ${id} 更新数据:`, value);
+                element.textContent = value.toLocaleString();
+                console.log(`🏪 ${id} 更新为:`, value);
             } else {
-                console.log(`未找到ID为 ${id} 的元素`);
+                console.log(`🏪 未找到ID为 ${id} 的元素`);
             }
         });
 
-        // 先查找页面中所有包含这些关键词的元素（兼容旧版本）
-        const allElements = document.querySelectorAll('*');
-        const relevantElements = [];
-        
-        allElements.forEach(element => {
-            if (element.textContent) {
-                const text = element.textContent.toLowerCase();
-                if (text.includes('商家数量') || text.includes('绑定码总数') || 
-                    text.includes('地区数量') || text.includes('总点击数') ||
-                    text.includes('消息模板')) {
-                    relevantElements.push({
-                        element: element,
-                        text: element.textContent,
-                        id: element.id,
-                        className: element.className
-                    });
-                }
-            }
-        });
-
-        console.log('找到相关元素:', relevantElements);
-
-        // 尝试通过文本内容匹配来更新
-        relevantElements.forEach(({ element, text }) => {
-            const parent = element.parentElement;
-            if (parent) {
-                // 查找同级或父级元素中的数值元素
-                const valueElements = parent.querySelectorAll('.metric-value, .stat-number, .stat-value');
-                valueElements.forEach(valueElement => {
-                    if (text.includes('商家数量')) {
-                        valueElement.textContent = basicMetrics.totalMerchants;
-                        console.log('更新商家数量:', basicMetrics.totalMerchants);
-                    } else if (text.includes('绑定码总数')) {
-                        valueElement.textContent = basicMetrics.totalBindCodes;
-                        console.log('更新绑定码总数:', basicMetrics.totalBindCodes);
-                    } else if (text.includes('地区数量')) {
-                        valueElement.textContent = basicMetrics.totalRegions;
-                        console.log('更新地区数量:', basicMetrics.totalRegions);
-                    } else if (text.includes('总点击数')) {
-                        valueElement.textContent = basicMetrics.totalClicks;
-                        console.log('更新总点击数:', basicMetrics.totalClicks);
-                    } else if (text.includes('消息模板')) {
-                        valueElement.textContent = basicMetrics.totalTemplates;
-                        console.log('更新消息模板数:', basicMetrics.totalTemplates);
-                    }
-                });
-            }
-        });
-
-        // 也尝试通过常见的ID直接更新（兼容性）
-        const commonIds = [
-            'merchantCount', 'merchantsCount',
-            'bindCodesCount', 'bindCodeCount',
-            'regionsCount', 'regionCount', 
-            'templatesCount', 'templateCount',
-            'clicksCount', 'clickCount'
-        ];
-
-        commonIds.forEach(id => {
-            const element = document.getElementById(id);
-            if (element) {
-                if (id.includes('merchant') || id.includes('Merchant')) {
-                    element.textContent = basicMetrics.totalMerchants;
-                    console.log(`通过ID ${id} 更新商家数量:`, basicMetrics.totalMerchants);
-                } else if (id.includes('bind') || id.includes('Bind')) {
-                    element.textContent = basicMetrics.totalBindCodes;
-                    console.log(`通过ID ${id} 更新绑定码数量:`, basicMetrics.totalBindCodes);
-                } else if (id.includes('region') || id.includes('Region')) {
-                    element.textContent = basicMetrics.totalRegions;
-                    console.log(`通过ID ${id} 更新地区数量:`, basicMetrics.totalRegions);
-                } else if (id.includes('template') || id.includes('Template')) {
-                    element.textContent = basicMetrics.totalTemplates;
-                    console.log(`通过ID ${id} 更新模板数量:`, basicMetrics.totalTemplates);
-                } else if (id.includes('click') || id.includes('Click')) {
-                    element.textContent = basicMetrics.totalClicks;
-                    console.log(`通过ID ${id} 更新点击数量:`, basicMetrics.totalClicks);
-                }
-            }
-        });
-
-        console.log('基础统计数据更新完成');
+        console.log('🏪 基础统计数据更新完成');
     }
 
     // 刷新过期数据

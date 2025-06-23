@@ -15,21 +15,27 @@ class DatabaseManager {
         let dataDir;
         if (isProduction || isStaging) {
             const volumeDataDir = '/app/data';
-            const appDataDir = path.join(__dirname, '..', 'app-data');
+            const localDataDir = path.join(__dirname, '..', 'data'); // staging使用本地data目录
             
-            // 检查Volume权限
-            try {
-                if (fs.existsSync(volumeDataDir)) {
-                    fs.accessSync(volumeDataDir, fs.constants.W_OK);
-                    dataDir = volumeDataDir; // Volume可用
-                    console.log(`📁 使用Volume数据目录: ${dataDir}`);
-                } else {
-                    throw new Error('Volume目录不存在');
+            // staging环境直接使用本地data目录，不使用Volume
+            if (isStaging) {
+                dataDir = localDataDir;
+                console.log(`📁 STAGING环境使用本地数据目录: ${dataDir}`);
+            } else {
+                // production环境才检查Volume权限
+                try {
+                    if (fs.existsSync(volumeDataDir)) {
+                        fs.accessSync(volumeDataDir, fs.constants.W_OK);
+                        dataDir = volumeDataDir; // Volume可用
+                        console.log(`📁 使用Volume数据目录: ${dataDir}`);
+                    } else {
+                        throw new Error('Volume目录不存在');
+                    }
+                } catch (error) {
+                    console.log(`⚠️ Volume权限问题，使用应用目录: ${error.message}`);
+                    dataDir = path.join(__dirname, '..', 'app-data'); // 使用应用目录
+                    console.log(`📁 使用应用数据目录: ${dataDir}`);
                 }
-            } catch (error) {
-                console.log(`⚠️ Volume权限问题，使用应用目录: ${error.message}`);
-                dataDir = appDataDir; // 使用应用目录
-                console.log(`📁 使用应用数据目录: ${dataDir}`);
             }
         } else {
             dataDir = path.join(__dirname, '..', 'data');
@@ -40,7 +46,9 @@ class DatabaseManager {
         if (isProduction) {
             dbFileName = 'marketing_bot.db';
         } else if (isStaging) {
-            dbFileName = 'marketing_bot_staging.db';
+            // STAGING环境直接使用PRODUCTION数据库，实现一比一展现
+            dbFileName = 'marketing_bot.db';
+            console.log('🔄 STAGING环境配置为使用PRODUCTION数据库');
         } else {
             dbFileName = 'marketing_bot_dev.db';
         }

@@ -742,13 +742,13 @@ class ApiService {
 
             // 获取评价数据
             const userEvaluation = db.prepare(`
-                SELECT overall_score, detail_scores, text_comment, status, created_at
+                SELECT overall_score, detailed_scores, comments as text_comment, status, created_at
                 FROM evaluations 
                 WHERE booking_session_id = ? AND evaluator_type = 'user'
             `).get(order.booking_session_id);
 
             const merchantEvaluation = db.prepare(`
-                SELECT overall_score, detail_scores, text_comment, status, created_at
+                SELECT overall_score, detailed_scores, comments as text_comment, status, created_at
                 FROM evaluations 
                 WHERE booking_session_id = ? AND evaluator_type = 'merchant'
             `).get(order.booking_session_id);
@@ -785,13 +785,13 @@ class ApiService {
                 merchant_evaluation_status: this.getMerchantEvaluationStatus(order.booking_session_id),
                 user_evaluation: userEvaluation ? {
                     overall_score: userEvaluation.overall_score,
-                    scores: userEvaluation.detail_scores ? JSON.parse(userEvaluation.detail_scores) : {},
+                    scores: userEvaluation.detailed_scores ? JSON.parse(userEvaluation.detailed_scores) : {},
                     comments: userEvaluation.text_comment,
                     created_at: formatTime(userEvaluation.created_at)
                 } : null,
                 merchant_evaluation: merchantEvaluation ? {
                     overall_score: merchantEvaluation.overall_score,
-                    scores: merchantEvaluation.detail_scores ? JSON.parse(merchantEvaluation.detail_scores) : {},
+                    scores: merchantEvaluation.detailed_scores ? JSON.parse(merchantEvaluation.detailed_scores) : {},
                     comments: merchantEvaluation.text_comment,
                     created_at: formatTime(merchantEvaluation.created_at)
                 } : null

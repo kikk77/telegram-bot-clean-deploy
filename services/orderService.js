@@ -159,8 +159,8 @@ class OrderService {
         try {
             return dbOperations.db.prepare(`
                 SELECT o.*, r.name as region_name,
-                       ue.overall_score as user_overall_score, ue.detail_scores as user_detail_scores, ue.text_comment as user_comment,
-                       me.overall_score as merchant_overall_score, me.detail_scores as merchant_detail_scores, me.text_comment as merchant_comment
+                       ue.overall_score as user_overall_score, ue.detailed_scores as user_detail_scores, ue.comments as user_comment,
+                       me.overall_score as merchant_overall_score, me.detailed_scores as merchant_detail_scores, me.comments as merchant_comment
                 FROM orders o
                 LEFT JOIN regions r ON o.region_id = r.id
                 LEFT JOIN evaluations ue ON o.id = ue.order_id AND ue.evaluator_type = 'user'

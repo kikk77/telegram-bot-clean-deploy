@@ -289,9 +289,9 @@ class EvaluationService {
     calculateDetailAverages(targetId, evaluatorType) {
         try {
             const evaluations = dbOperations.db.prepare(`
-                SELECT detail_scores 
+                SELECT detailed_scores 
                 FROM evaluations 
-                WHERE target_id = ? AND evaluator_type = ? AND status = 'completed' AND detail_scores IS NOT NULL
+                WHERE target_id = ? AND evaluator_type = ? AND status = 'completed' AND detailed_scores IS NOT NULL
             `).all(targetId, evaluatorType);
             
             const totals = {};
@@ -299,7 +299,7 @@ class EvaluationService {
             
             evaluations.forEach(evaluation => {
                 try {
-                    const scores = JSON.parse(evaluation.detail_scores);
+                    const scores = JSON.parse(evaluation.detailed_scores);
                     Object.entries(scores).forEach(([dimension, score]) => {
                         if (typeof score === 'number' && score >= 1 && score <= 10) {
                             totals[dimension] = (totals[dimension] || 0) + score;

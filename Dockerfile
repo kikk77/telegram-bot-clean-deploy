@@ -16,11 +16,19 @@ RUN npm ci --only=production
 # 复制项目文件
 COPY . .
 
-# 创建数据目录
-RUN mkdir -p data
+# 创建数据目录并设置权限
+RUN mkdir -p data && chown -R node:node /app
 
-# 设置权限
-RUN chown -R node:node /app
+# 创建启动脚本来处理Volume权限问题
+RUN echo '#!/bin/sh' > /app/fix-permissions.sh && \
+    echo 'if [ -d "/app/data" ] && [ ! -w "/app/data" ]; then' >> /app/fix-permissions.sh && \
+    echo '  echo "🔧 修复数据目录权限..."' >> /app/fix-permissions.sh && \
+    echo '  chmod 755 /app/data 2>/dev/null || true' >> /app/fix-permissions.sh && \
+    echo '  chown node:node /app/data 2>/dev/null || true' >> /app/fix-permissions.sh && \
+    echo 'fi' >> /app/fix-permissions.sh && \
+    echo 'exec "$@"' >> /app/fix-permissions.sh && \
+    chmod +x /app/fix-permissions.sh
+
 USER node
 
 # 暴露端口
@@ -30,5 +38,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
 
-# 启动应用
+# 使用权限修复脚本启动应用
+ENTRYPOINT ["/app/fix-permissions.sh"]
 CMD ["npm", "start"] 

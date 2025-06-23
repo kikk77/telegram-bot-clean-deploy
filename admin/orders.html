@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="styles/common.css">
     <link rel="stylesheet" href="styles/orders.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -15,13 +14,62 @@
             <h1>📊 订单管理系统</h1>
             <div class="header-actions">
                 <button class="btn btn-secondary" onclick="refreshData()">🔄 刷新数据</button>
-                <button class="btn btn-primary" onclick="exportData()">📥 导出数据</button>
+                <button class="btn btn-primary" onclick="window.ordersManager && window.ordersManager.exportData ? window.ordersManager.exportData() : alert('导出功能暂未实现')">📥 导出数据</button>
             </div>
         </header>
 
+        <!-- 系统基础统计 -->
+        <section class="system-stats">
+            <h2>🔧 系统基础统计</h2>
+            <div class="basic-stats-cards">
+                <div class="basic-stat-card">
+                    <div class="stat-icon">🏪</div>
+                    <div class="stat-content">
+                        <div class="stat-title">商家数量</div>
+                        <div class="stat-value" id="totalMerchants">-</div>
+                    </div>
+                </div>
+                
+                <div class="basic-stat-card">
+                    <div class="stat-icon">🔑</div>
+                    <div class="stat-content">
+                        <div class="stat-title">绑定码总数</div>
+                        <div class="stat-value" id="totalBindCodes">-</div>
+                    </div>
+                </div>
+                
+                <div class="basic-stat-card">
+                    <div class="stat-icon">📍</div>
+                    <div class="stat-content">
+                        <div class="stat-title">地区数量</div>
+                        <div class="stat-value" id="totalRegions">-</div>
+                    </div>
+                </div>
+                
+                <div class="basic-stat-card">
+                    <div class="stat-icon">👆</div>
+                    <div class="stat-content">
+                        <div class="stat-title">总点击数</div>
+                        <div class="stat-value" id="totalClicks">-</div>
+                        <div class="stat-detail">
+                            <span>用户点击"出击"次数</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="basic-stat-card">
+                    <div class="stat-icon">📝</div>
+                    <div class="stat-content">
+                        <div class="stat-title">消息模板</div>
+                        <div class="stat-value" id="totalTemplates">-</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- 数据看板 -->
         <section class="dashboard">
-            <h2>📈 数据看板</h2>
+            <h2>📈 订单数据看板</h2>
             
             <!-- 筛选器 -->
             <div class="filters">
@@ -179,6 +227,8 @@
             </div>
         </section>
 
+
+
         <!-- 订单列表 -->
         <section class="orders-section">
             <div class="section-header">
@@ -327,35 +377,202 @@
 
         <!-- 排名系统 -->
         <section class="rankings-section">
-            <h2>🏆 排名系统</h2>
-            
-            <div class="rankings-tabs">
-                <button class="tab-btn active" onclick="showRankingTab('merchant')">商家排名</button>
-                <button class="tab-btn" onclick="showRankingTab('user')">用户排名</button>
+            <div class="section-header">
+                <h2>🏆 综合排名系统</h2>
+                <div class="section-actions">
+                    <button class="btn btn-secondary" onclick="window.rankingManager.refreshRankings()">
+                        🔄 刷新排名
+                    </button>
+                    <button class="btn btn-primary" onclick="window.rankingManager.refreshRankings()">
+                        🔄 刷新排名
+                    </button>
+                </div>
             </div>
             
+            <div class="rankings-tabs">
+                <button class="tab-btn active" onclick="window.rankingManager.showRankingTab('merchant')" data-tab="merchant">
+                    👩‍🏫 商家排名
+                </button>
+                <button class="tab-btn" onclick="window.rankingManager.showRankingTab('user')" data-tab="user">
+                    👤 用户排名
+                </button>
+            </div>
+            
+            <!-- 商家排名 -->
             <div id="merchantRankings" class="ranking-content">
-                <div class="ranking-filters">
-                    <select id="merchantRankingRegion" onchange="updateMerchantRankings()">
-                        <option value="">全部地区</option>
-                    </select>
-                    <select id="merchantRankingPrice" onchange="updateMerchantRankings()">
-                        <option value="">全部价格</option>
-                        <option value="0-500">0-500</option>
-                        <option value="500-1000">500-1000</option>
-                        <option value="1000-2000">1000-2000</option>
-                        <option value="2000+">2000+</option>
-                    </select>
+                <div class="ranking-controls">
+                    <div class="ranking-filters">
+                        <div class="filter-group">
+                            <label>📊 排名维度:</label>
+                            <select id="merchantRankingType" onchange="window.rankingManager.updateMerchantRankings()">
+                                <option value="dailyRevenue">💰 当日收入排名</option>
+                                <option value="dailyOrders">📋 当日订单量排名</option>
+                                <option value="dailyConsultations">📞 当日咨询量排名</option>
+                                <option value="monthlyOrders">📅 月度成交量排名</option>
+                                <option value="avgRating">⭐ 平均评分排名</option>
+                                <option value="completionRate">✅ 完成率排名</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label>🗺️ 地区筛选:</label>
+                            <select id="merchantRankingRegion" onchange="window.rankingManager.updateMerchantRankings()">
+                                <option value="">全部地区</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label>📅 时间范围:</label>
+                            <select id="merchantRankingPeriod" onchange="window.rankingManager.updateMerchantRankings()">
+                                <option value="today">今日</option>
+                                <option value="week">本周</option>
+                                <option value="month" selected>本月</option>
+                                <option value="quarter">本季度</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="ranking-stats">
+                        <div class="stat-item">
+                            <span class="stat-value" id="merchantTotalCount">-</span>
+                            <span class="stat-label">活跃商家</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="merchantTopRevenue">-</span>
+                            <span class="stat-label">最高收入</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="merchantAvgRating">-</span>
+                            <span class="stat-label">平均评分</span>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="ranking-list" id="merchantRankingList">
-                    <!-- 动态加载商家排名 -->
+                    <div class="loading-text">加载排名数据中...</div>
                 </div>
             </div>
             
+            <!-- 用户排名 -->
             <div id="userRankings" class="ranking-content" style="display: none;">
+                <div class="ranking-controls">
+                    <div class="ranking-filters">
+                        <div class="filter-group">
+                            <label>📊 排名维度:</label>
+                            <select id="userRankingType" onchange="window.rankingManager.updateUserRankings()">
+                                <option value="orderCount">📋 消费次数排名</option>
+                                <option value="totalSpent">💰 消费金额排名</option>
+                                <option value="avgRating">⭐ 用户素质排名</option>
+                                <option value="evaluationRate">📝 评价完成率排名</option>
+                                <option value="repeatRate">🔄 回头率排名</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label>📅 时间范围:</label>
+                            <select id="userRankingPeriod" onchange="window.rankingManager.updateUserRankings()">
+                                <option value="month" selected>本月</option>
+                                <option value="quarter">本季度</option>
+                                <option value="year">本年</option>
+                                <option value="all">全部时间</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label>🎯 最小订单数:</label>
+                            <select id="userMinOrders" onchange="window.rankingManager.updateUserRankings()">
+                                <option value="1">1单以上</option>
+                                <option value="3" selected>3单以上</option>
+                                <option value="5">5单以上</option>
+                                <option value="10">10单以上</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="ranking-stats">
+                        <div class="stat-item">
+                            <span class="stat-value" id="userTotalCount">-</span>
+                            <span class="stat-label">活跃用户</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="userTopSpent">-</span>
+                            <span class="stat-label">最高消费</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="userAvgRating">-</span>
+                            <span class="stat-label">平均素质</span>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="ranking-list" id="userRankingList">
-                    <!-- 动态加载用户排名 -->
+                    <div class="loading-text">加载排名数据中...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 商家报告系统 -->
+        <section class="merchant-reports-section">
+            <div class="section-header">
+                <h2>📊 商家报告系统</h2>
+                <div class="section-actions">
+                    <button class="btn btn-primary" onclick="window.merchantReports.showReportModal()">
+                        📋 生成商家报告
+                    </button>
+                    <button class="btn btn-secondary" onclick="window.merchantReports.showRankingModal()">
+                        🏆 查看月度排名
+                    </button>
+                </div>
+            </div>
+            
+            <div class="merchant-reports-info">
+                <div class="info-grid">
+                    <div class="info-card">
+                        <div class="info-icon">📊</div>
+                        <div class="info-content">
+                            <h3>全面数据统计</h3>
+                            <p>包含订单量、课程分析、收入统计、评价数据等6大维度分析</p>
+                        </div>
+                    </div>
+                    
+                    <div class="info-card">
+                        <div class="info-icon">🔄</div>
+                        <div class="info-content">
+                            <h3>智能回头客分析</h3>
+                            <p>自动识别重复消费用户，提供详细的客户忠诚度分析</p>
+                        </div>
+                    </div>
+                    
+                    <div class="info-card">
+                        <div class="info-icon">🏆</div>
+                        <div class="info-content">
+                            <h3>实时排名系统</h3>
+                            <p>基于成交量的月度排名，每日自动更新，减轻服务器负担</p>
+                        </div>
+                    </div>
+                    
+                    <div class="info-card">
+                        <div class="info-icon">📱</div>
+                        <div class="info-content">
+                            <h3>一键发送报告</h3>
+                            <p>管理员可选择报告内容，直接通过Bot发送给对应商家</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="reports-stats">
+                    <div class="stat-item">
+                        <div class="stat-number" id="totalMerchants">-</div>
+                        <div class="stat-label">活跃商家</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="reportsGenerated">-</div>
+                        <div class="stat-label">本月报告</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="rankingUpdated">-</div>
+                        <div class="stat-label">排名更新</div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -414,13 +631,238 @@
         </div>
     </div>
 
+    <!-- 商家报告生成模态框 -->
+    <div id="merchantReportModal" class="modal">
+        <div class="modal-content large-modal">
+            <div class="modal-header">
+                <h3>📋 生成商家月度报告</h3>
+                <span class="close" onclick="window.merchantReports.closeReportModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="report-form-container">
+                    <div class="report-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="reportMerchantSelect">
+                                    <i class="icon">👩‍🏫</i>
+                                    选择商家:
+                                </label>
+                                <select id="reportMerchantSelect" onchange="window.merchantReports.onMerchantChange()">
+                                    <option value="">请选择商家...</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>
+                                    <i class="icon">📅</i>
+                                    报告年月:
+                                </label>
+                                <div class="date-inputs">
+                                    <select id="reportYear">
+                                        <!-- 动态生成年份选项 -->
+                                    </select>
+                                    <select id="reportMonth">
+                                        <option value="1">1月</option>
+                                        <option value="2">2月</option>
+                                        <option value="3">3月</option>
+                                        <option value="4">4月</option>
+                                        <option value="5">5月</option>
+                                        <option value="6">6月</option>
+                                        <option value="7">7月</option>
+                                        <option value="8">8月</option>
+                                        <option value="9">9月</option>
+                                        <option value="10">10月</option>
+                                        <option value="11">11月</option>
+                                        <option value="12">12月</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group full-width">
+                            <label>
+                                <i class="icon">📝</i>
+                                报告内容选择:
+                            </label>
+                            <div class="report-sections-grid">
+                                <label class="section-option">
+                                    <input type="checkbox" name="reportSections" value="orderStats" checked>
+                                    <div class="option-content">
+                                        <div class="option-header">
+                                            <span class="section-icon">📊</span>
+                                            <span class="section-text">订单统计</span>
+                                        </div>
+                                        <small>总咨询量、确认预约、实际成交等</small>
+                                    </div>
+                                </label>
+                                
+                                <label class="section-option">
+                                    <input type="checkbox" name="reportSections" value="courseAnalysis" checked>
+                                    <div class="option-content">
+                                        <div class="option-header">
+                                            <span class="section-icon">📚</span>
+                                            <span class="section-text">课程分析</span>
+                                        </div>
+                                        <small>p课程、pp课程占比分析</small>
+                                    </div>
+                                </label>
+                                
+                                <label class="section-option">
+                                    <input type="checkbox" name="reportSections" value="priceAnalysis" checked>
+                                    <div class="option-content">
+                                        <div class="option-header">
+                                            <span class="section-icon">💰</span>
+                                            <span class="section-text">收入分析</span>
+                                        </div>
+                                        <small>总收入、平均客单价分析</small>
+                                    </div>
+                                </label>
+                                
+                                <label class="section-option">
+                                    <input type="checkbox" name="reportSections" value="evaluationStats" checked>
+                                    <div class="option-content">
+                                        <div class="option-header">
+                                            <span class="section-icon">⭐</span>
+                                            <span class="section-text">评价统计</span>
+                                        </div>
+                                        <small>客户评价、商家评价统计</small>
+                                    </div>
+                                </label>
+                                
+                                <label class="section-option">
+                                    <input type="checkbox" name="reportSections" value="ranking" checked>
+                                    <div class="option-content">
+                                        <div class="option-header">
+                                            <span class="section-icon">🏆</span>
+                                            <span class="section-text">排名情况</span>
+                                        </div>
+                                        <small>本月成交排名及超越比例</small>
+                                    </div>
+                                </label>
+                                
+                                <label class="section-option">
+                                    <input type="checkbox" name="reportSections" value="returnCustomers" checked>
+                                    <div class="option-content">
+                                        <div class="option-header">
+                                            <span class="section-icon">🔄</span>
+                                            <span class="section-text">回头客分析</span>
+                                        </div>
+                                        <small>重复消费用户详细分析</small>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button class="btn btn-secondary" onclick="window.merchantReports.generatePreview()">
+                                <i class="btn-icon">👀</i>
+                                预览报告
+                            </button>
+                            <button class="btn btn-primary" onclick="window.merchantReports.sendReport()">
+                                <i class="btn-icon">📱</i>
+                                发送给商家
+                            </button>
+                            <button class="btn btn-success" onclick="console.log('下载按钮被点击'); if(window.merchantReports) { console.log('merchantReports存在'); window.merchantReports.generateAndDownload(); } else { console.error('merchantReports不存在'); alert('系统未初始化，请刷新页面重试'); }">
+                                <i class="btn-icon">📥</i>
+                                生成下载
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="reportPreview" class="report-preview" style="display: none;">
+                        <div class="preview-header">
+                            <h4>📋 报告预览</h4>
+                            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('reportPreview').style.display='none'">
+                                ✕ 关闭预览
+                            </button>
+                        </div>
+                        <div class="preview-content" id="reportPreviewContent">
+                            <!-- 动态加载报告预览 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 综合排名查看模态框 -->
+    <div id="merchantRankingModal" class="modal">
+        <div class="modal-content ranking-modal-content">
+            <div class="modal-header">
+                <h3>🏆 综合排名系统</h3>
+                <span class="close" onclick="window.merchantReports.closeRankingModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="ranking-controls">
+                    <div class="form-group">
+                        <label>📊 排名类型:</label>
+                        <div class="ranking-type-selector">
+                            <label class="radio-option">
+                                <input type="radio" name="rankingType" value="merchant" checked>
+                                <span class="radio-text">🏪 商家排名</span>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="rankingType" value="user">
+                                <span class="radio-text">👤 学员排名</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>查看年月:</label>
+                        <div class="date-inputs">
+                            <select id="rankingYear">
+                                <!-- 动态生成年份选项 -->
+                            </select>
+                            <select id="rankingMonth">
+                                <option value="1">1月</option>
+                                <option value="2">2月</option>
+                                <option value="3">3月</option>
+                                <option value="4">4月</option>
+                                <option value="5">5月</option>
+                                <option value="6">6月</option>
+                                <option value="7">7月</option>
+                                <option value="8">8月</option>
+                                <option value="9">9月</option>
+                                <option value="10">10月</option>
+                                <option value="11">11月</option>
+                                <option value="12">12月</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button class="btn btn-primary" onclick="window.rankingManager.loadRankings()">🔍 查看排名</button>
+                        <button class="btn btn-secondary" onclick="window.rankingManager.refreshRankings()">🔄 刷新排名</button>
+                    </div>
+                </div>
+                
+                <!-- 商家排名页面 -->
+                <div id="merchantRankingTab" class="ranking-tab">
+                    <div id="merchantRankingResults" class="ranking-results">
+                        <!-- 动态加载商家排名结果 -->
+                    </div>
+                </div>
+                
+                <!-- 用户排名页面 -->
+                <div id="userRankingTab" class="ranking-tab" style="display: none;">
+                    <div id="userRankingResults" class="ranking-results">
+                        <!-- 动态加载用户排名结果 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 加载中指示器 -->
     <div id="loading" class="loading" style="display: none;">
         <div class="loading-spinner"></div>
         <div class="loading-text">加载中...</div>
     </div>
 
-    <script src="scripts/common.js"></script>
-    <script src="scripts/orders.js"></script>
+    <script src="scripts/common.js?v=20250623u"></script>
+    <script src="scripts/orders.js?v=20250623u"></script>
+            <script src="scripts/rankingManager.js?v=20250623u"></script>
+    <script src="scripts/merchantReports.js?v=20250623u"></script>
 </body>
 </html> 

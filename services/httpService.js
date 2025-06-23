@@ -870,8 +870,11 @@ async function processApiRequest(pathname, method, data) {
     if (pathname === '/api/stats' && method === 'GET') {
         const stats = dbOperations.getInteractionStats();
         const cacheData = getCacheData();
-        const buttonStats = dbOperations.getButtons();
-        const totalClicks = buttonStats.reduce((sum, btn) => sum + btn.click_count, 0);
+        
+        // 获取真实的点击统计 - 只统计用户点击"出击"按钮的次数
+        const db = require('../config/database').getInstance().db;
+        const attackClicks = db.prepare('SELECT COUNT(*) as count FROM interactions WHERE action_type = ?').get('attack_click').count;
+        const totalClicks = attackClicks; // 总点击数就是出击点击数
         
         // 获取实际数据库计数
         const bindCodes = dbOperations.getAllBindCodes();
@@ -888,6 +891,7 @@ async function processApiRequest(pathname, method, data) {
                 totalBindCodes: bindCodes.length,
                 totalRegions: regions.length,
                 totalClicks: totalClicks,
+                attackClicks: attackClicks,
                 ...stats
             }
         };
@@ -1303,6 +1307,8 @@ async function processApiRequest(pathname, method, data) {
             'GET /api/bind-codes',
             'GET /api/regions',
             'GET /api/merchants',
+            'GET /api/rankings/merchants',
+            'GET /api/rankings/users',
             'GET /api/charts/*',
             'GET /api/bot-username'
         ]

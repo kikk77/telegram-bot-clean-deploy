@@ -74,13 +74,21 @@ class DatabaseManager {
         try {
             const existingPassword = this.db.prepare('SELECT value FROM db_meta WHERE key = ?').get('admin_password');
             if (!existingPassword) {
-                // 设置默认管理员密码
-                const defaultPassword = process.env.ADMIN_PASSWORD || '9229';
-                this.db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('admin_password', defaultPassword);
-                console.log('管理员密码已初始化');
+                // 从环境变量获取管理员密码
+                const adminPassword = process.env.ADMIN_PASSWORD;
+                if (!adminPassword || adminPassword === 'your_admin_password_here') {
+                    console.warn('⚠️ 警告：未设置管理员密码环境变量 ADMIN_PASSWORD');
+                    console.warn('🔧 请设置环境变量或在Railway Variables中配置 ADMIN_PASSWORD');
+                    console.warn('💡 本地开发：在.env文件中设置 ADMIN_PASSWORD=你的密码');
+                    console.warn('☁️ Railway部署：在Variables页面设置 ADMIN_PASSWORD');
+                    throw new Error('管理员密码未配置，请设置 ADMIN_PASSWORD 环境变量');
+                }
+                this.db.prepare('INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)').run('admin_password', adminPassword);
+                console.log('✅ 管理员密码已从环境变量初始化');
             }
         } catch (error) {
-            console.error('初始化管理员密码失败:', error);
+            console.error('❌ 初始化管理员密码失败:', error.message);
+            throw error;
         }
     }
 
@@ -464,10 +472,13 @@ class DatabaseManager {
     getAdminPassword() {
         try {
             const result = this.db.prepare('SELECT value FROM db_meta WHERE key = ?').get('admin_password');
-            return result ? result.value : '9229'; // 默认密码
+            if (!result || !result.value) {
+                throw new Error('管理员密码未设置，请配置 ADMIN_PASSWORD 环境变量');
+            }
+            return result.value;
         } catch (error) {
-            console.error('获取管理员密码失败:', error);
-            return '9229';
+            console.error('获取管理员密码失败:', error.message);
+            throw error;
         }
     }
 

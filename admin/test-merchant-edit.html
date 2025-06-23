@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商家编辑功能测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        .result { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+        button { margin: 5px; padding: 10px 15px; }
+    </style>
+</head>
+<body>
+    <h1>🔧 商家编辑功能诊断</h1>
+    
+    <div class="test-section">
+        <h2>1. 管理员密码验证测试</h2>
+        <button onclick="testPasswordVerification()">测试密码验证API</button>
+        <div id="passwordResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>2. 商家数据获取测试</h2>
+        <button onclick="testGetMerchants()">获取商家列表</button>
+        <div id="merchantsResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>3. 商家更新API测试</h2>
+        <button onclick="testUpdateMerchant()">测试商家更新</button>
+        <div id="updateResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>4. 环境配置检查</h2>
+        <button onclick="testEnvironment()">检查环境配置</button>
+        <div id="envResult" class="result"></div>
+    </div>
+
+    <script>
+        // 测试密码验证
+        async function testPasswordVerification() {
+            const resultDiv = document.getElementById('passwordResult');
+            resultDiv.innerHTML = '正在测试密码验证...';
+            
+            try {
+                // 提示用户输入密码进行测试
+                const testPassword = prompt('请输入管理员密码进行测试:');
+                if (!testPassword) {
+                    resultDiv.innerHTML = '<div class="error">❌ 测试已取消</div>';
+                    return;
+                }
+                
+                const response = await fetch('/api/admin/verify-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: testPassword })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.valid) {
+                    resultDiv.innerHTML = '<div class="success">✅ 密码验证成功！管理员密码有效</div>';
+                } else {
+                    resultDiv.innerHTML = '<div class="error">❌ 密码验证失败：密码错误或系统配置问题</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">❌ 请求失败：' + error.message + '</div>';
+            }
+        }
+        
+        // 测试获取商家列表
+        async function testGetMerchants() {
+            const resultDiv = document.getElementById('merchantsResult');
+            resultDiv.innerHTML = '正在获取商家列表...';
+            
+            try {
+                const response = await fetch('/api/merchants');
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.innerHTML = `<div class="success">✅ 成功获取 ${result.data.length} 个商家</div>
+                        <pre>${JSON.stringify(result.data, null, 2)}</pre>`;
+                } else {
+                    resultDiv.innerHTML = '<div class="error">❌ 获取失败：' + JSON.stringify(result) + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">❌ 请求失败：' + error.message + '</div>';
+            }
+        }
+        
+        // 测试商家更新
+        async function testUpdateMerchant() {
+            const resultDiv = document.getElementById('updateResult');
+            resultDiv.innerHTML = '正在测试商家更新...';
+            
+            try {
+                // 先获取一个商家ID
+                const merchantsResponse = await fetch('/api/merchants');
+                const merchantsResult = await merchantsResponse.json();
+                
+                if (!merchantsResult.success || merchantsResult.data.length === 0) {
+                    resultDiv.innerHTML = '<div class="error">❌ 没有可用的商家进行测试</div>';
+                    return;
+                }
+                
+                const testMerchant = merchantsResult.data[0];
+                const testData = {
+                    teacherName: testMerchant.teacher_name + '_测试',
+                    regionId: testMerchant.region_id,
+                    contact: testMerchant.contact || '@test',
+                    bindCode: testMerchant.bind_code,
+                    advantages: '测试优点',
+                    disadvantages: '测试缺点',
+                    price1: 500,
+                    price2: 800,
+                    skillWash: '测试技能1',
+                    skillBlow: '测试技能2',
+                    skillDo: '测试技能3',
+                    skillKiss: '测试技能4'
+                };
+                
+                const updateResponse = await fetch(`/api/merchants/${testMerchant.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(testData)
+                });
+                
+                const updateResult = await updateResponse.json();
+                
+                if (updateResult.success) {
+                    resultDiv.innerHTML = `<div class="success">✅ 商家更新成功！</div>
+                        <div>测试商家ID: ${testMerchant.id}</div>
+                        <div>更新数据: <pre>${JSON.stringify(testData, null, 2)}</pre></div>`;
+                } else {
+                    resultDiv.innerHTML = '<div class="error">❌ 更新失败：' + JSON.stringify(updateResult) + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">❌ 请求失败：' + error.message + '</div>';
+            }
+        }
+        
+        // 测试环境配置
+        async function testEnvironment() {
+            const resultDiv = document.getElementById('envResult');
+            resultDiv.innerHTML = '正在检查环境配置...';
+            
+            try {
+                const response = await fetch('/api/stats');
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.innerHTML = `<div class="success">✅ 环境配置正常</div>
+                        <div>系统统计: <pre>${JSON.stringify(result.data, null, 2)}</pre></div>`;
+                } else {
+                    resultDiv.innerHTML = '<div class="error">❌ 环境检查失败：' + JSON.stringify(result) + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">❌ 请求失败：' + error.message + '</div>';
+            }
+        }
+        
+        // 页面加载时自动运行所有测试
+        window.onload = function() {
+            console.log('🔧 开始自动诊断...');
+            testPasswordVerification();
+            setTimeout(testGetMerchants, 1000);
+            setTimeout(testEnvironment, 2000);
+        };
+    </script>
+</body>
+</html> 

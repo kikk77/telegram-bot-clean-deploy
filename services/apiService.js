@@ -3,12 +3,14 @@ const evaluationService = require('./evaluationService');
 const dbOperations = require('../models/dbOperations');
 const { db } = require('../config/database');
 const DataExportService = require('./dataExportService');
+const MerchantReportService = require('./merchantReportService');
 // statsService将在需要时延迟加载
 
 class ApiService {
     constructor() {
         this.routes = new Map();
         this.dataExportService = new DataExportService();
+        this.merchantReportService = new MerchantReportService();
         this.setupRoutes();
         
         // 请求缓存
@@ -26,7 +28,6 @@ class ApiService {
         }, 60 * 1000); // 每分钟清理一次
         
         // 延迟加载服务
-        this.dataExportService = null;
         this.dataImportService = null;
     }
 
@@ -83,6 +84,17 @@ class ApiService {
         this.routes.set('POST /api/bind-codes', this.createBindCode.bind(this));
         this.routes.set('DELETE /api/bind-codes/:id', this.deleteBindCode.bind(this));
         this.routes.set('DELETE /api/bind-codes/:id/force', this.forceDeleteBindCode.bind(this));
+
+        // 商家报告接口
+        this.routes.set('GET /api/merchant-reports/templates', this.getMerchantReportTemplates.bind(this));
+        this.routes.set('POST /api/merchant-reports/generate', this.generateMerchantReport.bind(this));
+        this.routes.set('POST /api/merchant-reports/send', this.sendMerchantReport.bind(this));
+        this.routes.set('GET /api/merchant-reports/ranking/:year/:month', this.getMerchantMonthlyRanking.bind(this));
+        this.routes.set('POST /api/merchant-reports/refresh-ranking', this.refreshMerchantRanking.bind(this));
+        
+        // 用户排名相关路由
+        this.routes.set('GET /api/user-rankings/:year/:month', this.getUserMonthlyRanking.bind(this));
+        this.routes.set('POST /api/user-rankings/refresh', this.refreshUserRanking.bind(this));
 
         
         console.log('API路由设置完成，共', this.routes.size, '个路由');
@@ -1039,16 +1051,22 @@ class ApiService {
     // 获取商家排名
     async getMerchantRankings({ query }) {
         try {
+            console.log('getMerchantRankings 查询参数:', query);
+            
             const filters = this.parseFilters(query);
-            let whereConditions = ['mr.total_evaluations > 0'];
+            console.log('解析后的筛选条件:', filters);
+            
+            let whereConditions = ['1=1'];
             let params = [];
 
-            if (filters.regionId) {
+            // 构建基础查询条件
+            if (filters.regionId && filters.regionId !== 'all') {
                 whereConditions.push('m.region_id = ?');
                 params.push(filters.regionId);
+                console.log('添加地区筛选:', filters.regionId);
             }
 
-            if (filters.priceRange) {
+            if (filters.priceRange && filters.priceRange !== 'all') {
                 whereConditions.push(`
                     CASE 
                         WHEN m.price1 IS NOT NULL AND m.price2 IS NOT NULL THEN 
@@ -1069,49 +1087,72 @@ class ApiService {
                     END = ?
                 `);
                 params.push(filters.priceRange);
+                console.log('添加价格筛选:', filters.priceRange);
+            }
+
+            // 添加时间筛选条件（处理Unix时间戳）
+            if (filters.dateFrom) {
+                const fromTimestamp = Math.floor(new Date(filters.dateFrom + 'T00:00:00').getTime() / 1000);
+                whereConditions.push('(o.created_at IS NULL OR o.created_at >= ?)');
+                params.push(fromTimestamp);
+                console.log('添加开始时间筛选:', filters.dateFrom, '时间戳:', fromTimestamp);
+            }
+            if (filters.dateTo) {
+                const toTimestamp = Math.floor(new Date(filters.dateTo + 'T23:59:59').getTime() / 1000);
+                whereConditions.push('(o.created_at IS NULL OR o.created_at <= ?)');
+                params.push(toTimestamp);
+                console.log('添加结束时间筛选:', filters.dateTo, '时间戳:', toTimestamp);
             }
 
             const whereClause = whereConditions.join(' AND ');
+            console.log('最终WHERE子句:', whereClause);
+            console.log('查询参数:', params);
 
-            const rankings = db.prepare(`
+            const sql = `
                 SELECT 
                     m.id,
                     m.teacher_name,
                     m.username,
                     r.name as region_name,
-                    mr.avg_overall_score,
-                    mr.total_evaluations,
-                    mr.avg_length_score,
-                    mr.avg_hardness_score,
-                    mr.avg_duration_score,
-                    mr.avg_technique_score,
+                    COUNT(DISTINCT o.id) as totalOrders,
+                    COUNT(DISTINCT CASE WHEN bs.user_course_status = 'completed' THEN o.id END) as completedOrders,
+                    AVG(CASE WHEN e.overall_score IS NOT NULL THEN e.overall_score END) as avgRating,
+                    COUNT(DISTINCT e.id) as totalEvaluations,
+                    SUM(CASE WHEN bs.user_course_status = 'completed' AND o.price_range IS NOT NULL 
+                        THEN CAST(o.price_range AS REAL) ELSE 0 END) as totalRevenue,
                     CASE 
                         WHEN m.price1 IS NOT NULL AND m.price2 IS NOT NULL THEN 
-                            CASE 
-                                WHEN (m.price1 + m.price2) / 2 <= 500 THEN '0-500'
-                                WHEN (m.price1 + m.price2) / 2 <= 1000 THEN '500-1000'
-                                WHEN (m.price1 + m.price2) / 2 <= 2000 THEN '1000-2000'
-                                ELSE '2000+'
-                            END
-                        WHEN m.price1 IS NOT NULL THEN
-                            CASE 
-                                WHEN m.price1 <= 500 THEN '0-500'
-                                WHEN m.price1 <= 1000 THEN '500-1000'
-                                WHEN m.price1 <= 2000 THEN '1000-2000'
-                                ELSE '2000+'
-                            END
-                        ELSE '未设置'
-                    END as price_range
+                            ROUND((m.price1 + m.price2) / 2)
+                        WHEN m.price1 IS NOT NULL THEN m.price1
+                        WHEN m.price2 IS NOT NULL THEN m.price2
+                        ELSE 0
+                    END as avgPrice,
+                    CASE 
+                        WHEN COUNT(o.id) > 0 
+                        THEN ROUND(COUNT(CASE WHEN bs.user_course_status = 'completed' THEN 1 END) * 100.0 / COUNT(o.id), 1)
+                        ELSE 0 
+                    END as completionRate
                 FROM merchants m
-                LEFT JOIN merchant_ratings mr ON m.id = mr.merchant_id
                 LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN orders o ON m.id = o.merchant_id
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                LEFT JOIN evaluations e ON bs.id = e.booking_session_id AND e.evaluator_type = 'user'
                 WHERE ${whereClause}
-                ORDER BY mr.avg_overall_score DESC, mr.total_evaluations DESC
+                GROUP BY m.id, m.teacher_name, m.username, r.name
+                ORDER BY completedOrders DESC, totalOrders DESC, avgRating DESC
                 LIMIT 50
-            `).all(...params);
+            `;
+            
+            console.log('执行SQL查询:', sql);
+            
+            const rankings = db.prepare(sql).all(...params);
+            
+            console.log('查询结果数量:', rankings.length);
+            console.log('前3个结果:', rankings.slice(0, 3));
 
             return { data: rankings };
         } catch (error) {
+            console.error('getMerchantRankings 错误:', error);
             throw new Error('获取商家排名失败: ' + error.message);
         }
     }
@@ -1119,22 +1160,61 @@ class ApiService {
     // 获取用户排名
     async getUserRankings({ query }) {
         try {
+            const filters = this.parseFilters(query);
+            let whereConditions = ['1=1'];
+            let params = [];
+
+            // 添加时间筛选条件（处理Unix时间戳）
+            if (filters.dateFrom) {
+                const fromTimestamp = Math.floor(new Date(filters.dateFrom + 'T00:00:00').getTime() / 1000);
+                whereConditions.push('o.created_at >= ?');
+                params.push(fromTimestamp);
+            }
+            if (filters.dateTo) {
+                const toTimestamp = Math.floor(new Date(filters.dateTo + 'T23:59:59').getTime() / 1000);
+                whereConditions.push('o.created_at <= ?');
+                params.push(toTimestamp);
+            }
+
+            const whereClause = whereConditions.join(' AND ');
+
             const rankings = db.prepare(`
                 SELECT 
-                    u.id,
-                    u.name,
-                    u.username,
-                    ur.avg_overall_score,
-                    ur.total_evaluations,
-                    COUNT(o.id) as total_orders
-                FROM users u
-                LEFT JOIN user_ratings ur ON u.id = ur.user_id
-                LEFT JOIN orders o ON u.id = o.user_id
-                WHERE ur.total_evaluations > 0
-                GROUP BY u.id, u.name, u.username, ur.avg_overall_score, ur.total_evaluations
-                ORDER BY ur.avg_overall_score DESC, ur.total_evaluations DESC
+                    o.user_id,
+                    o.user_first_name,
+                    o.user_last_name,
+                    o.user_username,
+                    COUNT(DISTINCT o.id) as totalOrders,
+                    COUNT(DISTINCT CASE WHEN bs.user_course_status = 'completed' THEN o.id END) as completedOrders,
+                    AVG(CASE WHEN e.overall_score IS NOT NULL THEN e.overall_score END) as avgRating,
+                    COUNT(DISTINCT e.id) as totalEvaluations,
+                    SUM(CASE WHEN bs.user_course_status = 'completed' AND o.price_range IS NOT NULL 
+                        THEN CAST(o.price_range AS REAL) ELSE 0 END) as totalSpent,
+                    CASE 
+                        WHEN COUNT(o.id) > 0 
+                        THEN ROUND(COUNT(CASE WHEN bs.user_course_status = 'completed' THEN 1 END) * 100.0 / COUNT(o.id), 1)
+                        ELSE 0 
+                    END as completionRate,
+                    CASE 
+                        WHEN o.user_first_name IS NOT NULL AND o.user_first_name != '未设置' 
+                        THEN CASE 
+                            WHEN o.user_last_name IS NOT NULL AND o.user_last_name != '未设置' 
+                            THEN o.user_first_name || ' ' || o.user_last_name
+                            ELSE o.user_first_name
+                        END
+                        WHEN o.user_username IS NOT NULL AND o.user_username != '未设置' 
+                        THEN '@' || o.user_username
+                        ELSE '用户' || o.user_id
+                    END as displayName
+                FROM orders o
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                LEFT JOIN evaluations e ON bs.id = e.booking_session_id AND e.evaluator_type = 'merchant'
+                WHERE ${whereClause} AND o.user_id IS NOT NULL
+                GROUP BY o.user_id, o.user_first_name, o.user_last_name, o.user_username
+                HAVING totalOrders > 0
+                ORDER BY completedOrders DESC, avgRating DESC, totalOrders DESC
                 LIMIT 50
-            `).all();
+            `).all(...params);
 
             return { data: rankings };
         } catch (error) {
@@ -1464,9 +1544,35 @@ class ApiService {
     // Dashboard需要的基础API方法
     async getBasicStats() {
         try {
-            const stats = dbOperations.getInteractionStats();
+            // 获取各种基础统计数据
+            const totalMerchants = db.prepare('SELECT COUNT(*) as count FROM merchants').get().count;
+            const totalBindCodes = db.prepare('SELECT COUNT(*) as count FROM bind_codes').get().count;
+            const totalRegions = db.prepare('SELECT COUNT(*) as count FROM regions').get().count;
+            const totalTemplates = db.prepare('SELECT COUNT(*) as count FROM message_templates').get().count;
+            
+            // 获取真实的点击统计 - 只统计用户点击"出击"按钮的次数
+            const attackClicks = db.prepare('SELECT COUNT(*) as count FROM interactions WHERE action_type = ?').get('attack_click').count;
+            const totalClicks = attackClicks; // 总点击数就是出击点击数
+            
+            console.log(`点击统计详情: 出击点击=${attackClicks}, 总点击数=${totalClicks}`);
+            
+            // 获取交互统计
+            const interactionStats = dbOperations.getInteractionStats();
+            
+            const stats = {
+                totalMerchants,
+                totalBindCodes,
+                totalRegions,
+                totalTemplates,
+                totalClicks,
+                attackClicks,
+                ...interactionStats
+            };
+            
+            console.log('基础统计数据:', stats);
             return { data: stats };
         } catch (error) {
+            console.error('获取基础统计失败:', error);
             throw new Error('获取基础统计失败: ' + error.message);
         }
     }
@@ -1798,6 +1904,361 @@ class ApiService {
         });
         
         return { ...result, fromCache: false };
+    }
+
+    // 商家报告相关方法
+
+    // 获取报告模板配置
+    async getMerchantReportTemplates() {
+        try {
+            const templates = this.merchantReportService.getReportTemplates();
+            
+            // 获取所有商家列表
+            const merchants = dbOperations.getAllMerchants()
+                .filter(m => m.status === 'active')
+                .map(m => ({
+                    id: m.id,
+                    name: m.teacher_name || m.username || `商家${m.id}`,
+                    username: m.username
+                }));
+
+            return {
+                data: {
+                    templates,
+                    merchants
+                },
+                message: '获取报告模板和商家列表成功'
+            };
+        } catch (error) {
+            console.error('获取报告模板失败:', error);
+            throw new Error('获取报告模板失败');
+        }
+    }
+
+    // 生成商家报告
+    async generateMerchantReport({ body }) {
+        try {
+            const { merchantId, year, month } = body;
+            
+            if (!merchantId || !year || !month) {
+                throw new Error('缺少必要参数：merchantId, year, month');
+            }
+
+            // 验证商家是否存在
+            const merchant = dbOperations.getMerchantById(merchantId);
+            if (!merchant) {
+                throw new Error('商家不存在');
+            }
+
+            // 生成报告
+            const report = await this.merchantReportService.generateMerchantMonthlyReport(
+                merchantId, 
+                parseInt(year), 
+                parseInt(month)
+            );
+
+            return {
+                data: report,
+                message: '生成商家报告成功'
+            };
+
+        } catch (error) {
+            console.error('生成商家报告失败:', error);
+            throw new Error(error.message || '生成商家报告失败');
+        }
+    }
+
+    // 发送商家报告
+    async sendMerchantReport({ body }) {
+        try {
+            const { merchantId, year, month, selectedSections, sendToBot = true } = body;
+            
+            if (!merchantId || !year || !month) {
+                throw new Error('缺少必要参数：merchantId, year, month');
+            }
+
+            // 生成报告
+            const report = await this.merchantReportService.generateMerchantMonthlyReport(
+                merchantId, 
+                parseInt(year), 
+                parseInt(month)
+            );
+
+            // 生成报告文本
+            const reportText = this.merchantReportService.generateReportText(report, selectedSections);
+
+            let result = {
+                reportText,
+                message: '报告生成成功'
+            };
+
+            // 如果需要发送到Bot
+            if (sendToBot) {
+                try {
+                    // 延迟加载botService避免循环依赖
+                    const botService = require('./botService');
+                    const merchant = report.merchant;
+                    
+                    if (merchant.user_id) {
+                        // 获取bot实例并直接发送消息
+                        const bot = botService.getBotInstance();
+                        if (bot) {
+                            await bot.sendMessage(merchant.user_id, reportText, {
+                                parse_mode: 'HTML'
+                            });
+                            result.message = '报告已发送给商家';
+                            result.sent = true;
+                        } else {
+                            result.message = '报告生成成功，但Bot实例未初始化，无法发送';
+                            result.sent = false;
+                        }
+                    } else {
+                        result.message = '报告生成成功，但商家未绑定用户ID，无法发送';
+                        result.sent = false;
+                    }
+                } catch (sendError) {
+                    console.error('发送报告到Bot失败:', sendError);
+                    result.message = '报告生成成功，但发送失败：' + sendError.message;
+                    result.sent = false;
+                }
+            }
+
+            return {
+                data: result,
+                message: result.message
+            };
+
+        } catch (error) {
+            console.error('发送商家报告失败:', error);
+            throw new Error(error.message || '发送商家报告失败');
+        }
+    }
+
+    // 获取商家月度排名
+    async getMerchantMonthlyRanking({ params }) {
+        try {
+            const { year, month } = params;
+            
+            if (!year || !month) {
+                throw new Error('缺少必要参数：year, month');
+            }
+
+            const rankings = await this.merchantReportService.calculateMonthlyRankings(
+                parseInt(year), 
+                parseInt(month)
+            );
+
+            return {
+                data: rankings,
+                message: '获取商家排名成功'
+            };
+
+        } catch (error) {
+            console.error('获取商家排名失败:', error);
+            throw new Error(error.message || '获取商家排名失败');
+        }
+    }
+
+    // 刷新商家排名缓存
+    async refreshMerchantRanking({ body }) {
+        try {
+            const { year, month } = body;
+            
+            if (!year || !month) {
+                throw new Error('缺少必要参数：year, month');
+            }
+
+            // 清除缓存
+            const cacheKey = `ranking_${year}_${month}`;
+            this.merchantReportService.rankingCache.delete(cacheKey);
+
+            // 重新计算排名
+            const rankings = await this.merchantReportService.calculateMonthlyRankings(
+                parseInt(year), 
+                parseInt(month)
+            );
+
+            return {
+                data: rankings,
+                message: '刷新商家排名成功'
+            };
+
+        } catch (error) {
+            console.error('刷新商家排名失败:', error);
+            throw new Error(error.message || '刷新商家排名失败');
+        }
+    }
+
+    // 获取用户月度排名
+    async getUserMonthlyRanking({ params }) {
+        try {
+            const { year, month } = params;
+            const cacheKey = `user_ranking_${year}_${month}`;
+            
+            // 尝试从缓存获取
+            if (this.cache.has(cacheKey)) {
+                return this.cache.get(cacheKey);
+            }
+
+            // 获取用户统计数据
+            const userStats = db.prepare(`
+                SELECT 
+                    u.id as userId,
+                    u.first_name,
+                    u.last_name,
+                    u.username,
+                    COUNT(DISTINCT o.id) as totalOrders,
+                    COUNT(DISTINCT CASE WHEN bs.user_course_status = 'completed' THEN o.id END) as completedOrders,
+                    AVG(CASE WHEN me.score IS NOT NULL THEN me.score END) as avgMerchantScore,
+                    COUNT(DISTINCT me.id) as receivedEvaluations,
+                    AVG(CASE WHEN ue.score IS NOT NULL THEN ue.score END) as avgUserScore,
+                    COUNT(DISTINCT ue.id) as givenEvaluations,
+                    SUM(CASE WHEN bs.user_course_status = 'completed' AND o.price_range IS NOT NULL 
+                        THEN CAST(o.price_range AS REAL) ELSE 0 END) as totalSpent,
+                    -- 计算用户活跃度分数
+                    COUNT(DISTINCT DATE(o.created_at)) as activeDays,
+                    -- 计算准时率（基于评价中的时间相关评分）
+                    AVG(CASE WHEN me.timeliness IS NOT NULL THEN me.timeliness ELSE 5 END) as punctualityScore,
+                    -- 计算课程完成率
+                    CASE WHEN COUNT(o.id) > 0 
+                        THEN ROUND(COUNT(CASE WHEN bs.user_course_status = 'completed' THEN 1 END) * 100.0 / COUNT(o.id), 2)
+                        ELSE 0 END as completionRate
+                FROM users u
+                LEFT JOIN orders o ON u.id = o.user_id 
+                    AND strftime('%Y', datetime(o.created_at)) = ?
+                    AND strftime('%m', datetime(o.created_at)) = ?
+
+                LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
+                LEFT JOIN merchant_evaluations me ON bs.id = me.booking_session_id
+                LEFT JOIN user_evaluations ue ON bs.id = ue.booking_session_id
+                WHERE 1=1
+                GROUP BY u.id
+                HAVING totalOrders > 0
+                ORDER BY 
+                    completedOrders DESC,
+                    avgMerchantScore DESC,
+                    completionRate DESC,
+                    totalSpent DESC
+            `).all(year.toString(), month.toString().padStart(2, '0'));
+
+            // 计算综合评分和排名
+            const rankedUsers = userStats.map((user, index) => {
+                // 综合评分算法
+                const completedWeight = 0.4;      // 完成订单数权重
+                const scoreWeight = 0.25;         // 商家评价权重
+                const completionWeight = 0.2;     // 完成率权重
+                const punctualityWeight = 0.1;    // 准时率权重
+                const activityWeight = 0.05;      // 活跃度权重
+
+                const normalizedCompleted = Math.min(user.completedOrders / 10, 1); // 归一化到0-1
+                const normalizedScore = (user.avgMerchantScore || 0) / 5;
+                const normalizedCompletion = user.completionRate / 100;
+                const normalizedPunctuality = (user.punctualityScore || 5) / 5;
+                const normalizedActivity = Math.min(user.activeDays / 15, 1);
+
+                const comprehensiveScore = (
+                    normalizedCompleted * completedWeight +
+                    normalizedScore * scoreWeight +
+                    normalizedCompletion * completionWeight +
+                    normalizedPunctuality * punctualityWeight +
+                    normalizedActivity * activityWeight
+                ) * 100;
+
+                // 用户等级评定
+                let userLevel = '';
+                let levelIcon = '';
+                if (comprehensiveScore >= 85) {
+                    userLevel = '钻石学员';
+                    levelIcon = '💎';
+                } else if (comprehensiveScore >= 70) {
+                    userLevel = '黄金学员';
+                    levelIcon = '🥇';
+                } else if (comprehensiveScore >= 55) {
+                    userLevel = '白银学员';
+                    levelIcon = '🥈';
+                } else if (comprehensiveScore >= 40) {
+                    userLevel = '青铜学员';
+                    levelIcon = '🥉';
+                } else {
+                    userLevel = '新手学员';
+                    levelIcon = '🌟';
+                }
+
+                return {
+                    ...user,
+                    rank: index + 1,
+                    comprehensiveScore: Math.round(comprehensiveScore * 10) / 10,
+                    userLevel,
+                    levelIcon,
+                    displayName: user.first_name && user.first_name !== '未设置' 
+                        ? `${user.first_name}${user.last_name && user.last_name !== '未设置' ? ' ' + user.last_name : ''}`
+                        : (user.username && user.username !== '未设置' ? '@' + user.username : `用户${user.userId}`),
+                    avgMerchantScore: user.avgMerchantScore ? parseFloat(user.avgMerchantScore).toFixed(1) : '暂无',
+                    avgUserScore: user.avgUserScore ? parseFloat(user.avgUserScore).toFixed(1) : '暂无',
+                    totalSpent: Math.round(user.totalSpent || 0)
+                };
+            });
+
+            const result = {
+                year: parseInt(year),
+                month: parseInt(month),
+                totalUsers: rankedUsers.length,
+                rankings: rankedUsers,
+                updateTime: new Date().toISOString(),
+                summary: {
+                    diamondUsers: rankedUsers.filter(u => u.userLevel === '钻石学员').length,
+                    goldUsers: rankedUsers.filter(u => u.userLevel === '黄金学员').length,
+                    silverUsers: rankedUsers.filter(u => u.userLevel === '白银学员').length,
+                    bronzeUsers: rankedUsers.filter(u => u.userLevel === '青铜学员').length,
+                    newUsers: rankedUsers.filter(u => u.userLevel === '新手学员').length,
+                    avgCompletionRate: rankedUsers.length > 0 
+                        ? (rankedUsers.reduce((sum, u) => sum + u.completionRate, 0) / rankedUsers.length).toFixed(1)
+                        : 0,
+                    avgScore: rankedUsers.length > 0 
+                        ? (rankedUsers.reduce((sum, u) => sum + (parseFloat(u.avgMerchantScore) || 0), 0) / rankedUsers.length).toFixed(1)
+                        : 0
+                }
+            };
+
+            // 缓存结果（24小时）
+            this.cache.set(cacheKey, result, 24 * 60 * 60 * 1000);
+
+            return {
+                data: result,
+                message: '获取用户排名成功'
+            };
+
+        } catch (error) {
+            console.error('获取用户排名失败:', error);
+            throw new Error('获取用户排名失败: ' + error.message);
+        }
+    }
+
+    // 刷新用户排名
+    async refreshUserRanking({ body }) {
+        try {
+            const { year, month } = body;
+            
+            if (!year || !month) {
+                throw new Error('年份和月份不能为空');
+            }
+
+            // 清除相关缓存
+            const cacheKey = `user_ranking_${year}_${month}`;
+            this.cache.delete(cacheKey);
+
+            // 重新计算排名
+            const ranking = await this.getUserMonthlyRanking({ params: { year, month } });
+
+            return {
+                message: '用户排名刷新成功',
+                data: ranking.data
+            };
+
+        } catch (error) {
+            console.error('刷新用户排名失败:', error);
+            throw new Error('刷新用户排名失败: ' + error.message);
+        }
     }
 }
 

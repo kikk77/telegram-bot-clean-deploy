@@ -58,6 +58,7 @@ class ApiClient {
 
 // 全局API客户端实例
 const api = new ApiClient();
+window.api = api;
 
 // 通知系统
 class NotificationSystem {
@@ -139,6 +140,7 @@ class NotificationSystem {
 
 // 全局通知系统实例
 const notify = new NotificationSystem();
+window.notificationSystem = notify;
 
 // 加载状态管理
 class LoadingManager {
@@ -176,6 +178,27 @@ class LoadingManager {
                 animation: spin 1s linear infinite;
             `;
             
+            // 添加CSS动画
+            if (!document.getElementById('loading-spinner-style')) {
+                const style = document.createElement('style');
+                style.id = 'loading-spinner-style';
+                style.textContent = `
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                    @keyframes slideInRight {
+                        from { transform: translateX(100%); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                    @keyframes slideOutRight {
+                        from { transform: translateX(0); opacity: 1; }
+                        to { transform: translateX(100%); opacity: 0; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            
             overlay.appendChild(spinner);
             document.body.appendChild(overlay);
         }
@@ -207,6 +230,7 @@ class LoadingManager {
 
 // 全局加载管理器实例
 const loading = new LoadingManager();
+window.loadingManager = loading;
 
 // 模态框管理
 class ModalManager {
@@ -543,7 +567,9 @@ document.head.appendChild(style);
 // 导出全局对象
 window.api = api;
 window.notify = notify;
-window.loading = loading;
-window.modal = modal;
+window.notificationSystem = notify;  // 兼容性别名
+window.loading = new LoadingManager();
+window.loadingManager = window.loading;     // 兼容性别名
+window.modal = new ModalManager();
 window.FormValidator = FormValidator;
 window.utils = utils; 

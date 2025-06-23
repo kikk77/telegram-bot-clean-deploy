@@ -898,10 +898,22 @@ class OptimizedOrdersManager {
             
             // 并行加载优化统计和基础统计
             const filters = this.getCurrentFilters();
+            console.log('🔍 发送的筛选条件:', filters);
+            
+            console.log('📡 开始API调用...');
             const [optimizedResponse, basicResponse] = await Promise.all([
-                fetch('/api/stats/optimized?' + new URLSearchParams(filters), { headers }).then(r => r.json()),
-                fetch('/api/stats?' + new URLSearchParams({}), { headers }).then(r => r.json())
+                fetch('/api/stats/optimized?' + new URLSearchParams(filters), { headers }).then(r => {
+                    console.log('📡 优化统计API响应状态:', r.status, r.statusText);
+                    return r.json();
+                }),
+                fetch('/api/stats?' + new URLSearchParams({}), { headers }).then(r => {
+                    console.log('📡 基础统计API响应状态:', r.status, r.statusText);
+                    return r.json();
+                })
             ]);
+            
+            console.log('📡 优化统计原始响应:', optimizedResponse);
+            console.log('📡 基础统计原始响应:', basicResponse);
             
             // 处理不同的API返回格式
             const optimizedStats = optimizedResponse.data || optimizedResponse;
@@ -911,11 +923,17 @@ class OptimizedOrdersManager {
             console.log('Orders页面获取到的基础统计数据:', basicStats);
             
             if (optimizedStats) {
+                console.log('📊 准备调用updateMetricCards...');
                 this.updateMetricCards(optimizedStats);
+            } else {
+                console.error('📊 optimizedStats 为空！');
             }
             
             if (basicStats) {
+                console.log('📊 准备调用updateBasicStats...');
                 this.updateBasicStats(basicStats);
+            } else {
+                console.error('📊 basicStats 为空！');
             }
             
             // 标记需要重新加载的图表
@@ -936,6 +954,10 @@ class OptimizedOrdersManager {
 
     // 更新指标卡片
     updateMetricCards(data) {
+        console.log('📊 updateMetricCards 收到的原始数据:', data);
+        console.log('📊 数据类型:', typeof data);
+        console.log('📊 数据keys:', Object.keys(data || {}));
+        
         const metrics = {
             totalOrders: data.totalOrders || 0,
             bookedOrders: data.bookedOrders || 0,
@@ -947,9 +969,18 @@ class OptimizedOrdersManager {
             completionRate: data.completionRate || 0
         };
 
+        console.log('📊 处理后的metrics数据:', metrics);
+
         Object.entries(metrics).forEach(([key, value]) => {
             const element = document.getElementById(key);
+            console.log(`📊 更新元素 ${key}:`, {
+                element: element,
+                value: value,
+                elementExists: !!element
+            });
+            
             if (element) {
+                const oldValue = element.textContent;
                 if (key === 'avgPrice') {
                     element.textContent = `¥${value}`;
                 } else if (key === 'avgUserRating' || key === 'avgMerchantRating') {
@@ -959,8 +990,13 @@ class OptimizedOrdersManager {
                 } else {
                     element.textContent = value.toLocaleString();
                 }
+                console.log(`📊 元素 ${key} 更新: "${oldValue}" -> "${element.textContent}"`);
+            } else {
+                console.error(`📊 找不到ID为 ${key} 的元素！`);
             }
         });
+        
+        console.log('📊 updateMetricCards 更新完成');
     }
 
     // 更新基础统计数据

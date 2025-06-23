@@ -1167,12 +1167,12 @@ class ApiService {
             // 添加时间筛选条件（处理Unix时间戳）
             if (filters.dateFrom) {
                 const fromTimestamp = Math.floor(new Date(filters.dateFrom + 'T00:00:00').getTime() / 1000);
-                whereConditions.push('o.created_at >= ?');
+                whereConditions.push('(o.created_at IS NULL OR o.created_at >= ?)');
                 params.push(fromTimestamp);
             }
             if (filters.dateTo) {
                 const toTimestamp = Math.floor(new Date(filters.dateTo + 'T23:59:59').getTime() / 1000);
-                whereConditions.push('o.created_at <= ?');
+                whereConditions.push('(o.created_at IS NULL OR o.created_at <= ?)');
                 params.push(toTimestamp);
             }
 
@@ -1181,8 +1181,7 @@ class ApiService {
             const rankings = db.prepare(`
                 SELECT 
                     o.user_id,
-                    o.user_first_name,
-                    o.user_last_name,
+                    o.user_name,
                     o.user_username,
                     COUNT(DISTINCT o.id) as totalOrders,
                     COUNT(DISTINCT CASE WHEN bs.user_course_status = 'completed' THEN o.id END) as completedOrders,
@@ -1196,13 +1195,9 @@ class ApiService {
                         ELSE 0 
                     END as completionRate,
                     CASE 
-                        WHEN o.user_first_name IS NOT NULL AND o.user_first_name != '未设置' 
-                        THEN CASE 
-                            WHEN o.user_last_name IS NOT NULL AND o.user_last_name != '未设置' 
-                            THEN o.user_first_name || ' ' || o.user_last_name
-                            ELSE o.user_first_name
-                        END
-                        WHEN o.user_username IS NOT NULL AND o.user_username != '未设置' 
+                        WHEN o.user_name IS NOT NULL AND o.user_name != '未设置' AND o.user_name != '' 
+                        THEN o.user_name
+                        WHEN o.user_username IS NOT NULL AND o.user_username != '未设置' AND o.user_username != ''
                         THEN '@' || o.user_username
                         ELSE '用户' || o.user_id
                     END as displayName
@@ -1210,7 +1205,7 @@ class ApiService {
                 LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 LEFT JOIN evaluations e ON bs.id = e.booking_session_id AND e.evaluator_type = 'merchant'
                 WHERE ${whereClause} AND o.user_id IS NOT NULL
-                GROUP BY o.user_id, o.user_first_name, o.user_last_name, o.user_username
+                GROUP BY o.user_id, o.user_name, o.user_username
                 HAVING totalOrders > 0
                 ORDER BY completedOrders DESC, avgRating DESC, totalOrders DESC
                 LIMIT 50
@@ -2096,43 +2091,35 @@ class ApiService {
             const cacheKey = `user_ranking_${year}_${month}`;
             
             // 尝试从缓存获取
-            if (this.cache.has(cacheKey)) {
+            if (this.cache && this.cache.has && this.cache.has(cacheKey)) {
                 return this.cache.get(cacheKey);
             }
 
-            // 获取用户统计数据
+            // 获取用户统计数据 - 基于现有数据库结构
             const userStats = db.prepare(`
                 SELECT 
-                    u.id as userId,
-                    u.first_name,
-                    u.last_name,
-                    u.username,
+                    o.user_id as userId,
+                    o.user_name,
+                    o.user_username,
                     COUNT(DISTINCT o.id) as totalOrders,
                     COUNT(DISTINCT CASE WHEN bs.user_course_status = 'completed' THEN o.id END) as completedOrders,
-                    AVG(CASE WHEN me.score IS NOT NULL THEN me.score END) as avgMerchantScore,
-                    COUNT(DISTINCT me.id) as receivedEvaluations,
-                    AVG(CASE WHEN ue.score IS NOT NULL THEN ue.score END) as avgUserScore,
-                    COUNT(DISTINCT ue.id) as givenEvaluations,
+                    AVG(CASE WHEN e.overall_score IS NOT NULL THEN e.overall_score END) as avgMerchantScore,
+                    COUNT(DISTINCT e.id) as receivedEvaluations,
                     SUM(CASE WHEN bs.user_course_status = 'completed' AND o.price_range IS NOT NULL 
                         THEN CAST(o.price_range AS REAL) ELSE 0 END) as totalSpent,
-                    -- 计算用户活跃度分数
-                    COUNT(DISTINCT DATE(o.created_at)) as activeDays,
-                    -- 计算准时率（基于评价中的时间相关评分）
-                    AVG(CASE WHEN me.timeliness IS NOT NULL THEN me.timeliness ELSE 5 END) as punctualityScore,
+                    -- 计算用户活跃度分数（基于订单创建时间）
+                    COUNT(DISTINCT DATE(datetime(o.created_at, 'unixepoch'))) as activeDays,
                     -- 计算课程完成率
                     CASE WHEN COUNT(o.id) > 0 
                         THEN ROUND(COUNT(CASE WHEN bs.user_course_status = 'completed' THEN 1 END) * 100.0 / COUNT(o.id), 2)
                         ELSE 0 END as completionRate
-                FROM users u
-                LEFT JOIN orders o ON u.id = o.user_id 
-                    AND strftime('%Y', datetime(o.created_at)) = ?
-                    AND strftime('%m', datetime(o.created_at)) = ?
-
+                FROM orders o
                 LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
-                LEFT JOIN merchant_evaluations me ON bs.id = me.booking_session_id
-                LEFT JOIN user_evaluations ue ON bs.id = ue.booking_session_id
-                WHERE 1=1
-                GROUP BY u.id
+                LEFT JOIN evaluations e ON bs.id = e.booking_session_id AND e.evaluator_type = 'merchant'
+                WHERE o.user_id IS NOT NULL
+                    AND strftime('%Y', datetime(o.created_at, 'unixepoch')) = ?
+                    AND strftime('%m', datetime(o.created_at, 'unixepoch')) = ?
+                GROUP BY o.user_id, o.user_name, o.user_username
                 HAVING totalOrders > 0
                 ORDER BY 
                     completedOrders DESC,
@@ -2144,23 +2131,20 @@ class ApiService {
             // 计算综合评分和排名
             const rankedUsers = userStats.map((user, index) => {
                 // 综合评分算法
-                const completedWeight = 0.4;      // 完成订单数权重
-                const scoreWeight = 0.25;         // 商家评价权重
-                const completionWeight = 0.2;     // 完成率权重
-                const punctualityWeight = 0.1;    // 准时率权重
+                const completedWeight = 0.5;      // 完成订单数权重
+                const scoreWeight = 0.3;          // 商家评价权重
+                const completionWeight = 0.15;    // 完成率权重
                 const activityWeight = 0.05;      // 活跃度权重
 
                 const normalizedCompleted = Math.min(user.completedOrders / 10, 1); // 归一化到0-1
                 const normalizedScore = (user.avgMerchantScore || 0) / 5;
                 const normalizedCompletion = user.completionRate / 100;
-                const normalizedPunctuality = (user.punctualityScore || 5) / 5;
                 const normalizedActivity = Math.min(user.activeDays / 15, 1);
 
                 const comprehensiveScore = (
                     normalizedCompleted * completedWeight +
                     normalizedScore * scoreWeight +
                     normalizedCompletion * completionWeight +
-                    normalizedPunctuality * punctualityWeight +
                     normalizedActivity * activityWeight
                 ) * 100;
 
@@ -2190,11 +2174,11 @@ class ApiService {
                     comprehensiveScore: Math.round(comprehensiveScore * 10) / 10,
                     userLevel,
                     levelIcon,
-                    displayName: user.first_name && user.first_name !== '未设置' 
-                        ? `${user.first_name}${user.last_name && user.last_name !== '未设置' ? ' ' + user.last_name : ''}`
-                        : (user.username && user.username !== '未设置' ? '@' + user.username : `用户${user.userId}`),
+                    displayName: user.user_name && user.user_name !== '未设置' && user.user_name !== ''
+                        ? user.user_name
+                        : (user.user_username && user.user_username !== '未设置' && user.user_username !== '' ? '@' + user.user_username : `用户${user.userId}`),
                     avgMerchantScore: user.avgMerchantScore ? parseFloat(user.avgMerchantScore).toFixed(1) : '暂无',
-                    avgUserScore: user.avgUserScore ? parseFloat(user.avgUserScore).toFixed(1) : '暂无',
+                    avgUserScore: '暂无', // 暂时不支持用户给出的评价
                     totalSpent: Math.round(user.totalSpent || 0)
                 };
             });
@@ -2221,7 +2205,9 @@ class ApiService {
             };
 
             // 缓存结果（24小时）
-            this.cache.set(cacheKey, result, 24 * 60 * 60 * 1000);
+            if (this.cache && this.cache.set) {
+                this.cache.set(cacheKey, result, 24 * 60 * 60 * 1000);
+            }
 
             return {
                 data: result,
@@ -2245,7 +2231,9 @@ class ApiService {
 
             // 清除相关缓存
             const cacheKey = `user_ranking_${year}_${month}`;
-            this.cache.delete(cacheKey);
+            if (this.cache && this.cache.delete) {
+                this.cache.delete(cacheKey);
+            }
 
             // 重新计算排名
             const ranking = await this.getUserMonthlyRanking({ params: { year, month } });

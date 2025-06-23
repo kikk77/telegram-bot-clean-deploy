@@ -888,6 +888,9 @@ class OptimizedOrdersManager {
             // 强制清除所有缓存，确保获取最新数据
             this.clearCache(); // 清除所有缓存
             
+            // 添加时间戳参数防止任何缓存
+            const timestamp = Date.now();
+            
             // 添加缓存清理头部，强制服务器端也清除缓存
             const headers = {
                 'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -898,42 +901,32 @@ class OptimizedOrdersManager {
             
             // 并行加载优化统计和基础统计
             const filters = this.getCurrentFilters();
-            console.log('🔍 发送的筛选条件:', filters);
             
-            console.log('📡 开始API调用...');
             const [optimizedResponse, basicResponse] = await Promise.all([
-                fetch('/api/stats/optimized?' + new URLSearchParams(filters), { headers }).then(r => {
-                    console.log('📡 优化统计API响应状态:', r.status, r.statusText);
-                    return r.json();
-                }),
-                fetch('/api/stats?' + new URLSearchParams({}), { headers }).then(r => {
-                    console.log('📡 基础统计API响应状态:', r.status, r.statusText);
-                    return r.json();
-                })
+                fetch(`/api/stats/optimized?_t=${timestamp}&` + new URLSearchParams(filters), { headers }),
+                fetch(`/api/stats?_t=${timestamp}`, { headers })
             ]);
             
-            console.log('📡 优化统计原始响应:', optimizedResponse);
-            console.log('📡 基础统计原始响应:', basicResponse);
+            if (!optimizedResponse.ok || !basicResponse.ok) {
+                throw new Error(`API请求失败: ${optimizedResponse.status} ${basicResponse.status}`);
+            }
+            
+            const optimizedData = await optimizedResponse.json();
+            const basicData = await basicResponse.json();
             
             // 处理不同的API返回格式
-            const optimizedStats = optimizedResponse.data || optimizedResponse;
-            const basicStats = basicResponse.data || basicResponse;
+            const optimizedStats = optimizedData.data || optimizedData;
+            const basicStats = basicData.data || basicData;
             
             console.log('Orders页面获取到的优化统计数据:', optimizedStats);
             console.log('Orders页面获取到的基础统计数据:', basicStats);
             
             if (optimizedStats) {
-                console.log('📊 准备调用updateMetricCards...');
                 this.updateMetricCards(optimizedStats);
-            } else {
-                console.error('📊 optimizedStats 为空！');
             }
             
             if (basicStats) {
-                console.log('📊 准备调用updateBasicStats...');
                 this.updateBasicStats(basicStats);
-            } else {
-                console.error('📊 basicStats 为空！');
             }
             
             // 标记需要重新加载的图表
@@ -954,10 +947,6 @@ class OptimizedOrdersManager {
 
     // 更新指标卡片
     updateMetricCards(data) {
-        console.log('📊 updateMetricCards 收到的原始数据:', data);
-        console.log('📊 数据类型:', typeof data);
-        console.log('📊 数据keys:', Object.keys(data || {}));
-        
         const metrics = {
             totalOrders: data.totalOrders || 0,
             bookedOrders: data.bookedOrders || 0,
@@ -969,20 +958,12 @@ class OptimizedOrdersManager {
             completionRate: data.completionRate || 0
         };
 
-        console.log('📊 处理后的metrics数据:', metrics);
-
         Object.entries(metrics).forEach(([key, value]) => {
             const element = document.getElementById(key);
-            console.log(`📊 更新元素 ${key}:`, {
-                element: element,
-                value: value,
-                elementExists: !!element
-            });
             
             if (element) {
-                const oldValue = element.textContent;
                 if (key === 'avgPrice') {
-                    element.textContent = `¥${value}`;
+                    element.textContent = value > 0 ? `¥${value}` : '-';
                 } else if (key === 'avgUserRating' || key === 'avgMerchantRating') {
                     element.textContent = value > 0 ? `${value}/10` : '-';
                 } else if (key === 'completionRate') {
@@ -990,13 +971,8 @@ class OptimizedOrdersManager {
                 } else {
                     element.textContent = value.toLocaleString();
                 }
-                console.log(`📊 元素 ${key} 更新: "${oldValue}" -> "${element.textContent}"`);
-            } else {
-                console.error(`📊 找不到ID为 ${key} 的元素！`);
             }
         });
-        
-        console.log('📊 updateMetricCards 更新完成');
     }
 
     // 更新基础统计数据
@@ -1227,43 +1203,66 @@ class OptimizedOrdersManager {
     async refreshData() {
         console.log('开始刷新所有数据...');
         
-        // 1. 更新刷新按钮状态
+        // 1. 强制清除所有浏览器缓存
+        if ('caches' in window) {
+            try {
+                const cacheNames = await caches.keys();
+                await Promise.all(cacheNames.map(name => caches.delete(name)));
+                console.log('Service Worker缓存已清除');
+            } catch (error) {
+                console.log('清除Service Worker缓存失败:', error);
+            }
+        }
+        
+        // 2. 清除localStorage和sessionStorage
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+            console.log('本地存储已清除');
+        } catch (error) {
+            console.log('清除本地存储失败:', error);
+        }
+        
+        // 3. 更新刷新按钮状态
         const refreshBtn = document.querySelector('button[onclick="refreshData()"]');
         const originalText = refreshBtn ? refreshBtn.innerHTML : '';
         if (refreshBtn) {
-            refreshBtn.innerHTML = '⏳ 刷新中...';
+            refreshBtn.innerHTML = '⏳ 强制刷新中...';
             refreshBtn.disabled = true;
         }
         
-        // 2. 清除所有缓存
+        // 4. 清除内部缓存
         this.clearCache();
         
-        // 3. 重置页面状态
+        // 5. 重置页面状态
         this.currentPage = 1;
         this.chartsLoaded.clear();
         
-        // 4. 显示加载状态
+        // 6. 显示加载状态
         this.showLoading(true);
         
         try {
-            // 5. 重新加载基础数据和仪表板
+            // 7. 强制重新加载，添加随机参数防止任何缓存
+            const forceParam = `?_force=${Date.now()}&_random=${Math.random()}`;
+            
+            // 8. 重新加载基础数据和仪表板
             await this.loadInitialData();
             
-            // 6. 重新加载所有图表
+            // 9. 重新加载所有图表
             await this.loadAllCharts();
             
             console.log('所有数据刷新完成');
             
-            // 7. 显示成功提示
-            this.showSuccessMessage('数据刷新完成');
+            // 10. 显示成功提示
+            this.showSuccessMessage('数据强制刷新完成！如仍有缓存问题，请按Ctrl+F5强制刷新页面');
             
         } catch (error) {
             console.error('刷新数据失败:', error);
-            this.showError('刷新数据失败: ' + error.message);
+            this.showError('刷新数据失败: ' + error.message + ' - 建议按Ctrl+F5强制刷新页面');
         } finally {
             this.showLoading(false);
             
-            // 8. 恢复刷新按钮状态
+            // 11. 恢复刷新按钮状态
             if (refreshBtn) {
                 refreshBtn.innerHTML = originalText || '🔄 刷新数据';
                 refreshBtn.disabled = false;

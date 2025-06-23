@@ -11,7 +11,29 @@ class DatabaseManager {
         const isStaging = nodeEnv === 'staging';
         
         // 根据环境选择数据目录和数据库文件名
-        const dataDir = (isProduction || isStaging) ? '/app/data' : path.join(__dirname, '..', 'data');
+        // 生产环境优先使用Volume，如果权限有问题则使用应用目录
+        let dataDir;
+        if (isProduction || isStaging) {
+            const volumeDataDir = '/app/data';
+            const appDataDir = path.join(__dirname, '..', 'app-data');
+            
+            // 检查Volume权限
+            try {
+                if (fs.existsSync(volumeDataDir)) {
+                    fs.accessSync(volumeDataDir, fs.constants.W_OK);
+                    dataDir = volumeDataDir; // Volume可用
+                    console.log(`📁 使用Volume数据目录: ${dataDir}`);
+                } else {
+                    throw new Error('Volume目录不存在');
+                }
+            } catch (error) {
+                console.log(`⚠️ Volume权限问题，使用应用目录: ${error.message}`);
+                dataDir = appDataDir; // 使用应用目录
+                console.log(`📁 使用应用数据目录: ${dataDir}`);
+            }
+        } else {
+            dataDir = path.join(__dirname, '..', 'data');
+        }
         
         // 不同环境使用不同的数据库文件
         let dbFileName;

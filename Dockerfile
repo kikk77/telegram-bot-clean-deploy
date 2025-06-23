@@ -17,7 +17,7 @@ RUN npm ci --only=production
 COPY . .
 
 # 创建数据目录并设置权限
-RUN mkdir -p data && chown -R node:node /app
+RUN mkdir -p data app-data && chown -R node:node /app
 
 # 创建启动脚本来处理Volume权限问题
 RUN echo '#!/bin/sh' > /app/fix-permissions.sh && \

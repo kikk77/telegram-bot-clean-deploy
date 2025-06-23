@@ -1292,39 +1292,80 @@ class ApiService {
             params.push(filters.merchantId); // 当作老师名称搜索
         }
 
-        // 地区筛选 - 修正JOIN关系
+        // 地区筛选 - 修正为通过商家的地区筛选，因为大多数订单的region_id为空
         if (filters.regionId) {
-            conditions.push('o.region_id = ?');
-            params.push(filters.regionId);
+            conditions.push('(o.region_id = ? OR m.region_id = ?)');
+            params.push(filters.regionId, filters.regionId);
         }
 
-        // 价格区间筛选 - 修正字段名称
+        // 价格区间筛选 - 支持多种价格表示方式
         if (filters.priceRange) {
             switch (filters.priceRange) {
                 case '0-500':
-                    conditions.push('(CAST(o.actual_price AS INTEGER) BETWEEN 0 AND 500 OR o.price_range = "0-500")');
+                    conditions.push(`(
+                        (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) BETWEEN 0 AND 500) OR
+                        (o.price_range LIKE '%500%' AND o.price_range NOT LIKE '%1000%') OR
+                        (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) BETWEEN 0 AND 500) OR
+                        (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) BETWEEN 0 AND 500)
+                    )`);
                     break;
                 case '500-1000':
-                    conditions.push('(CAST(o.actual_price AS INTEGER) BETWEEN 500 AND 1000 OR o.price_range = "500-1000")');
+                    conditions.push(`(
+                        (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) BETWEEN 500 AND 1000) OR
+                        (o.price_range LIKE '%1000%' AND o.price_range NOT LIKE '%2000%') OR
+                        (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) BETWEEN 500 AND 1000) OR
+                        (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) BETWEEN 500 AND 1000)
+                    )`);
                     break;
                 case '1000-2000':
-                    conditions.push('(CAST(o.actual_price AS INTEGER) BETWEEN 1000 AND 2000 OR o.price_range = "1000-2000")');
+                    conditions.push(`(
+                        (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) BETWEEN 1000 AND 2000) OR
+                        (o.price_range LIKE '%2000%' OR o.price_range LIKE '%1500%') OR
+                        (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) BETWEEN 1000 AND 2000) OR
+                        (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) BETWEEN 1000 AND 2000)
+                    )`);
                     break;
                 case '2000+':
-                    conditions.push('(CAST(o.actual_price AS INTEGER) > 2000 OR o.price_range = "2000+")');
+                    conditions.push(`(
+                        (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) > 2000) OR
+                        (o.price_range LIKE '%3000%' OR o.price_range LIKE '%4000%' OR o.price_range LIKE '%5000%') OR
+                        (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) > 2000) OR
+                        (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) > 2000)
+                    )`);
                     break;
             }
         }
 
-        // 状态筛选 - 需要根据实际状态逻辑判断
+        // 状态筛选 - 简化逻辑，主要基于orders表的status字段
         if (filters.status) {
-            const statusCondition = this.buildStatusCondition(filters.status);
-            if (statusCondition) {
-                conditions.push(statusCondition);
+            switch (filters.status) {
+                case 'confirmed':
+                    conditions.push("o.status = 'confirmed'");
+                    break;
+                case 'pending':
+                    conditions.push("o.status = 'pending'");
+                    break;
+                case 'attempting':
+                    conditions.push("o.status = 'attempting'");
+                    break;
+                case 'cancelled':
+                    conditions.push("o.status = 'cancelled'");
+                    break;
+                case 'failed':
+                    conditions.push("o.status = 'failed'");
+                    break;
+                case 'completed':
+                    // 完成状态可能在booking_sessions中，也可能在orders中
+                    conditions.push("(o.status = 'completed' OR bs.user_course_status = 'completed')");
+                    break;
+                default:
+                    // 如果是其他状态，直接匹配
+                    conditions.push("o.status = ?");
+                    params.push(filters.status);
             }
         }
 
-        // 课程类型筛选 - 修正字段名称
+        // 课程类型筛选 - 支持p, pp, other
         if (filters.courseType) {
             conditions.push('o.course_type = ?');
             params.push(filters.courseType);
@@ -1334,6 +1375,7 @@ class ApiService {
         if (filters.search) {
             conditions.push(`(
                 CAST(o.id AS TEXT) LIKE ? OR 
+                o.order_number LIKE ? OR
                 o.user_username LIKE ? OR 
                 o.user_name LIKE ? OR 
                 m.teacher_name LIKE ? OR 
@@ -1343,13 +1385,13 @@ class ApiService {
                 o.price_range LIKE ?
             )`);
             const searchTerm = `%${filters.search}%`;
-            params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+            params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
         }
 
         // 精确订单号搜索
         if (filters.orderId) {
-            conditions.push('CAST(o.id AS TEXT) = ?');
-            params.push(filters.orderId.toString());
+            conditions.push('(CAST(o.id AS TEXT) = ? OR o.order_number = ?)');
+            params.push(filters.orderId.toString(), filters.orderId.toString());
         }
 
         // 用户名搜索
@@ -1366,26 +1408,28 @@ class ApiService {
             params.push(merchantSearchTerm, merchantSearchTerm);
         }
 
-        // 价格范围筛选
+        // 价格范围筛选 - 支持最小/最大价格
         if (filters.minPrice && !isNaN(filters.minPrice)) {
             conditions.push(`(
                 (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) >= ?) OR
+                (o.price_range IS NOT NULL AND o.price_range != '未设置' AND o.price_range != '待确定价格' AND CAST(REPLACE(o.price_range, '.0', '') AS REAL) >= ?) OR
                 (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) >= ?) OR
                 (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) >= ?)
             )`);
-            params.push(filters.minPrice, filters.minPrice, filters.minPrice);
+            params.push(filters.minPrice, filters.minPrice, filters.minPrice, filters.minPrice);
         }
 
         if (filters.maxPrice && !isNaN(filters.maxPrice)) {
             conditions.push(`(
                 (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) <= ?) OR
+                (o.price_range IS NOT NULL AND o.price_range != '未设置' AND o.price_range != '待确定价格' AND CAST(REPLACE(o.price_range, '.0', '') AS REAL) <= ?) OR
                 (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) <= ?) OR
                 (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) <= ?)
             )`);
-            params.push(filters.maxPrice, filters.maxPrice, filters.maxPrice);
+            params.push(filters.maxPrice, filters.maxPrice, filters.maxPrice, filters.maxPrice);
         }
 
-        // 评价状态筛选
+        // 评价状态筛选 - 由于production环境evaluations表为空，暂时简化
         if (filters.evaluationStatus) {
             switch (filters.evaluationStatus) {
                 case 'user_completed':
@@ -1402,7 +1446,7 @@ class ApiService {
                         WHERE e.booking_session_id = o.booking_session_id 
                         AND e.evaluator_type = 'user' 
                         AND e.status = 'completed'
-                    )`);
+                    ) OR o.booking_session_id IS NULL`);
                     break;
                 case 'merchant_completed':
                     conditions.push(`EXISTS (
@@ -1418,7 +1462,7 @@ class ApiService {
                         WHERE e.booking_session_id = o.booking_session_id 
                         AND e.evaluator_type = 'merchant' 
                         AND e.status = 'completed'
-                    )`);
+                    ) OR o.booking_session_id IS NULL`);
                     break;
                 case 'all_completed':
                     conditions.push(`EXISTS (
@@ -1434,7 +1478,7 @@ class ApiService {
                     )`);
                     break;
                 case 'none_completed':
-                    conditions.push(`NOT EXISTS (
+                    conditions.push(`(NOT EXISTS (
                         SELECT 1 FROM evaluations e 
                         WHERE e.booking_session_id = o.booking_session_id 
                         AND e.evaluator_type = 'user' 
@@ -1444,35 +1488,12 @@ class ApiService {
                         WHERE e.booking_session_id = o.booking_session_id 
                         AND e.evaluator_type = 'merchant' 
                         AND e.status = 'completed'
-                    )`);
+                    )) OR o.booking_session_id IS NULL`);
                     break;
             }
         }
 
         return { conditions, params };
-    }
-
-    // 构建状态筛选条件
-    buildStatusCondition(status) {
-        // 使用与SQL查询中相同的状态计算逻辑
-        switch (status) {
-            case 'completed':
-                return "bs.user_course_status = 'completed'";
-            case 'incomplete':
-                return "bs.user_course_status = 'incomplete'";
-            case 'confirmed':
-                return "(bs.user_course_status = 'confirmed' OR o.status = 'confirmed') AND bs.user_course_status != 'completed' AND bs.user_course_status != 'incomplete'";
-            case 'attempting':
-                return "o.status = 'attempting' AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))";
-            case 'failed':
-                return "o.status = 'failed' AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))";
-            case 'cancelled':
-                return "o.status = 'cancelled' AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))";
-            case 'pending':
-                return "(o.status IS NULL OR o.status = 'pending' OR (o.status NOT IN ('attempting', 'failed', 'cancelled', 'confirmed') AND (bs.user_course_status IS NULL OR bs.user_course_status NOT IN ('completed', 'incomplete', 'confirmed'))))";
-            default:
-                return null;
-        }
     }
 
     // Dashboard需要的基础API方法

@@ -949,36 +949,47 @@ class OptimizedOrdersManager {
     updateMetricCards(data) {
         console.log('📊 收到的优化统计数据:', data);
         
-        const metrics = {
-            totalOrders: data.totalOrders || 0,
-            bookedOrders: data.bookedOrders || 0,
-            incompleteOrders: data.incompleteOrders || 0,
-            completedOrders: data.completedOrders || 0,
-            avgPrice: data.avgPrice || 0,
-            avgUserRating: data.avgUserRating || 0,
-            avgMerchantRating: data.avgMerchantRating || 0,
-            completionRate: data.completionRate || 0
+        // 直接映射数据到对应的元素ID
+        const elements = {
+            'totalOrders': data.totalOrders || 0,
+            'bookedOrders': data.bookedOrders || 0,
+            'incompleteOrders': data.incompleteOrders || 0,
+            'completedOrders': data.completedOrders || 0,
+            'avgPrice': data.avgPrice || 0,
+            'avgUserRating': data.avgUserRating || 0,
+            'avgMerchantRating': data.avgMerchantRating || 0,
+            'completionRate': data.completionRate || 0
         };
 
-        console.log('📊 处理后的metrics:', metrics);
+        console.log('📊 处理后的数据映射:', elements);
 
-        Object.entries(metrics).forEach(([key, value]) => {
-            const element = document.getElementById(key);
-            console.log(`📊 更新 ${key}:`, value, '元素:', element);
+        // 更新每个元素
+        Object.entries(elements).forEach(([elementId, value]) => {
+            const element = document.getElementById(elementId);
+            console.log(`📊 更新元素 ${elementId}:`, value, '元素存在:', !!element);
             
             if (element) {
-                if (key === 'avgPrice') {
-                    element.textContent = value > 0 ? `¥${value}` : '-';
-                } else if (key === 'avgUserRating' || key === 'avgMerchantRating') {
-                    element.textContent = value > 0 ? `${value}/10` : '-';
-                } else if (key === 'completionRate') {
-                    element.textContent = `${value}%`;
-                } else {
-                    element.textContent = value.toLocaleString();
+                let displayValue;
+                
+                switch (elementId) {
+                    case 'avgPrice':
+                        displayValue = value > 0 ? `¥${value.toLocaleString()}` : '-';
+                        break;
+                    case 'avgUserRating':
+                    case 'avgMerchantRating':
+                        displayValue = value > 0 ? `${value}/10` : '-';
+                        break;
+                    case 'completionRate':
+                        displayValue = `${value}%`;
+                        break;
+                    default:
+                        displayValue = value.toLocaleString();
                 }
-                console.log(`📊 ${key} 更新完成:`, element.textContent);
+                
+                element.textContent = displayValue;
+                console.log(`📊 ${elementId} 更新为:`, displayValue);
             } else {
-                console.error(`📊 找不到元素 ${key}`);
+                console.error(`📊 找不到元素: ${elementId}`);
             }
         });
     }
@@ -987,24 +998,25 @@ class OptimizedOrdersManager {
     updateBasicStats(data) {
         console.log('🏪 收到的基础统计数据:', data);
         
-        const basicMetrics = {
-            totalMerchants: data.totalMerchants || 0,
-            totalBindCodes: data.totalBindCodes || 0,
-            totalRegions: data.totalRegions || 0,
-            totalTemplates: data.totalTemplates || 0,
-            totalClicks: data.totalClicks || 0
+        // 直接映射基础统计数据
+        const basicElements = {
+            'totalMerchants': data.totalMerchants || 0,
+            'totalBindCodes': data.totalBindCodes || 0,
+            'totalRegions': data.totalRegions || 0,
+            'totalTemplates': data.totalTemplates || 0,
+            'totalClicks': data.totalClicks || 0
         };
 
-        console.log('🏪 处理后的基础metrics:', basicMetrics);
+        console.log('🏪 处理后的基础数据映射:', basicElements);
 
-        // 直接通过ID更新基础统计元素
-        Object.entries(basicMetrics).forEach(([id, value]) => {
-            const element = document.getElementById(id);
+        // 更新每个基础统计元素
+        Object.entries(basicElements).forEach(([elementId, value]) => {
+            const element = document.getElementById(elementId);
             if (element) {
                 element.textContent = value.toLocaleString();
-                console.log(`🏪 ${id} 更新为:`, value);
+                console.log(`🏪 ${elementId} 更新为:`, value);
             } else {
-                console.log(`🏪 未找到ID为 ${id} 的元素`);
+                console.log(`🏪 未找到基础统计元素: ${elementId}`);
             }
         });
 

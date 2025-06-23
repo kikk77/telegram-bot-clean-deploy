@@ -559,8 +559,8 @@ class ApiService {
             const rawOrders = db.prepare(`
                 SELECT 
                     o.*,
-                    m.id as merchant_id,
-                    m.teacher_name as actual_merchant_name,
+                    m.id as merchant_db_id,
+                    m.teacher_name as merchant_name,
                     m.username as merchant_username,
                     m.contact as teacher_contact,
                     m.price1,
@@ -572,28 +572,13 @@ class ApiService {
                     -- 计算真实状态
                     CASE 
                         WHEN bs.user_course_status = 'completed' THEN 'completed'
-                        WHEN bs.user_course_status = 'incomplete' THEN 'incomplete'
                         WHEN bs.user_course_status = 'confirmed' OR o.status = 'confirmed' THEN 'confirmed'
-                        WHEN o.status = 'attempting' THEN 'attempting'
-                        WHEN o.status = 'failed' THEN 'failed'
                         WHEN o.status = 'cancelled' THEN 'cancelled'
                         ELSE 'pending'
-                    END as real_status,
-                    -- 检查用户评价是否存在
-                    (SELECT CASE WHEN COUNT(*) > 0 THEN 'completed' ELSE 'pending' END 
-                     FROM evaluations 
-                     WHERE booking_session_id = o.booking_session_id 
-                     AND evaluator_type = 'user' 
-                     AND status = 'completed') as user_evaluation_status,
-                    -- 检查商家评价是否存在
-                    (SELECT CASE WHEN COUNT(*) > 0 THEN 'completed' ELSE 'pending' END 
-                     FROM evaluations 
-                     WHERE booking_session_id = o.booking_session_id 
-                     AND evaluator_type = 'merchant' 
-                     AND status = 'completed') as merchant_evaluation_status
+                    END as real_status
                 FROM orders o
                 LEFT JOIN merchants m ON o.merchant_id = m.id
-                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN regions r ON o.region_id = r.id
                 LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE ${whereClause}
                 ORDER BY o.created_at DESC
@@ -603,29 +588,38 @@ class ApiService {
             // 处理订单数据，计算正确价格
             const orders = rawOrders.map(order => {
                 // 计算实际价格
-                let actualPrice = '价格未设置';
-                if (order.price && order.price !== '未设置' && !isNaN(order.price)) {
-                    actualPrice = parseInt(order.price);
-                } else {
-                    // 根据课程内容匹配商家价格
-                    if (order.course_content === 'p' && order.price1) {
+                let actualPrice = order.actual_price;
+                if (!actualPrice || actualPrice === 0) {
+                    // 根据课程类型匹配商家价格
+                    if (order.course_type === 'p' && order.price1) {
                         actualPrice = order.price1;
-                    } else if (order.course_content === 'pp' && order.price2) {
+                    } else if (order.course_type === 'pp' && order.price2) {
                         actualPrice = order.price2;
-                    } else if (order.course_content === 'other') {
-                        actualPrice = '其他时长(面议)';
+                    } else if (order.course_type === 'other') {
+                        actualPrice = '其他时长';
+                    } else {
+                        actualPrice = '未设置';
                     }
                 }
 
                 return {
-                    ...order,
-                    order_number: order.id,
+                    id: order.id,
+                    order_number: order.order_number || order.id,
+                    user_name: order.user_name || '未知用户',
+                    user_username: order.user_username,
+                    merchant_id: order.merchant_id,
+                    merchant_name: order.merchant_name || '未知商家',
+                    teacher_contact: order.teacher_contact,
+                    region_name: order.region_name || '未知地区',
+                    course_type: order.course_type,
+                    course_content: order.course_content || order.course_type,
                     actual_price: actualPrice,
                     price: actualPrice,
-                    status: order.real_status, // 使用SQL计算的状态
-                    merchant_name: order.actual_merchant_name || order.teacher_name,
-                    region_name: order.region_name || '未知地区',
-                    // 添加评价状态字段 - 基于evaluations表的实际数据
+                    status: order.real_status,
+                    created_at: order.created_at,
+                    updated_at: order.updated_at,
+                    booking_time: order.booking_time,
+                    // 添加评价状态字段
                     user_evaluation_status: this.getUserEvaluationStatus(order.booking_session_id),
                     merchant_evaluation_status: this.getMerchantEvaluationStatus(order.booking_session_id)
                 };
@@ -636,7 +630,7 @@ class ApiService {
                 SELECT COUNT(*) as count 
                 FROM orders o
                 LEFT JOIN merchants m ON o.merchant_id = m.id
-                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN regions r ON o.region_id = r.id
                 LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE ${whereClause}
             `).get(...params);
@@ -652,6 +646,7 @@ class ApiService {
                 }
             };
         } catch (error) {
+            console.error('获取订单列表失败:', error);
             throw new Error('获取订单列表失败: ' + error.message);
         }
     }
@@ -700,8 +695,8 @@ class ApiService {
             const order = db.prepare(`
                 SELECT 
                     o.*,
-                    m.id as merchant_id,
-                    m.teacher_name as actual_merchant_name,
+                    m.id as merchant_db_id,
+                    m.teacher_name as merchant_name,
                     m.username as merchant_username,
                     m.contact as teacher_contact,
                     m.price1,
@@ -709,38 +704,10 @@ class ApiService {
                     r.name as region_name,
                     bs.user_course_status,
                     bs.merchant_course_status,
-                    bs.updated_at as completion_time,
-                    -- 获取用户评价（包含评价时间）
-                    (SELECT json_object(
-                        'overall_score', overall_score,
-                        'detailed_scores', detailed_scores,
-                        'comments', comments,
-                        'status', status,
-                        'created_at', created_at
-                    ) FROM evaluations 
-                     WHERE booking_session_id = o.booking_session_id 
-                     AND evaluator_type = 'user' LIMIT 1) as user_evaluation_data,
-                    -- 获取商家评价（包含评价时间）
-                    (SELECT json_object(
-                        'overall_score', overall_score,
-                        'detailed_scores', detailed_scores,
-                        'comments', comments,
-                        'status', status,
-                        'created_at', created_at
-                    ) FROM evaluations 
-                     WHERE booking_session_id = o.booking_session_id 
-                     AND evaluator_type = 'merchant' LIMIT 1) as merchant_evaluation_data,
-                    -- 获取用户评价时间
-                    (SELECT created_at FROM evaluations 
-                     WHERE booking_session_id = o.booking_session_id 
-                     AND evaluator_type = 'user' LIMIT 1) as user_evaluation_time,
-                    -- 获取商家评价时间  
-                    (SELECT created_at FROM evaluations 
-                     WHERE booking_session_id = o.booking_session_id 
-                     AND evaluator_type = 'merchant' LIMIT 1) as merchant_evaluation_time
+                    bs.updated_at as completion_time
                 FROM orders o
                 LEFT JOIN merchants m ON o.merchant_id = m.id
-                LEFT JOIN regions r ON m.region_id = r.id
+                LEFT JOIN regions r ON o.region_id = r.id
                 LEFT JOIN booking_sessions bs ON o.booking_session_id = bs.id
                 WHERE o.id = ?
             `).get(orderId);
@@ -749,112 +716,85 @@ class ApiService {
                 throw new Error('订单不存在');
             }
 
-            // 计算实际价格 - 根据课程类型匹配商家价格设置
-            let actualPrice = '价格未设置';
-            if (order.price && order.price !== '未设置' && !isNaN(order.price)) {
-                actualPrice = parseInt(order.price);
-            } else {
-                // 根据课程内容匹配商家价格
-                if (order.course_content === 'p' && order.price1) {
+            // 计算实际价格
+            let actualPrice = order.actual_price;
+            if (!actualPrice || actualPrice === 0) {
+                if (order.course_type === 'p' && order.price1) {
                     actualPrice = order.price1;
-                } else if (order.course_content === 'pp' && order.price2) {
+                } else if (order.course_type === 'pp' && order.price2) {
                     actualPrice = order.price2;
-                } else if (order.course_content === 'other') {
-                    actualPrice = '其他时长(面议)';
+                } else if (order.course_type === 'other') {
+                    actualPrice = '其他时长';
+                } else {
+                    actualPrice = '未设置';
                 }
             }
 
-            // 确定订单真实状态 - 基于booking_sessions的状态
-            let realStatus = 'pending'; // 默认状态
+            // 确定订单真实状态
+            let realStatus = 'pending';
             if (order.user_course_status === 'completed') {
                 realStatus = 'completed';
-            } else if (order.user_course_status === 'incomplete') {
-                realStatus = 'incomplete';
             } else if (order.user_course_status === 'confirmed' || order.status === 'confirmed') {
                 realStatus = 'confirmed';
             } else if (order.status === 'cancelled') {
                 realStatus = 'cancelled';
             }
 
-            // 时间处理 - 转换Unix时间戳为ISO格式
+            // 获取评价数据
+            const userEvaluation = db.prepare(`
+                SELECT overall_score, detail_scores, text_comment, status, created_at
+                FROM evaluations 
+                WHERE booking_session_id = ? AND evaluator_type = 'user'
+            `).get(order.booking_session_id);
+
+            const merchantEvaluation = db.prepare(`
+                SELECT overall_score, detail_scores, text_comment, status, created_at
+                FROM evaluations 
+                WHERE booking_session_id = ? AND evaluator_type = 'merchant'
+            `).get(order.booking_session_id);
+
+            // 时间处理
             const formatTime = (timestamp) => {
                 if (!timestamp) return null;
-                // 如果是Unix时间戳（数字）
                 if (typeof timestamp === 'number' || /^\d+$/.test(timestamp)) {
                     return new Date(parseInt(timestamp) * 1000).toISOString();
                 }
-                // 如果已经是ISO格式
                 return timestamp;
             };
 
-            // 处理评价数据
-            let userEvaluation = null;
-            let merchantEvaluation = null;
-            
-            try {
-                if (order.user_evaluation_data) {
-                    const evalData = JSON.parse(order.user_evaluation_data);
-                    userEvaluation = {
-                        overall_score: evalData.overall_score,
-                        scores: JSON.parse(evalData.detailed_scores || '{}'),
-                        comments: evalData.comments,
-                        created_at: formatTime(evalData.created_at)
-                    };
-                }
-            } catch (e) {
-                console.error('解析用户评价数据失败:', e);
-            }
-
-            try {
-                if (order.merchant_evaluation_data) {
-                    const evalData = JSON.parse(order.merchant_evaluation_data);
-                    // 检查是否有实际评分数据
-                    const hasDetailedScores = evalData.detailed_scores && evalData.detailed_scores !== 'null';
-                    const hasOverallScore = evalData.overall_score !== null;
-                    
-                    merchantEvaluation = {
-                        overall_score: evalData.overall_score,
-                        scores: hasDetailedScores ? JSON.parse(evalData.detailed_scores) : {},
-                        comments: evalData.comments, // 只使用数据库中的comments，不自动生成
-                        created_at: formatTime(evalData.created_at),
-                        is_simple_evaluation: !hasDetailedScores && hasOverallScore // 标记是否为简单评价（有总体评分但无详细评分）
-                    };
-                }
-            } catch (e) {
-                console.error('解析商家评价数据失败:', e);
-            }
-
             // 构建处理后的订单数据
             const processedOrder = {
-                ...order,
-                // 基本信息
+                id: order.id,
+                order_number: order.order_number || order.id,
                 user_name: order.user_name || '未知用户',
                 user_username: order.user_username,
                 merchant_id: order.merchant_id,
-                merchant_name: order.actual_merchant_name || order.teacher_name,
+                merchant_name: order.merchant_name || '未知商家',
                 teacher_contact: order.teacher_contact,
                 region: order.region_name || '未知地区',
-                
-                // 价格信息
+                course_type: order.course_type,
+                course_content: order.course_content || order.course_type,
                 price: actualPrice,
                 actual_price: actualPrice,
-                
-                // 状态信息  
                 status: realStatus,
+                booking_time: order.booking_time,
+                created_at: order.created_at,
+                updated_at: order.updated_at,
+                completion_time: formatTime(order.completion_time),
                 user_evaluation_status: this.getUserEvaluationStatus(order.booking_session_id),
                 merchant_evaluation_status: this.getMerchantEvaluationStatus(order.booking_session_id),
-                
-                // 时间信息
-                booking_time: order.booking_time, // 预约时间
-                created_at: order.created_at,     // 创建时间
-                updated_at: order.updated_at,     // 更新时间
-                completion_time: formatTime(order.completion_time), // 完成时间
-                user_evaluation_time: formatTime(order.user_evaluation_time), // 用户评价时间
-                merchant_evaluation_time: formatTime(order.merchant_evaluation_time), // 商家评价时间
-                
-                // 评价数据
-                user_evaluation: userEvaluation,
-                merchant_evaluation: merchantEvaluation
+                user_evaluation: userEvaluation ? {
+                    overall_score: userEvaluation.overall_score,
+                    scores: userEvaluation.detail_scores ? JSON.parse(userEvaluation.detail_scores) : {},
+                    comments: userEvaluation.text_comment,
+                    created_at: formatTime(userEvaluation.created_at)
+                } : null,
+                merchant_evaluation: merchantEvaluation ? {
+                    overall_score: merchantEvaluation.overall_score,
+                    scores: merchantEvaluation.detail_scores ? JSON.parse(merchantEvaluation.detail_scores) : {},
+                    comments: merchantEvaluation.text_comment,
+                    created_at: formatTime(merchantEvaluation.created_at)
+                } : null
             };
 
             return {
@@ -871,11 +811,12 @@ class ApiService {
     async getRegions() {
         try {
             const regions = db.prepare(`
-                SELECT id, name FROM regions WHERE active = 1 ORDER BY sort_order, name
+                SELECT id, name FROM regions ORDER BY sort_order, name
             `).all();
 
             return { data: regions };
         } catch (error) {
+            console.error('获取地区列表失败:', error);
             throw new Error('获取地区列表失败: ' + error.message);
         }
     }
@@ -1333,14 +1274,14 @@ class ApiService {
         const conditions = ['1=1'];
         const params = [];
 
-        // 时间筛选 - 使用ISO字符串格式的时间
+        // 时间筛选 - 使用Unix时间戳
         if (filters.dateFrom) {
-            conditions.push('date(datetime(o.created_at)) >= date(?)');
+            conditions.push('date(o.created_at, "unixepoch") >= ?');
             params.push(filters.dateFrom);
         }
 
         if (filters.dateTo) {
-            conditions.push('date(datetime(o.created_at)) <= date(?)');
+            conditions.push('date(o.created_at, "unixepoch") <= ?');
             params.push(filters.dateTo);
         }
 
@@ -1351,26 +1292,26 @@ class ApiService {
             params.push(filters.merchantId); // 当作老师名称搜索
         }
 
-        // 地区筛选 - 直接通过JOIN的条件筛选
+        // 地区筛选 - 修正JOIN关系
         if (filters.regionId) {
-            conditions.push('m.region_id = ?');
+            conditions.push('o.region_id = ?');
             params.push(filters.regionId);
         }
 
-        // 价格区间筛选 - 基于实际价格计算
+        // 价格区间筛选 - 修正字段名称
         if (filters.priceRange) {
             switch (filters.priceRange) {
                 case '0-500':
-                    conditions.push('CAST(o.price_range AS INTEGER) BETWEEN 0 AND 500');
+                    conditions.push('(CAST(o.actual_price AS INTEGER) BETWEEN 0 AND 500 OR o.price_range = "0-500")');
                     break;
                 case '500-1000':
-                    conditions.push('CAST(o.price_range AS INTEGER) BETWEEN 500 AND 1000');
+                    conditions.push('(CAST(o.actual_price AS INTEGER) BETWEEN 500 AND 1000 OR o.price_range = "500-1000")');
                     break;
                 case '1000-2000':
-                    conditions.push('CAST(o.price_range AS INTEGER) BETWEEN 1000 AND 2000');
+                    conditions.push('(CAST(o.actual_price AS INTEGER) BETWEEN 1000 AND 2000 OR o.price_range = "1000-2000")');
                     break;
                 case '2000+':
-                    conditions.push('CAST(o.price_range AS INTEGER) > 2000');
+                    conditions.push('(CAST(o.actual_price AS INTEGER) > 2000 OR o.price_range = "2000+")');
                     break;
             }
         }
@@ -1383,9 +1324,9 @@ class ApiService {
             }
         }
 
-        // 课程类型筛选 - 精确匹配
+        // 课程类型筛选 - 修正字段名称
         if (filters.courseType) {
-            conditions.push('o.course_content = ?');
+            conditions.push('o.course_type = ?');
             params.push(filters.courseType);
         }
 
@@ -1399,7 +1340,7 @@ class ApiService {
                 m.username LIKE ? OR 
                 o.course_content LIKE ? OR
                 CAST(o.actual_price AS TEXT) LIKE ? OR
-                CAST(o.price_range AS TEXT) LIKE ?
+                o.price_range LIKE ?
             )`);
             const searchTerm = `%${filters.search}%`;
             params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
@@ -1429,21 +1370,19 @@ class ApiService {
         if (filters.minPrice && !isNaN(filters.minPrice)) {
             conditions.push(`(
                 (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) >= ?) OR
-                (o.price_range IS NOT NULL AND CAST(o.price_range AS REAL) >= ?) OR
-                (o.course_content = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) >= ?) OR
-                (o.course_content = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) >= ?)
+                (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) >= ?) OR
+                (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) >= ?)
             )`);
-            params.push(filters.minPrice, filters.minPrice, filters.minPrice, filters.minPrice);
+            params.push(filters.minPrice, filters.minPrice, filters.minPrice);
         }
 
         if (filters.maxPrice && !isNaN(filters.maxPrice)) {
             conditions.push(`(
                 (o.actual_price IS NOT NULL AND CAST(o.actual_price AS REAL) <= ?) OR
-                (o.price_range IS NOT NULL AND CAST(o.price_range AS REAL) <= ?) OR
-                (o.course_content = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) <= ?) OR
-                (o.course_content = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) <= ?)
+                (o.course_type = 'p' AND m.price1 IS NOT NULL AND CAST(m.price1 AS REAL) <= ?) OR
+                (o.course_type = 'pp' AND m.price2 IS NOT NULL AND CAST(m.price2 AS REAL) <= ?)
             )`);
-            params.push(filters.maxPrice, filters.maxPrice, filters.maxPrice, filters.maxPrice);
+            params.push(filters.maxPrice, filters.maxPrice, filters.maxPrice);
         }
 
         // 评价状态筛选

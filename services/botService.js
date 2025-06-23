@@ -3781,18 +3781,56 @@ async function handleMerchantDetailEvaluationConfirm(userId, data, query) {
             console.log('evaluationId:', evaluationId);
             console.log('detailScores:', detailScores);
             console.log('existingOverallScore:', existingOverallScore);
+            
+            // 检查是否有文字评价
+            const hasTextComment = detailScores.textComment && detailScores.textComment.trim() !== '';
+            
+            if (hasTextComment) {
+                console.log('检测到文字评价:', detailScores.textComment);
+                
+                // 保存完整的详细评价到数据库，包括文字评价
+                evaluationService.updateEvaluation(evaluationId, existingOverallScore, detailScores, detailScores.textComment, 'completed');
+                
+                // 兼容性：同时更新orders表中的商家评价字段
+                const evaluation = evaluationService.getEvaluation(evaluationId);
+                if (evaluation && evaluation.booking_session_id) {
+                    const order = dbOperations.getOrderByBookingSession(evaluation.booking_session_id);
+                    if (order) {
+                        const evaluationData = JSON.stringify({
+                            overall_score: existingOverallScore,
+                            scores: detailScores,
+                            textComment: detailScores.textComment,
+                            created_at: Math.floor(Date.now() / 1000)
+                        });
+                        dbOperations.updateOrderFields(order.id, {
+                            merchant_evaluation: evaluationData,
+                            updated_at: Math.floor(Date.now() / 1000)
+                        });
+                        console.log(`📝 兼容性：商家完整评价数据已同步到orders表，订单ID: ${order.id}`);
+                    }
+                }
+                
+                // 删除评价会话
+                dbOperations.deleteEvaluationSession(evalSession.id);
+                
+                // 发送完成消息
+                await bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
+                
+                // 商家详细评价完成后，直接结束流程（商家不需要播报）
+                setTimeout(async () => {
+                    await bot.sendMessage(userId, '欢迎下次为小鸡服务！');
+                }, 1000);
+            } else {
+                console.log('没有检测到文字评价，只保存评分数据');
+                
+                // 只保存评分数据，状态设为详细评价完成但可能需要文字评价
+                evaluationService.updateEvaluation(evaluationId, existingOverallScore, detailScores, null, 'detail_completed');
+                
+                // 发送完成消息，但提示可以补充文字评价
+                await bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您的评价～\n\n欢迎下次为小鸡服务！');
+            }
+            
             console.log('=== 商家详细评价确认调试结束 ===');
-            
-            // 保存详细评价到数据库，保留原有的overall_score
-            evaluationService.updateEvaluation(evaluationId, existingOverallScore, detailScores, '详细评价已完成', 'completed');
-            
-            // 发送完成消息
-            await bot.sendMessage(userId, '🎉 详细评价提交成功！\n\n🙏 感谢老师您耐心评价，这将会纳入您的评价数据\n📊 未来小鸡会总结您的全面总结上课报告数据！');
-            
-            // 商家详细评价完成后，直接结束流程（商家不需要播报）
-            setTimeout(async () => {
-                await bot.sendMessage(userId, '欢迎下次为小鸡服务！');
-            }, 1000);
         }
         
     } catch (error) {

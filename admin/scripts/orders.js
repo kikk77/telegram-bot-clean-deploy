@@ -1737,10 +1737,11 @@ class OptimizedOrdersManager {
                 </div>`;
             }
             
-            // 详细评分 - 使用info-item格式，按照12项评分的顺序显示
+            // 详细评分 - 支持商家详细评价的数据结构
             if (evaluation.scores && Object.keys(evaluation.scores).length > 0) {
-                // 定义评分项目的显示顺序和标签 - 根据实际的12项评分系统
+                // 定义评分项目的显示顺序和标签 - 支持商家详细评价系统
                 const scoreLabels = {
+                    // 用户评价老师的12项评分
                     'appearance': '颜值',
                     'waist': '腰腹', 
                     'feet': '脚型',
@@ -1752,49 +1753,100 @@ class OptimizedOrdersManager {
                     'sexiness': '骚气',
                     'attitude': '态度',
                     'voice': '叫声',
-                    'initiative': '主动'
+                    'initiative': '主动',
+                    // 商家详细评价项目
+                    'length': '鸡鸡长度',
+                    'hardness': '鸡鸡硬度',
+                    'duration': '单次做爱时间'
                 };
                 
-                // 定义左右两列的分组
-                const leftColumnKeys = ['appearance', 'waist', 'feet', 'legs', 'tightness', 'breasts'];
-                const rightColumnKeys = ['temperament', 'environment', 'sexiness', 'attitude', 'voice', 'initiative'];
+                // 检查是否为商家详细评价
+                const isMerchantEvaluation = evaluation.scores.length || evaluation.scores.hardness || evaluation.scores.duration;
                 
-                // 创建两列布局的评分显示
-                html += '<div class="scores-grid">';
-                
-                // 左列
-                html += '<div class="score-column">';
-                leftColumnKeys.forEach(key => {
-                    if (evaluation.scores[key] !== undefined && typeof evaluation.scores[key] === 'number') {
-                        const score = evaluation.scores[key];
-                        const label = scoreLabels[key];
-                        
-                        html += `
-                        <div class="score-item">
-                            <span class="score-label">${label}</span>
-                            <span class="score-value">${score}/10</span>
-                        </div>`;
-                    }
-                });
-                html += '</div>';
-                
-                // 右列
-                html += '<div class="score-column">';
-                rightColumnKeys.forEach(key => {
-                    if (evaluation.scores[key] !== undefined && typeof evaluation.scores[key] === 'number') {
-                        const score = evaluation.scores[key];
-                        const label = scoreLabels[key];
-                        
-                        html += `
-                        <div class="score-item">
-                            <span class="score-label">${label}</span>
-                            <span class="score-value">${score}/10</span>
-                        </div>`;
-                    }
-                });
-                html += '</div>';
-                
-                html += '</div>';
+                if (isMerchantEvaluation) {
+                    // 商家详细评价的显示逻辑
+                    html += '<div class="merchant-scores-grid">';
+                    
+                    const merchantKeys = ['length', 'hardness', 'duration'];
+                    merchantKeys.forEach(key => {
+                        if (evaluation.scores[key] !== undefined) {
+                            const score = evaluation.scores[key];
+                            const label = scoreLabels[key];
+                            
+                            // 特殊处理 duration 字段（可能是文本而不是数字）
+                            let displayValue;
+                            if (key === 'duration') {
+                                if (typeof score === 'string') {
+                                    // 转换时间选项为中文显示
+                                    const durationMap = {
+                                        '1min': '1分钟内',
+                                        '3min': '3分钟',
+                                        '5min': '5分钟',
+                                        '10min': '10分钟',
+                                        '15min': '15分钟',
+                                        '30min': '30分钟',
+                                        '1hour': '1小时以上',
+                                        'no': '未出水💦'
+                                    };
+                                    displayValue = durationMap[score] || score;
+                                } else {
+                                    displayValue = `${score}/10`;
+                                }
+                            } else {
+                                displayValue = `${score}/10`;
+                            }
+                            
+                            html += `
+                            <div class="score-item">
+                                <span class="score-label">${label}</span>
+                                <span class="score-value">${displayValue}</span>
+                            </div>`;
+                        }
+                    });
+                    
+                    html += '</div>';
+                } else {
+                    // 用户评价老师的12项评分显示逻辑
+                    const leftColumnKeys = ['appearance', 'waist', 'feet', 'legs', 'tightness', 'breasts'];
+                    const rightColumnKeys = ['temperament', 'environment', 'sexiness', 'attitude', 'voice', 'initiative'];
+                    
+                    // 创建两列布局的评分显示
+                    html += '<div class="scores-grid">';
+                    
+                    // 左列
+                    html += '<div class="score-column">';
+                    leftColumnKeys.forEach(key => {
+                        if (evaluation.scores[key] !== undefined && typeof evaluation.scores[key] === 'number') {
+                            const score = evaluation.scores[key];
+                            const label = scoreLabels[key];
+                            
+                            html += `
+                            <div class="score-item">
+                                <span class="score-label">${label}</span>
+                                <span class="score-value">${score}/10</span>
+                            </div>`;
+                        }
+                    });
+                    html += '</div>';
+                    
+                    // 右列
+                    html += '<div class="score-column">';
+                    rightColumnKeys.forEach(key => {
+                        if (evaluation.scores[key] !== undefined && typeof evaluation.scores[key] === 'number') {
+                            const score = evaluation.scores[key];
+                            const label = scoreLabels[key];
+                            
+                            html += `
+                            <div class="score-item">
+                                <span class="score-label">${label}</span>
+                                <span class="score-value">${score}/10</span>
+                            </div>`;
+                        }
+                    });
+                    html += '</div>';
+                    
+                    html += '</div>';
+                }
             }
             
             // 评分详情卡片不显示评价时间，保持纯净的评分显示
@@ -1824,7 +1876,7 @@ class OptimizedOrdersManager {
                 <div class="comment-content">
                     <div class="comment-text" id="${commentId}">${commentText}</div>
                     <div class="comment-actions">
-                        <button class="copy-evaluation-btn" onclick="orderManager.copyEvaluationContentById('${commentId}')">
+                        <button class="copy-evaluation-btn" onclick="ordersManager.copyEvaluationContentById('${commentId}')">
                             📋 复制评价内容
                         </button>
                     </div>
@@ -1833,15 +1885,32 @@ class OptimizedOrdersManager {
                 return html;
             }
             
-            // 详细评价的文字内容
-            if (evaluation.comments) {
+            // 详细评价的文字内容 - 支持多种数据结构
+            let hasTextComment = false;
+            
+            // 检查 textComment 字段（新的商家详细评价系统）
+            if (evaluation.textComment && evaluation.textComment.trim() !== '') {
+                commentText = evaluation.textComment;
+                hasTextComment = true;
+            }
+            // 检查 comments 字段（旧系统兼容）
+            else if (evaluation.comments && evaluation.comments.trim() !== '') {
                 commentText = evaluation.comments;
+                hasTextComment = true;
+            }
+            // 检查 scores.textComment 字段（嵌套结构）
+            else if (evaluation.scores && evaluation.scores.textComment && evaluation.scores.textComment.trim() !== '') {
+                commentText = evaluation.scores.textComment;
+                hasTextComment = true;
+            }
+            
+            if (hasTextComment) {
                 const commentId = 'comment_' + Math.random().toString(36).substr(2, 9);
                 html += `
                 <div class="comment-content">
                     <div class="comment-text" id="${commentId}">${commentText}</div>
                     <div class="comment-actions">
-                        <button class="copy-evaluation-btn" onclick="orderManager.copyEvaluationContentById('${commentId}')">
+                        <button class="copy-evaluation-btn" onclick="ordersManager.copyEvaluationContentById('${commentId}')">
                             📋 复制评价内容
                         </button>
                     </div>

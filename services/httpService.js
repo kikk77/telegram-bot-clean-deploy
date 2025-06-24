@@ -992,9 +992,9 @@ async function processApiRequest(pathname, method, data) {
                     [{ text: '预约老师课程', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }]
                 ];
                 
-                // 如果商家有频道链接，添加"关注老师频道"按钮（使用callback方式）
+                // 如果商家有频道链接，添加"关注老师频道"按钮（直接跳转到机器人）
                 if (merchant.channel_link && merchant.channel_link.trim()) {
-                    buttons.push([{ text: '关注老师频道', callback_data: `group_channel_${merchantId}` }]);
+                    buttons.push([{ text: '关注老师频道', url: `https://t.me/${botUsername}?start=channel_${merchantId}` }]);
                 }
                 
                 sendOptions.reply_markup = {

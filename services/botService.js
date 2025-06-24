@@ -578,45 +578,7 @@ function initBotHandlers() {
                 chatId
             );
             
-            // 检查是否是频道查看流程
-            if (text.includes(' channel_')) {
-                const merchantId = text.split('channel_')[1];
-                console.log(`解析到频道查看商家ID: ${merchantId}`);
-                
-                const merchant = dbOperations.getMerchantById(merchantId);
-                console.log(`查询到商家信息:`, merchant);
-                
-                if (merchant && merchant.channel_link && merchant.channel_link.trim()) {
-                    // 发送包含频道链接的消息（不记录、不通知）
-                    const channelMessage = `🔗 ${merchant.teacher_name} 老师的频道：\n${merchant.channel_link}`;
-                    
-                    const channelOptions = {
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '打开频道', url: merchant.channel_link }],
-                                [{ text: '关注老师频道', callback_data: `channel_${merchantId}` }],
-                                [{ text: '预约上课', callback_data: `merchant_${merchantId}` }],
-                                [{ text: '返回榜单', url: 'https://t.me/xiaoji233' }]
-                            ]
-                        },
-                        disable_web_page_preview: false
-                    };
-                    
-                    console.log(`发送频道信息给用户 ${userId}（不记录点击）`);
-                    const sentMessage = await bot.sendMessage(chatId, channelMessage, channelOptions);
-                    
-                    // 将频道信息消息添加到消息跟踪系统
-                    addMessageToHistory(userId, sentMessage.message_id, 'channel_link', {
-                        merchantId: merchantId,
-                        channelLink: merchant.channel_link
-                    });
-                    return;
-                } else {
-                    console.log(`商家ID ${merchantId} 不存在或未设置频道链接`);
-                    bot.sendMessage(chatId, '❌ 该老师暂未设置频道链接');
-                    return;
-                }
-            }
+
             
             // 检查是否是商家联系流程
             if (text.includes(' merchant_')) {
@@ -632,18 +594,19 @@ function initBotHandlers() {
                         bot.sendMessage(chatId, '😔 抱歉，目前老师已下线，请看看其他老师吧～\n\n您可以使用 /start 命令重新查看可用的老师列表。');
                         return;
                     }
-                    // 发送商家信息（不包含联系方式）
+                    // 发送商家信息（完整信息）
                     const merchantInfo = `地区：#${merchant.region_name || 'xx'}              艺名：${merchant.teacher_name || '未填写'}\n` +
                                        `优点：${merchant.advantages || '未填写'}\n` +
                                        `缺点：${merchant.disadvantages || '未填写'}\n` +
-                                       `价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp\n\n` +
+                                       `价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp\n` +
+                                       `联系：${merchant.contact || '未填写'}\n\n` +
                                        `老师💃自填基本功：\n` +
                                        `💦洗:${merchant.skill_wash || '未填写'}\n` +
                                        `👄吹:${merchant.skill_blow || '未填写'}\n` +
                                        `❤️做:${merchant.skill_do || '未填写'}\n` +
                                        `🐍吻:${merchant.skill_kiss || '未填写'}`;
                     
-                    // 构建按钮，根据是否有频道链接决定是否显示"关注老师频道"按钮
+                    // 构建按钮 - 三个标准按钮
                     const buttons = [
                         [{ text: '预约老师课程', callback_data: `attack_${merchantId}` }]
                     ];
@@ -663,7 +626,18 @@ function initBotHandlers() {
                     };
                     
                     console.log(`发送商家信息给用户 ${userId}`);
-                    const sentMessage = await bot.sendMessage(chatId, merchantInfo, options);
+                    
+                    // 如果商家有图片，发送图片消息；否则发送文字消息
+                    let sentMessage;
+                    if (merchant.image_url && merchant.image_url.trim()) {
+                        sentMessage = await bot.sendPhoto(chatId, merchant.image_url, {
+                            caption: merchantInfo,
+                            reply_markup: options.reply_markup
+                        });
+                    } else {
+                        sentMessage = await bot.sendMessage(chatId, merchantInfo, options);
+                    }
+                    
                     console.log(`发送商家信息成功id${sentMessage.message_id}`);
                     
                     // 将商家信息消息添加到消息跟踪系统
@@ -1033,11 +1007,6 @@ function initBotHandlers() {
                 console.error('记录频道点击失败:', error);
             }
             
-            // 回应callback并发送包含频道链接的消息
-            await bot.answerCallbackQuery(query.id, {
-                text: `正在打开 ${merchant.teacher_name} 老师的频道...`
-            });
-            
             // 发送包含频道链接的消息，用户点击链接直接跳转
             const channelMessage = `🔗 ${merchant.teacher_name} 老师的频道：\n${merchant.channel_link}`;
             
@@ -1045,7 +1014,7 @@ function initBotHandlers() {
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '打开频道', url: merchant.channel_link }],
-                        [{ text: '预约上课', callback_data: `merchant_${merchantId}` }],
+                        [{ text: '预约上课', callback_data: `attack_${merchantId}` }],
                         [{ text: '返回榜单', url: 'https://t.me/xiaoji233' }]
                     ]
                 },

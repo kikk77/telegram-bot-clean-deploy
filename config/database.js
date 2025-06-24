@@ -229,6 +229,7 @@ class DatabaseManager {
                 skill_blow TEXT,
                 skill_do TEXT,
                 skill_kiss TEXT,
+                channel_link TEXT,
                 FOREIGN KEY (region_id) REFERENCES regions (id)
             );
         `);
@@ -418,7 +419,7 @@ class DatabaseManager {
             const tableInfo = this.db.prepare("PRAGMA table_info(merchants)").all();
             const columnNames = tableInfo.map(col => col.name);
             
-            const requiredColumns = ['advantages', 'disadvantages', 'price1', 'price2', 'skill_wash', 'skill_blow', 'skill_do', 'skill_kiss'];
+            const requiredColumns = ['advantages', 'disadvantages', 'price1', 'price2', 'skill_wash', 'skill_blow', 'skill_do', 'skill_kiss', 'channel_link'];
             
             for (const column of requiredColumns) {
                 if (!columnNames.includes(column)) {

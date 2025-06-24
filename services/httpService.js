@@ -768,7 +768,8 @@ async function processApiRequest(pathname, method, data) {
         if (data.advantages !== undefined || data.disadvantages !== undefined || 
             data.price1 !== undefined || data.price2 !== undefined ||
             data.skillWash !== undefined || data.skillBlow !== undefined ||
-            data.skillDo !== undefined || data.skillKiss !== undefined) {
+            data.skillDo !== undefined || data.skillKiss !== undefined ||
+            data.channelLink !== undefined) {
             // 使用新的模板更新方法
             dbOperations.updateMerchantTemplate(merchantId, data);
         } else {

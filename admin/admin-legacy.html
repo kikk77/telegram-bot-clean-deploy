@@ -551,6 +551,11 @@
                                 </div>
                                 <small>可以手动编辑或使用商家绑定时填写的联系方式</small>
                             </div>
+                            <div class="form-group">
+                                <label>频道链接：</label>
+                                <input type="text" id="editChannelLink" placeholder="https://t.me/channelname">
+                                <small>用户点击"关注老师频道"按钮时跳转的链接</small>
+                            </div>
                         </div>
 
                         <!-- 绑定码管理 -->
@@ -1656,6 +1661,7 @@
             document.getElementById('editTeacherName').value = merchant.teacher_name || '';
             document.getElementById('editRegionId').value = merchant.region_id || '';
             document.getElementById('editContact').value = merchant.contact || '';
+            document.getElementById('editChannelLink').value = merchant.channel_link || '';
             document.getElementById('editBindCode').value = merchant.bind_code || '';
             
             // 填充模板信息
@@ -1795,6 +1801,7 @@
             const teacherName = document.getElementById('editTeacherName').value;
             const regionId = document.getElementById('editRegionId').value;
             const contact = document.getElementById('editContact').value;
+            const channelLink = document.getElementById('editChannelLink').value;
             const bindCode = document.getElementById('editBindCode').value;
             const advantages = document.getElementById('editAdvantages').value;
             const disadvantages = document.getElementById('editDisadvantages').value;
@@ -1811,6 +1818,7 @@
                     teacherName,
                     regionId,
                     contact,
+                    channelLink,
                     bindCode,
                     advantages,
                     disadvantages,

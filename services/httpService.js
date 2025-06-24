@@ -872,10 +872,10 @@ async function processApiRequest(pathname, method, data) {
         const stats = dbOperations.getInteractionStats();
         const cacheData = getCacheData();
         
-        // 获取真实的点击统计 - 只统计用户点击"出击"按钮的次数
+        // 获取真实的点击统计 - 只统计用户点击"预约老师课程"按钮的次数
         const db = require('../config/database').getInstance().db;
         const attackClicks = db.prepare('SELECT COUNT(*) as count FROM interactions WHERE action_type = ?').get('attack_click').count;
-        const totalClicks = attackClicks; // 总点击数就是出击点击数
+        const totalClicks = attackClicks; // 总点击数就是预约按钮点击数
         
         // 获取实际数据库计数
         const bindCodes = dbOperations.getAllBindCodes();
@@ -989,7 +989,7 @@ async function processApiRequest(pathname, method, data) {
                 
                 // 构建按钮，根据是否有频道链接决定是否显示"关注老师频道"按钮
                 const buttons = [
-                    [{ text: '出击！', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }]
+                                            [{ text: '预约老师课程', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }]
                 ];
                 
                 // 如果商家有频道链接，添加"关注老师频道"按钮

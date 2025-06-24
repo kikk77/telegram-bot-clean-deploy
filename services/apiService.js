@@ -1520,11 +1520,11 @@ class ApiService {
             const completedOrders = db.prepare("SELECT COUNT(*) as count FROM orders WHERE status = 'completed'").get().count;
             const pendingOrders = db.prepare("SELECT COUNT(*) as count FROM orders WHERE status IN ('attempting', 'pending')").get().count;
             
-            // 获取真实的点击统计 - 只统计用户点击"出击"按钮的次数
+            // 获取真实的点击统计 - 只统计用户点击"预约老师课程"按钮的次数
             const attackClicks = db.prepare('SELECT COUNT(*) as count FROM interactions WHERE action_type = ?').get('attack_click').count;
-            const totalClicks = attackClicks; // 总点击数就是出击点击数
+            const totalClicks = attackClicks; // 总点击数就是预约按钮点击数
             
-            console.log(`点击统计详情: 出击点击=${attackClicks}, 总点击数=${totalClicks}`);
+            console.log(`点击统计详情: 预约点击=${attackClicks}, 总点击数=${totalClicks}`);
             console.log(`商家统计: 总数=${totalMerchants}, 活跃=${activeMerchants}`);
             console.log(`订单统计: 总数=${totalOrders}, 完成=${completedOrders}, 待处理=${pendingOrders}`);
             

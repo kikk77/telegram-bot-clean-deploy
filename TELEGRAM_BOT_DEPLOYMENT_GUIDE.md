@@ -47,8 +47,8 @@ kitelegrambot/
 ```mermaid
 graph TD
     A[管理后台] --> B[测试发送商家信息]
-    B --> C[群组显示商家信息 + 出击按钮]
-    C --> D[用户点击出击按钮]
+    B --> C[群组显示商家信息 + 预约按钮]
+C --> D[用户点击预约按钮]
     D --> E[跳转到Bot私聊]
     E --> F[发送 /start merchant_123]
     F --> G[Bot显示详细商家信息]
@@ -284,7 +284,7 @@ const merchantInfo = `
 // 群组按钮配置（URL跳转类型）
 const keyboard = {
     inline_keyboard: [[{
-        text: "出击！",
+                        text: "预约老师课程",
         url: `https://t.me/${botUsername}?start=merchant_${merchantId}`
     }]]
 };

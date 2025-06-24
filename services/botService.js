@@ -1004,7 +1004,9 @@ function initBotHandlers() {
             const channelOptions = {
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '🔗 打开频道', url: merchant.channel_link }]
+                        [{ text: '打开频道', url: merchant.channel_link }],
+                        [{ text: '预约上课', callback_data: `book_menu_${merchantId}` }],
+                        [{ text: '返回榜单', url: 'https://t.me/xiaoji233' }]
                     ]
                 },
                 disable_web_page_preview: false
@@ -1014,6 +1016,53 @@ function initBotHandlers() {
             await sendMessageWithoutDelete(chatId, channelMessage, channelOptions, 'channel_link', {
                 merchantId: merchantId,
                 channelLink: merchant.channel_link
+            });
+            return;
+        }
+
+        // 处理预约菜单按钮点击（从频道页面跳转过来的）
+        if (data.startsWith('book_menu_')) {
+            const merchantId = data.replace('book_menu_', '');
+            
+            // 获取商家信息
+            const merchant = dbOperations.getMerchantById(merchantId);
+            if (!merchant) {
+                await bot.sendMessage(chatId, '❌ 商家信息不存在');
+                return;
+            }
+            
+            if (merchant.status !== 'active') {
+                await bot.sendMessage(chatId, '😔 抱歉，目前老师已下线，请看看其他老师吧～\n\n您可以使用 /start 命令重新查看可用的老师列表。');
+                return;
+            }
+            
+            // 回应callback
+            await bot.answerCallbackQuery(query.id, {
+                text: `选择预约类型...`
+            });
+            
+            // 显示预约选项菜单
+            const bookingMessage = `🎯 选择预约类型：
+
+👤 ${merchant.teacher_name} 老师
+📍 地区：${merchant.region_name || '未设置'}
+💰 价格：${merchant.price1 || '未设置'}p / ${merchant.price2 || '未设置'}pp
+
+请选择您要预约的课程类型：`;
+            
+            const bookingOptions = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: 'p课程', callback_data: `book_p_${merchantId}` }],
+                        [{ text: 'pp课程', callback_data: `book_pp_${merchantId}` }],
+                        [{ text: '其他时长', callback_data: `book_other_${merchantId}` }],
+                        [{ text: '返回频道', callback_data: `channel_${merchantId}` }]
+                    ]
+                }
+            };
+            
+            await sendMessageWithDelete(chatId, bookingMessage, bookingOptions, 'booking_menu', {
+                merchantId: merchantId
             });
             return;
         }

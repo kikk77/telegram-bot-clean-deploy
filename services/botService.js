@@ -406,6 +406,8 @@ async function sendMessageTemplate(chatId, template, replyToMessageId = null) {
         if (template.image_url) {
             await bot.sendPhoto(chatId, template.image_url, {
                 caption: template.content,
+                parse_mode: 'HTML',
+                show_caption_above_media: true,
                 ...options
             });
         } else {
@@ -632,6 +634,8 @@ function initBotHandlers() {
                     if (merchant.image_url && merchant.image_url.trim()) {
                         sentMessage = await bot.sendPhoto(chatId, merchant.image_url, {
                             caption: merchantInfo,
+                            parse_mode: 'HTML',
+                            show_caption_above_media: true,
                             reply_markup: options.reply_markup
                         });
                     } else {

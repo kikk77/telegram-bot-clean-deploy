@@ -1091,7 +1091,8 @@ async function processApiRequest(pathname, method, data) {
                 // 发送图片消息
                 const photoOptions = {
                     caption: sendOptions.caption,
-                    parse_mode: 'HTML'
+                    parse_mode: 'HTML',
+                    show_caption_above_media: true
                 };
                 if (sendOptions.reply_markup) {
                     photoOptions.reply_markup = sendOptions.reply_markup;

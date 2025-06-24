@@ -604,12 +604,11 @@ function initBotHandlers() {
                         bot.sendMessage(chatId, '😔 抱歉，目前老师已下线，请看看其他老师吧～\n\n您可以使用 /start 命令重新查看可用的老师列表。');
                         return;
                     }
-                    // 发送商家信息（完整信息）
+                    // 发送商家信息（不包含联系方式，用户需要通过预约按钮才能看到联系方式）
                     const merchantInfo = `地区：#${merchant.region_name || 'xx'}              艺名：${merchant.teacher_name || '未填写'}\n` +
                                        `优点：${merchant.advantages || '未填写'}\n` +
                                        `缺点：${merchant.disadvantages || '未填写'}\n` +
-                                       `价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp\n` +
-                                       `联系：${merchant.contact || '未填写'}\n\n` +
+                                       `价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp\n\n` +
                                        `老师💃自填基本功：\n` +
                                        `💦洗:${merchant.skill_wash || '未填写'}\n` +
                                        `👄吹:${merchant.skill_blow || '未填写'}\n` +

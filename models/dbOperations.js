@@ -842,6 +842,87 @@ const dbOperations = {
         return result;
     },
 
+    // 频道点击相关操作
+    recordChannelClick(clickData) {
+        const stmt = db.prepare(`
+            INSERT INTO channel_clicks (user_id, username, first_name, last_name, merchant_id, merchant_name, channel_link) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+            clickData.user_id,
+            clickData.username,
+            clickData.first_name,
+            clickData.last_name,
+            clickData.merchant_id,
+            clickData.merchant_name,
+            clickData.channel_link
+        );
+        return result.lastInsertRowid;
+    },
+
+    // 增加商家频道点击计数
+    incrementMerchantChannelClicks(merchantId) {
+        const stmt = db.prepare('UPDATE merchants SET channel_clicks = channel_clicks + 1 WHERE id = ?');
+        const result = stmt.run(merchantId);
+        
+        // 清理相关缓存
+        cache.set('all_merchants', null);
+        cache.set('active_merchants', null);
+        
+        return result;
+    },
+
+    // 获取商家频道点击统计
+    getMerchantChannelClickStats(merchantId) {
+        const stmt = db.prepare(`
+            SELECT 
+                m.id,
+                m.teacher_name,
+                m.channel_clicks,
+                COUNT(cc.id) as detailed_clicks
+            FROM merchants m
+            LEFT JOIN channel_clicks cc ON m.id = cc.merchant_id
+            WHERE m.id = ?
+            GROUP BY m.id
+        `);
+        return stmt.get(merchantId);
+    },
+
+    // 获取频道点击排名
+    getChannelClickRanking(limit = 50) {
+        const stmt = db.prepare(`
+            SELECT 
+                m.id,
+                m.teacher_name,
+                m.channel_link,
+                m.channel_clicks,
+                r.name as region_name,
+                COUNT(cc.id) as detailed_clicks
+            FROM merchants m
+            LEFT JOIN regions r ON m.region_id = r.id
+            LEFT JOIN channel_clicks cc ON m.id = cc.merchant_id
+            WHERE m.status = 'active' AND m.channel_link IS NOT NULL AND m.channel_link != ''
+            GROUP BY m.id
+            ORDER BY m.channel_clicks DESC, detailed_clicks DESC
+            LIMIT ?
+        `);
+        return stmt.all(limit);
+    },
+
+    // 获取频道点击详细记录
+    getChannelClickDetails(merchantId, limit = 100) {
+        const stmt = db.prepare(`
+            SELECT 
+                cc.*,
+                datetime(cc.clicked_at, 'unixepoch', 'localtime') as clicked_time
+            FROM channel_clicks cc
+            WHERE cc.merchant_id = ?
+            ORDER BY cc.clicked_at DESC
+            LIMIT ?
+        `);
+        return stmt.all(merchantId, limit);
+    },
+
     // 按钮操作
     createButton(title, message, merchantId) {
         const stmt = db.prepare('INSERT INTO buttons (title, message, merchant_id) VALUES (?, ?, ?)');

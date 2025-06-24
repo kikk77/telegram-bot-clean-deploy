@@ -994,7 +994,7 @@ async function processApiRequest(pathname, method, data) {
                 
                 // 如果商家有频道链接，添加"关注老师频道"按钮
                 if (merchant.channel_link && merchant.channel_link.trim()) {
-                    buttons.push([{ text: '关注老师频道', url: merchant.channel_link }]);
+                    buttons.push([{ text: '关注老师频道', callback_data: `channel_${merchantId}` }]);
                 }
                 
                 // 添加返回榜单按钮
@@ -1303,6 +1303,47 @@ async function processApiRequest(pathname, method, data) {
             return {
                 success: true,
                 username: 'xiaojisystembot'
+            };
+        }
+    }
+
+    // 商家排名API - 支持多种排名类型
+    if (pathname === '/api/rankings/merchants' && method === 'GET') {
+        try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const rankingType = url.searchParams.get('type') || 'monthlyOrders';
+            const regionId = url.searchParams.get('regionId');
+            const period = url.searchParams.get('period') || 'month';
+            
+            let rankings = [];
+            
+            if (rankingType === 'channelClicks') {
+                // 频道点击排名
+                rankings = dbOperations.getChannelClickRanking(50);
+                rankings = rankings.map((merchant, index) => ({
+                    ...merchant,
+                    rank: index + 1,
+                    displayValue: `${merchant.channel_clicks}次点击`,
+                    sortValue: merchant.channel_clicks
+                }));
+            } else {
+                // 其他排名类型的处理保持不变
+                const apiService = require('./apiService');
+                const result = await apiService.getMerchantRankings({
+                    query: { type: rankingType, regionId, period }
+                });
+                rankings = result.data || result.rankings || [];
+            }
+            
+            return {
+                success: true,
+                data: rankings
+            };
+        } catch (error) {
+            console.error('获取商家排名失败:', error);
+            return {
+                success: false,
+                error: error.message
             };
         }
     }

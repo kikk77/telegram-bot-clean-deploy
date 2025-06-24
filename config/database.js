@@ -203,7 +203,7 @@ class DatabaseManager {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 sort_order INTEGER DEFAULT 0,
-                active INTEGER DEFAULT 1
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
             );
         `);
 
@@ -230,7 +230,24 @@ class DatabaseManager {
                 skill_do TEXT,
                 skill_kiss TEXT,
                 channel_link TEXT,
+                channel_clicks INTEGER DEFAULT 0,
                 FOREIGN KEY (region_id) REFERENCES regions (id)
+            );
+        `);
+
+        // 频道点击记录表
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS channel_clicks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                merchant_id INTEGER NOT NULL,
+                merchant_name TEXT,
+                channel_link TEXT,
+                clicked_at INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (merchant_id) REFERENCES merchants (id)
             );
         `);
 
@@ -419,13 +436,13 @@ class DatabaseManager {
             const tableInfo = this.db.prepare("PRAGMA table_info(merchants)").all();
             const columnNames = tableInfo.map(col => col.name);
             
-            const requiredColumns = ['advantages', 'disadvantages', 'price1', 'price2', 'skill_wash', 'skill_blow', 'skill_do', 'skill_kiss', 'channel_link'];
+            const requiredColumns = ['advantages', 'disadvantages', 'price1', 'price2', 'skill_wash', 'skill_blow', 'skill_do', 'skill_kiss', 'channel_link', 'channel_clicks'];
             
             for (const column of requiredColumns) {
                 if (!columnNames.includes(column)) {
                     console.log(`添加字段 ${column} 到 merchants 表`);
-                    if (column.startsWith('price')) {
-                        this.db.exec(`ALTER TABLE merchants ADD COLUMN ${column} INTEGER`);
+                    if (column.startsWith('price') || column === 'channel_clicks') {
+                        this.db.exec(`ALTER TABLE merchants ADD COLUMN ${column} INTEGER DEFAULT 0`);
                     } else {
                         this.db.exec(`ALTER TABLE merchants ADD COLUMN ${column} TEXT`);
                     }

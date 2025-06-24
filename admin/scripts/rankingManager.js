@@ -204,6 +204,9 @@ class RankingManager {
                     break;
             }
             
+            // 添加排名类型参数
+            params.append('type', rankingType);
+            
             const queryString = params.toString();
             const apiUrl = queryString ? `/rankings/merchants?${queryString}` : '/rankings/merchants';
             
@@ -448,8 +451,10 @@ class RankingManager {
             console.log(`处理商家 ${index}:`, merchant);
             
             const completedOrders = merchant.completedOrders || 0;
+            const channelClicks = merchant.channel_clicks || 0;
             const rankNumber = merchant.rank || (index + 1);
             const merchantName = merchant.teacher_name || '未知商家';
+            const rankingType = this.currentMerchantRanking?.rankingType || 'monthlyOrders';
             
             // 根据排名显示不同样式
             let rankClass = '';
@@ -465,8 +470,13 @@ class RankingManager {
                 rankIcon = '🥉';
             }
             
-            // 只显示成交单数，不显示价格
-            const orderInfo = `${completedOrders}单`;
+            // 根据排名类型显示不同信息
+            let orderInfo = '';
+            if (rankingType === 'channelClicks') {
+                orderInfo = `${channelClicks}次点击`;
+            } else {
+                orderInfo = `${completedOrders}单`;
+            }
             
             // 使用正确的商家ID字段
             const merchantId = merchant.merchantId || merchant.id;

@@ -610,7 +610,7 @@ function initBotHandlers() {
                     
                     // 如果商家有频道链接，添加"关注老师频道"按钮
                     if (merchant.channel_link && merchant.channel_link.trim()) {
-                        buttons.push([{ text: '关注老师频道', url: merchant.channel_link }]);
+                        buttons.push([{ text: '关注老师频道', callback_data: `channel_${merchantId}` }]);
                     }
                     
                     // 添加返回榜单按钮
@@ -928,6 +928,78 @@ function initBotHandlers() {
             return;
         }
         
+        // 处理频道点击
+        if (data.startsWith('channel_')) {
+            const merchantId = data.replace('channel_', '');
+            
+            // 获取商家信息
+            const merchant = dbOperations.getMerchantById(merchantId);
+            if (!merchant) {
+                await bot.sendMessage(chatId, '❌ 商家信息不存在');
+                return;
+            }
+            
+            if (!merchant.channel_link || !merchant.channel_link.trim()) {
+                await bot.sendMessage(chatId, '❌ 该老师暂未设置频道链接');
+                return;
+            }
+            
+            // 获取用户信息
+            const userName = query.from.first_name || '';
+            const userLastName = query.from.last_name || '';
+            const fullName = `${userName} ${userLastName}`.trim() || '未设置名称';
+            const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+            
+            try {
+                // 记录频道点击到数据库
+                const clickData = {
+                    user_id: userId,
+                    username: query.from.username,
+                    first_name: query.from.first_name,
+                    last_name: query.from.last_name,
+                    merchant_id: merchantId,
+                    merchant_name: merchant.teacher_name,
+                    channel_link: merchant.channel_link
+                };
+                
+                dbOperations.recordChannelClick(clickData);
+                
+                // 更新商家的频道点击计数
+                dbOperations.incrementMerchantChannelClicks(merchantId);
+                
+                console.log(`✅ 记录频道点击: 用户 ${fullName} (${username}) 点击了商家 ${merchant.teacher_name} 的频道`);
+                
+                // 通知老师（如果有绑定的user_id）
+                if (merchant.user_id) {
+                    const notificationMessage = `🐥小鸡提醒：用户（${username}）通过管家查看了您的频道。`;
+                    
+                    bot.sendMessage(merchant.user_id, notificationMessage).catch(error => {
+                        console.log(`无法发送频道点击通知给商家 ${merchant.user_id}: ${error.message}`);
+                    });
+                    
+                    console.log(`✅ 已通知商家 ${merchant.teacher_name} (${merchant.user_id}) 有用户查看了频道`);
+                }
+                
+            } catch (error) {
+                console.error('记录频道点击失败:', error);
+            }
+            
+            // 发送频道链接给用户
+            const channelMessage = `🔗 ${merchant.teacher_name} 老师的频道链接：\n\n${merchant.channel_link}\n\n点击链接即可访问老师的频道！`;
+            
+            const channelOptions = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '打开频道', url: merchant.channel_link }],
+                        [{ text: '返回', callback_data: `attack_${merchantId}` }]
+                    ]
+                }
+            };
+            
+            await bot.sendMessage(chatId, channelMessage, channelOptions);
+            return;
+        }
+
         // 处理预约按钮点击
         if (data.startsWith('book_')) {
             const parts = data.split('_');

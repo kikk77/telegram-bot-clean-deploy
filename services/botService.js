@@ -1020,7 +1020,112 @@ function initBotHandlers() {
             return;
         }
 
-
+        // 处理群内频道点击（重新发送带计数的消息）
+        if (data.startsWith('group_channel_')) {
+            const merchantId = data.replace('group_channel_', '');
+            
+            // 获取商家信息
+            const merchant = dbOperations.getMerchantById(merchantId);
+            if (!merchant) {
+                await bot.answerCallbackQuery(query.id, {
+                    text: '❌ 商家信息不存在',
+                    show_alert: true
+                });
+                return;
+            }
+            
+            if (!merchant.channel_link || !merchant.channel_link.trim()) {
+                await bot.answerCallbackQuery(query.id, {
+                    text: '❌ 该老师暂未设置频道链接',
+                    show_alert: true
+                });
+                return;
+            }
+            
+            // 获取用户信息
+            const userName = query.from.first_name || '';
+            const userLastName = query.from.last_name || '';
+            const fullName = `${userName} ${userLastName}`.trim() || '未设置名称';
+            const username = query.from.username ? `@${query.from.username}` : '未设置用户名';
+            
+            try {
+                // 记录频道点击到数据库
+                const clickData = {
+                    user_id: userId,
+                    username: query.from.username,
+                    first_name: query.from.first_name,
+                    last_name: query.from.last_name,
+                    merchant_id: merchantId,
+                    merchant_name: merchant.teacher_name,
+                    channel_link: merchant.channel_link
+                };
+                
+                dbOperations.recordChannelClick(clickData);
+                
+                // 更新商家的频道点击计数
+                dbOperations.incrementMerchantChannelClicks(merchantId);
+                
+                console.log(`✅ 记录群内频道点击: 用户 ${fullName} (${username}) 点击了商家 ${merchant.teacher_name} 的频道`);
+                
+                // 通知老师（如果有绑定的user_id）
+                console.log(`🔍 检查商家绑定状态: ${merchant.teacher_name}, user_id: ${merchant.user_id || '未绑定'}`);
+                
+                if (merchant.user_id) {
+                    const notificationMessage = `🐥小鸡提醒：用户（${username}）通过管家查看了您的频道。`;
+                    
+                    console.log(`📤 正在发送频道点击通知给商家 ${merchant.teacher_name} (${merchant.user_id})`);
+                    
+                    try {
+                        await bot.sendMessage(merchant.user_id, notificationMessage);
+                        console.log(`✅ 成功发送频道点击通知给商家 ${merchant.teacher_name} (${merchant.user_id})`);
+                    } catch (error) {
+                        console.error(`❌ 发送频道点击通知失败: 商家 ${merchant.teacher_name} (${merchant.user_id})`);
+                        console.error(`   错误详情: ${error.message}`);
+                        console.error(`   错误代码: ${error.code || '未知'}`);
+                    }
+                } else {
+                    console.log(`⚠️ 商家 ${merchant.teacher_name} 未绑定user_id，无法发送频道点击通知`);
+                }
+                
+            } catch (error) {
+                console.error('记录群内频道点击失败:', error);
+            }
+            
+            // 回应callback
+            await bot.answerCallbackQuery(query.id, {
+                text: `正在打开 ${merchant.teacher_name} 老师的频道...`
+            });
+            
+            // 向用户私聊发送带有计数功能的频道信息
+            try {
+                const channelMessage = `🔗 ${merchant.teacher_name} 老师的频道：\n${merchant.channel_link}`;
+                
+                const channelOptions = {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '打开频道', url: merchant.channel_link }],
+                            [{ text: '预约上课', callback_data: `merchant_${merchantId}` }],
+                            [{ text: '返回榜单', url: 'https://t.me/xiaoji233' }]
+                        ]
+                    },
+                    disable_web_page_preview: false
+                };
+                
+                // 发送到用户私聊
+                await bot.sendMessage(userId, channelMessage, channelOptions);
+                console.log(`✅ 已向用户 ${fullName} 发送频道信息到私聊`);
+                
+            } catch (error) {
+                console.error(`❌ 发送频道信息到私聊失败: ${error.message}`);
+                // 如果私聊失败，可能是用户没有与机器人开始对话
+                await bot.answerCallbackQuery(query.id, {
+                    text: '请先私聊机器人后再点击此按钮',
+                    show_alert: true
+                });
+            }
+            
+            return;
+        }
 
         // 处理预约按钮点击
         if (data.startsWith('book_')) {

@@ -987,18 +987,15 @@ async function processApiRequest(pathname, method, data) {
                     }
                 }
                 
-                // 构建按钮，根据是否有频道链接决定是否显示"关注老师频道"按钮
+                // 构建按钮 - 群内发送时只显示两个按钮
                 const buttons = [
-                                            [{ text: '预约老师课程', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }]
+                    [{ text: '预约老师课程', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }]
                 ];
                 
-                // 如果商家有频道链接，添加"关注老师频道"按钮
+                // 如果商家有频道链接，添加"关注老师频道"按钮（使用callback方式）
                 if (merchant.channel_link && merchant.channel_link.trim()) {
-                    buttons.push([{ text: '关注老师频道', callback_data: `channel_${merchantId}` }]);
+                    buttons.push([{ text: '关注老师频道', callback_data: `group_channel_${merchantId}` }]);
                 }
-                
-                // 添加返回榜单按钮
-                buttons.push([{ text: '返回榜单', url: 'https://t.me/xiaoji233' }]);
                 
                 sendOptions.reply_markup = {
                     inline_keyboard: buttons

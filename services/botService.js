@@ -970,14 +970,23 @@ function initBotHandlers() {
                 console.log(`✅ 记录频道点击: 用户 ${fullName} (${username}) 点击了商家 ${merchant.teacher_name} 的频道`);
                 
                 // 通知老师（如果有绑定的user_id）
+                console.log(`🔍 检查商家绑定状态: ${merchant.teacher_name}, user_id: ${merchant.user_id || '未绑定'}`);
+                
                 if (merchant.user_id) {
                     const notificationMessage = `🐥小鸡提醒：用户（${username}）通过管家查看了您的频道。`;
                     
-                    bot.sendMessage(merchant.user_id, notificationMessage).catch(error => {
-                        console.log(`无法发送频道点击通知给商家 ${merchant.user_id}: ${error.message}`);
-                    });
+                    console.log(`📤 正在发送频道点击通知给商家 ${merchant.teacher_name} (${merchant.user_id})`);
                     
-                    console.log(`✅ 已通知商家 ${merchant.teacher_name} (${merchant.user_id}) 有用户查看了频道`);
+                    try {
+                        await bot.sendMessage(merchant.user_id, notificationMessage);
+                        console.log(`✅ 成功发送频道点击通知给商家 ${merchant.teacher_name} (${merchant.user_id})`);
+                    } catch (error) {
+                        console.error(`❌ 发送频道点击通知失败: 商家 ${merchant.teacher_name} (${merchant.user_id})`);
+                        console.error(`   错误详情: ${error.message}`);
+                        console.error(`   错误代码: ${error.code || '未知'}`);
+                    }
+                } else {
+                    console.log(`⚠️ 商家 ${merchant.teacher_name} 未绑定user_id，无法发送频道点击通知`);
                 }
                 
             } catch (error) {

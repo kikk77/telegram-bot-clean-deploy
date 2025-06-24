@@ -1097,7 +1097,16 @@ async function processApiRequest(pathname, method, data) {
                 if (sendOptions.reply_markup) {
                     photoOptions.reply_markup = sendOptions.reply_markup;
                 }
-                result = await bs.bot.sendPhoto(targetChatId, sendOptions.photo, photoOptions);
+                
+                // 如果是base64图片数据，转换为Buffer
+                let photoData = sendOptions.photo;
+                if (typeof photoData === 'string' && photoData.startsWith('data:image/')) {
+                    // 从base64 data URL中提取数据
+                    const base64Data = photoData.split(',')[1];
+                    photoData = Buffer.from(base64Data, 'base64');
+                }
+                
+                result = await bs.bot.sendPhoto(targetChatId, photoData, photoOptions);
             } else {
                 // 发送文本消息
                 const textOptions = {

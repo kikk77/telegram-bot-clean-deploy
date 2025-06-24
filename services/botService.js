@@ -404,7 +404,15 @@ async function sendMessageTemplate(chatId, template, replyToMessageId = null) {
 
         // 发送消息
         if (template.image_url) {
-            await bot.sendPhoto(chatId, template.image_url, {
+            // 如果是base64图片数据，转换为Buffer
+            let photoData = template.image_url;
+            if (typeof photoData === 'string' && photoData.startsWith('data:image/')) {
+                // 从base64 data URL中提取数据
+                const base64Data = photoData.split(',')[1];
+                photoData = Buffer.from(base64Data, 'base64');
+            }
+            
+            await bot.sendPhoto(chatId, photoData, {
                 caption: template.content,
                 parse_mode: 'HTML',
                 show_caption_above_media: true,
@@ -632,7 +640,15 @@ function initBotHandlers() {
                     // 如果商家有图片，发送图片消息；否则发送文字消息
                     let sentMessage;
                     if (merchant.image_url && merchant.image_url.trim()) {
-                        sentMessage = await bot.sendPhoto(chatId, merchant.image_url, {
+                        // 如果是base64图片数据，转换为Buffer
+                        let photoData = merchant.image_url;
+                        if (typeof photoData === 'string' && photoData.startsWith('data:image/')) {
+                            // 从base64 data URL中提取数据
+                            const base64Data = photoData.split(',')[1];
+                            photoData = Buffer.from(base64Data, 'base64');
+                        }
+                        
+                        sentMessage = await bot.sendPhoto(chatId, photoData, {
                             caption: merchantInfo,
                             parse_mode: 'HTML',
                             show_caption_above_media: true,

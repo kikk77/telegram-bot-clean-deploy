@@ -134,7 +134,7 @@ class DatabaseManager {
         console.log('当前数据库版本:', currentVersion);
         
         if (!currentVersion) {
-            this.setDbVersion('1.1.0');
+            this.setDbVersion('1.1.2');
             this.createAllTables();
         } else {
             this.migrateDatabase(currentVersion);
@@ -231,6 +231,7 @@ class DatabaseManager {
                 skill_kiss TEXT,
                 channel_link TEXT,
                 channel_clicks INTEGER DEFAULT 0,
+                image_url TEXT,
                 FOREIGN KEY (region_id) REFERENCES regions (id)
             );
         `);
@@ -429,7 +430,7 @@ class DatabaseManager {
         this.repairDataConsistency();
         
         // 更新到最新版本
-        this.setDbVersion('1.1.1'); // 升级版本号
+        this.setDbVersion('1.1.2'); // 升级版本号，强制触发image_url字段迁移
         console.log('数据库迁移完成');
     }
 

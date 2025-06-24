@@ -987,11 +987,21 @@ async function processApiRequest(pathname, method, data) {
                     }
                 }
                 
+                // 构建按钮，根据是否有频道链接决定是否显示"关注老师频道"按钮
+                const buttons = [
+                    [{ text: '出击！', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }]
+                ];
+                
+                // 如果商家有频道链接，添加"关注老师频道"按钮
+                if (merchant.channel_link && merchant.channel_link.trim()) {
+                    buttons.push([{ text: '关注老师频道', url: merchant.channel_link }]);
+                }
+                
+                // 添加返回榜单按钮
+                buttons.push([{ text: '返回榜单', url: 'https://t.me/xiaoji233' }]);
+                
                 sendOptions.reply_markup = {
-                    inline_keyboard: [
-                        [{ text: '出击！', url: `https://t.me/${botUsername}?start=merchant_${merchantId}` }],
-                        [{ text: '榜单', url: 'https://t.me/xiaoji233' }]
-                    ]
+                    inline_keyboard: buttons
                 };
 
                 // 如果有图片，添加图片

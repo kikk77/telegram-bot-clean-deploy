@@ -276,12 +276,7 @@ function handleApiRequest(req, res, pathname, method) {
     const parsedUrl = url.parse(req.url, true);
     const queryParams = parsedUrl.query || {};
     
-    // 检查是否是文件上传请求
-    const contentType = req.headers['content-type'] || '';
-    if (pathname === '/api/upload-image' && method === 'POST' && contentType.includes('multipart/form-data')) {
-        handleImageUploadRequest(req, res);
-        return;
-    }
+
     
     let body = '';
     
@@ -494,10 +489,7 @@ async function processApiRequest(pathname, method, data) {
         }
     }
     
-    // 图片上传API
-    if (pathname === '/api/upload-image' && method === 'POST') {
-        return await handleImageUpload(data);
-    }
+
 
     // 绑定码管理API
     if (pathname === '/api/bind-codes') {
@@ -1635,169 +1627,7 @@ function sendResponse(res, statusCode, data, contentType = 'application/json') {
     }
 }
 
-// 处理图片上传请求
-function handleImageUploadRequest(req, res) {
-    const chunks = [];
-    let totalSize = 0;
-    const maxSize = 10 * 1024 * 1024; // 10MB限制
-    
-    req.on('data', chunk => {
-        totalSize += chunk.length;
-        if (totalSize > maxSize) {
-            res.writeHead(413, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: '文件太大，最大支持10MB' }));
-            return;
-        }
-        chunks.push(chunk);
-    });
-    
-    req.on('end', async () => {
-        try {
-            const buffer = Buffer.concat(chunks);
-            const boundary = extractBoundary(req.headers['content-type']);
-            
-            if (!boundary) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: '无效的multipart请求' }));
-                return;
-            }
-            
-            const files = parseMultipartData(buffer, boundary);
-            const imageFile = files.find(file => file.name === 'image');
-            
-            if (!imageFile) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: '未找到图片文件' }));
-                return;
-            }
-            
-            const result = await saveImageFile(imageFile);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(result));
-            
-        } catch (error) {
-            console.error('图片上传处理失败:', error);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: error.message }));
-        }
-    });
-    
-    req.on('error', error => {
-        console.error('上传请求错误:', error);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: '上传请求失败' }));
-    });
-}
 
-// 提取multipart边界
-function extractBoundary(contentType) {
-    const match = contentType.match(/boundary=(.+)$/);
-    return match ? match[1] : null;
-}
-
-// 解析multipart数据
-function parseMultipartData(buffer, boundary) {
-    const files = [];
-    const boundaryBuffer = Buffer.from(`--${boundary}`);
-    const parts = [];
-    
-    let start = 0;
-    let pos = buffer.indexOf(boundaryBuffer, start);
-    
-    while (pos !== -1) {
-        if (start !== pos) {
-            parts.push(buffer.slice(start, pos));
-        }
-        start = pos + boundaryBuffer.length;
-        pos = buffer.indexOf(boundaryBuffer, start);
-    }
-    
-    for (const part of parts) {
-        if (part.length < 4) continue;
-        
-        const headerEnd = part.indexOf('\r\n\r\n');
-        if (headerEnd === -1) continue;
-        
-        const headers = part.slice(0, headerEnd).toString();
-        const data = part.slice(headerEnd + 4);
-        
-        // 移除结尾的\r\n
-        const fileData = data.slice(0, data.length - 2);
-        
-        const nameMatch = headers.match(/name="([^"]+)"/);
-        const filenameMatch = headers.match(/filename="([^"]+)"/);
-        const contentTypeMatch = headers.match(/Content-Type: ([^\r\n]+)/);
-        
-        if (nameMatch) {
-            files.push({
-                name: nameMatch[1],
-                filename: filenameMatch ? filenameMatch[1] : null,
-                contentType: contentTypeMatch ? contentTypeMatch[1] : 'application/octet-stream',
-                data: fileData
-            });
-        }
-    }
-    
-    return files;
-}
-
-// 保存图片文件
-async function saveImageFile(file) {
-    try {
-        // 检查文件类型
-        if (!file.contentType.startsWith('image/')) {
-            throw new Error('只支持图片文件');
-        }
-        
-        // 生成唯一文件名
-        const ext = getFileExtension(file.filename || '', file.contentType);
-        const filename = `${crypto.randomUUID()}${ext}`;
-        
-        // 确保uploads目录存在
-        const uploadsDir = path.join(__dirname, '..', 'uploads');
-        if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
-        }
-        
-        // 保存文件
-        const filePath = path.join(uploadsDir, filename);
-        fs.writeFileSync(filePath, file.data);
-        
-        // 返回访问URL
-        const imageUrl = `/uploads/${filename}`;
-        
-        console.log(`图片上传成功: ${filename}, 大小: ${file.data.length} bytes`);
-        
-        return {
-            success: true,
-            imageUrl: imageUrl,
-            filename: filename,
-            size: file.data.length
-        };
-        
-    } catch (error) {
-        console.error('保存图片失败:', error);
-        throw error;
-    }
-}
-
-// 获取文件扩展名
-function getFileExtension(filename, contentType) {
-    if (filename && filename.includes('.')) {
-        return path.extname(filename);
-    }
-    
-    const typeMap = {
-        'image/jpeg': '.jpg',
-        'image/jpg': '.jpg',
-        'image/png': '.png',
-        'image/gif': '.gif',
-        'image/webp': '.webp',
-        'image/bmp': '.bmp'
-    };
-    
-    return typeMap[contentType] || '.jpg';
-}
 
 module.exports = {
     createHttpServer,

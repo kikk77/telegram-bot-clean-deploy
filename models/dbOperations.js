@@ -526,7 +526,7 @@ const dbOperations = {
             data.skillBlow, 
             data.skillDo, 
             data.skillKiss, 
-            data.imageUrl,
+            data.imageData,
             id
         );
     },

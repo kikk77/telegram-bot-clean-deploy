@@ -509,7 +509,8 @@ const dbOperations = {
                 skill_wash = ?, 
                 skill_blow = ?, 
                 skill_do = ?, 
-                skill_kiss = ? 
+                skill_kiss = ?,
+                image_url = ?
             WHERE id = ?
         `);
         return stmt.run(
@@ -525,6 +526,7 @@ const dbOperations = {
             data.skillBlow, 
             data.skillDo, 
             data.skillKiss, 
+            data.imageUrl,
             id
         );
     },

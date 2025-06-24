@@ -439,7 +439,7 @@ class DatabaseManager {
             const tableInfo = this.db.prepare("PRAGMA table_info(merchants)").all();
             const columnNames = tableInfo.map(col => col.name);
             
-            const requiredColumns = ['advantages', 'disadvantages', 'price1', 'price2', 'skill_wash', 'skill_blow', 'skill_do', 'skill_kiss', 'channel_link', 'channel_clicks'];
+            const requiredColumns = ['advantages', 'disadvantages', 'price1', 'price2', 'skill_wash', 'skill_blow', 'skill_do', 'skill_kiss', 'channel_link', 'channel_clicks', 'image_url'];
             
             for (const column of requiredColumns) {
                 if (!columnNames.includes(column)) {

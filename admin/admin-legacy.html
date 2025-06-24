@@ -558,6 +558,25 @@
                             </div>
                         </div>
 
+                        <!-- 图片管理 -->
+                        <div class="card" style="margin-bottom: 20px;">
+                            <h4>🖼️ 图片管理</h4>
+                            <div class="form-group">
+                                <label>商家图片：</label>
+                                <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                    <div style="flex: 1;">
+                                        <input type="file" id="editImageFile" accept="image/*" onchange="handleImageUpload(event)" style="margin-bottom: 10px;">
+                                        <input type="text" id="editImageUrl" placeholder="或直接输入图片URL" onchange="handleImageUrlChange(event)">
+                                        <small>支持上传图片文件或输入图片URL，图片将显示在商家信息上方</small>
+                                    </div>
+                                    <button type="button" class="btn btn-small btn-warning" onclick="clearMerchantImage()" style="white-space: nowrap;">清除图片</button>
+                                </div>
+                                <div id="imagePreview" style="margin-top: 10px; display: none;">
+                                    <img id="previewImage" style="max-width: 200px; max-height: 200px; border-radius: 5px; border: 1px solid #ddd;">
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- 绑定码管理 -->
                         <div class="card" style="margin-bottom: 20px;">
                             <h4>🔗 绑定码管理</h4>
@@ -1682,6 +1701,14 @@
             // 更新地区前缀显示
             updateRegionPrefix();
             
+            // 填充图片信息
+            document.getElementById('editImageUrl').value = merchant.image_url || '';
+            if (merchant.image_url) {
+                showImagePreview(merchant.image_url);
+            } else {
+                hideImagePreview();
+            }
+            
             // 存储原始联系方式用于"使用绑定联系方式"功能
             window.currentMerchantBindContact = merchant.contact;
             
@@ -1761,6 +1788,95 @@
             }
         }
 
+        // 处理图片上传
+        async function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // 检查文件类型
+            if (!file.type.startsWith('image/')) {
+                showAlert('请选择图片文件', 'error');
+                return;
+            }
+
+            // 检查文件大小（限制为5MB）
+            if (file.size > 5 * 1024 * 1024) {
+                showAlert('图片文件不能超过5MB', 'error');
+                return;
+            }
+
+            try {
+                showLoading();
+                
+                // 创建FormData对象
+                const formData = new FormData();
+                formData.append('image', file);
+
+                // 上传图片
+                const response = await fetch('/api/upload-image', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('图片上传失败');
+                }
+
+                const result = await response.json();
+                if (result.success) {
+                    // 设置图片URL
+                    document.getElementById('editImageUrl').value = result.imageUrl;
+                    showImagePreview(result.imageUrl);
+                    showAlert('图片上传成功', 'success');
+                } else {
+                    throw new Error(result.error || '图片上传失败');
+                }
+            } catch (error) {
+                console.error('图片上传失败:', error);
+                showAlert('图片上传失败: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 处理图片URL变化
+        function handleImageUrlChange(event) {
+            const url = event.target.value.trim();
+            if (url) {
+                showImagePreview(url);
+            } else {
+                hideImagePreview();
+            }
+        }
+
+        // 显示图片预览
+        function showImagePreview(imageUrl) {
+            const preview = document.getElementById('imagePreview');
+            const img = document.getElementById('previewImage');
+            
+            img.src = imageUrl;
+            img.onload = function() {
+                preview.style.display = 'block';
+            };
+            img.onerror = function() {
+                preview.style.display = 'none';
+                showAlert('图片加载失败，请检查URL是否正确', 'warning');
+            };
+        }
+
+        // 隐藏图片预览
+        function hideImagePreview() {
+            document.getElementById('imagePreview').style.display = 'none';
+        }
+
+        // 清除商家图片
+        function clearMerchantImage() {
+            document.getElementById('editImageFile').value = '';
+            document.getElementById('editImageUrl').value = '';
+            hideImagePreview();
+            showAlert('图片已清除', 'info');
+        }
+
         // 预览商家信息
         function previewMerchantInfo() {
             const regionSelect = document.getElementById('editRegionId');
@@ -1777,6 +1893,7 @@
             const skillBlow = document.getElementById('editBlow').value || '未填写';
             const skillDo = document.getElementById('editDo').value || '未填写';
             const skillKiss = document.getElementById('editKiss').value || '未填写';
+            const imageUrl = document.getElementById('editImageUrl').value || '';
 
             const preview = `地区：#${regionName}              艺名：${teacherName}
 优点：${advantages}
@@ -1790,7 +1907,19 @@
 ❤️做:${skillDo}
 🐍吻:${skillKiss}`;
 
-            document.getElementById('merchantInfoPreview').textContent = preview;
+            const previewContainer = document.getElementById('merchantInfoPreview');
+            
+            // 如果有图片，显示图片预览
+            if (imageUrl.trim()) {
+                previewContainer.innerHTML = `
+                    <div style="margin-bottom: 15px;">
+                        <img src="${imageUrl}" style="max-width: 200px; max-height: 200px; border-radius: 5px; border: 1px solid #ddd;" onerror="this.style.display='none'">
+                    </div>
+                    <pre style="white-space: pre-line; font-family: monospace; margin: 0;">${preview}</pre>
+                `;
+            } else {
+                previewContainer.innerHTML = `<pre style="white-space: pre-line; font-family: monospace; margin: 0;">${preview}</pre>`;
+            }
         }
 
         // 更新商家信息
@@ -1811,6 +1940,7 @@
             const skillBlow = document.getElementById('editBlow').value;
             const skillDo = document.getElementById('editDo').value;
             const skillKiss = document.getElementById('editKiss').value;
+            const imageUrl = document.getElementById('editImageUrl').value;
 
             try {
                 showLoading();
@@ -1827,7 +1957,8 @@
                     skillWash,
                     skillBlow,
                     skillDo,
-                    skillKiss
+                    skillKiss,
+                    imageUrl
                 });
                 showAlert('商家信息模板更新成功');
                 closeMerchantEditModal();

@@ -422,6 +422,9 @@ class DatabaseManager {
         // 检查是否需要创建orders表
         this.migrateOrdersTable();
         
+        // 检查是否需要创建channel_clicks表
+        this.migrateChannelClicksTable();
+        
         // 新增：强制修复数据一致性问题（针对显示都是2的问题）
         this.repairDataConsistency();
         
@@ -575,6 +578,34 @@ class DatabaseManager {
             }
         } catch (error) {
             console.error('迁移orders表失败:', error);
+        }
+    }
+
+    migrateChannelClicksTable() {
+        try {
+            // 检查channel_clicks表是否存在
+            const tablesResult = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='channel_clicks'").get();
+            
+            if (!tablesResult) {
+                console.log('创建channel_clicks表...');
+                this.db.exec(`
+                    CREATE TABLE channel_clicks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        username TEXT,
+                        first_name TEXT,
+                        last_name TEXT,
+                        merchant_id INTEGER NOT NULL,
+                        merchant_name TEXT,
+                        channel_link TEXT,
+                        clicked_at INTEGER DEFAULT (strftime('%s', 'now')),
+                        FOREIGN KEY (merchant_id) REFERENCES merchants (id)
+                    );
+                `);
+                console.log('channel_clicks表创建完成');
+            }
+        } catch (error) {
+            console.error('迁移channel_clicks表失败:', error);
         }
     }
 

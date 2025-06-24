@@ -1049,7 +1049,7 @@ function initBotHandlers() {
         }
 
 
-
+        
         // 处理预约按钮点击
         if (data.startsWith('book_')) {
             const parts = data.split('_');

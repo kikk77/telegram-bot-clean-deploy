@@ -490,7 +490,7 @@ async function processApiRequest(pathname, method, data) {
     }
     
 
-
+    
     // 绑定码管理API
     if (pathname === '/api/bind-codes') {
         if (method === 'GET') {

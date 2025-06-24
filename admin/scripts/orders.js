@@ -988,7 +988,7 @@ class OptimizedOrdersManager {
                 
                 element.textContent = displayValue;
                 console.log(`📊 ${elementId} 更新为:`, displayValue);
-            } else {
+                } else {
                 console.error(`📊 找不到元素: ${elementId}`);
             }
         });

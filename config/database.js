@@ -23,18 +23,18 @@ class DatabaseManager {
                 console.log(`📁 STAGING环境使用本地数据目录: ${dataDir}`);
             } else {
                 // production环境才检查Volume权限
-                try {
-                    if (fs.existsSync(volumeDataDir)) {
-                        fs.accessSync(volumeDataDir, fs.constants.W_OK);
-                        dataDir = volumeDataDir; // Volume可用
-                        console.log(`📁 使用Volume数据目录: ${dataDir}`);
-                    } else {
-                        throw new Error('Volume目录不存在');
-                    }
-                } catch (error) {
-                    console.log(`⚠️ Volume权限问题，使用应用目录: ${error.message}`);
+            try {
+                if (fs.existsSync(volumeDataDir)) {
+                    fs.accessSync(volumeDataDir, fs.constants.W_OK);
+                    dataDir = volumeDataDir; // Volume可用
+                    console.log(`📁 使用Volume数据目录: ${dataDir}`);
+                } else {
+                    throw new Error('Volume目录不存在');
+                }
+            } catch (error) {
+                console.log(`⚠️ Volume权限问题，使用应用目录: ${error.message}`);
                     dataDir = path.join(__dirname, '..', 'app-data'); // 使用应用目录
-                    console.log(`📁 使用应用数据目录: ${dataDir}`);
+                console.log(`📁 使用应用数据目录: ${dataDir}`);
                 }
             }
         } else {

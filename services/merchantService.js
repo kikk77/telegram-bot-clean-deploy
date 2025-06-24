@@ -241,6 +241,9 @@ class MerchantService {
             const region = dbOperations.getRegionById(merchant.region_id);
             const regionName = region ? region.name : 'xx';
             
+            // 使用EAV模式获取商家技能信息
+            const skillsDisplay = dbOperations.formatMerchantSkillsDisplay(merchant.id);
+            
             return `地区：#${regionName}              艺名：${merchant.teacher_name || '未填写'}
 优点：${merchant.advantages || '未填写'}
 缺点：${merchant.disadvantages || '未填写'}
@@ -248,10 +251,7 @@ class MerchantService {
 联系：${merchant.contact || '未填写'}
 
 老师💃自填基本功：
-💦洗:${merchant.skill_wash || '未填写'}
-👄吹:${merchant.skill_blow || '未填写'}
-❤️做:${merchant.skill_do || '未填写'}
-🐍吻:${merchant.skill_kiss || '未填写'}`;
+${skillsDisplay}`;
             
         } catch (error) {
             console.error('获取商家信息模板失败:', error);

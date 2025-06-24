@@ -12,12 +12,13 @@ class OrderStatusService {
             const config = this.eav.getEntity(status, 'order_status_config');
             if (!config) {
                 // 如果EAV中没有找到，返回默认配置
+                console.log(`订单状态 ${status} 的配置不在EAV中，使用默认配置`);
                 return this.getDefaultStatusConfig(status);
             }
             return config;
         } catch (error) {
             console.error(`获取订单状态配置失败 (${status}):`, error);
-            return this.getDefaultStatusConfig(status);
+            throw error;
         }
     }
 
@@ -27,7 +28,7 @@ class OrderStatusService {
             return this.eav.getAllEntities('order_status_config');
         } catch (error) {
             console.error('获取所有订单状态配置失败:', error);
-            return this.getDefaultAllStatusConfigs();
+            throw error;
         }
     }
 

@@ -12,6 +12,7 @@ class MerchantSkillService {
             const skills = this.eav.getEntity(`merchant_${merchantId}`, 'merchant_skills');
             if (!skills) {
                 // 如果EAV中没有找到，尝试从原始表中迁移
+                console.log(`商家 ${merchantId} 的技能数据不在EAV中，尝试从传统表迁移...`);
                 return this.migrateMerchantSkillsFromLegacy(merchantId);
             }
             return skills;
@@ -28,9 +29,23 @@ class MerchantSkillService {
             const skillsData = this.eav.getBatchEntities(entityKeys, 'merchant_skills');
             
             const result = {};
+            const missingIds = [];
+            
             for (const merchantId of merchantIds) {
                 const entityKey = `merchant_${merchantId}`;
-                result[merchantId] = skillsData[entityKey] || this.getDefaultSkills();
+                if (skillsData[entityKey]) {
+                    result[merchantId] = skillsData[entityKey];
+                } else {
+                    missingIds.push(merchantId);
+                }
+            }
+            
+            // 对于EAV中没有的数据，从传统表迁移
+            if (missingIds.length > 0) {
+                console.log(`${missingIds.length} 个商家的技能数据不在EAV中，从传统表迁移...`);
+                for (const merchantId of missingIds) {
+                    result[merchantId] = this.migrateMerchantSkillsFromLegacy(merchantId);
+                }
             }
             
             return result;
@@ -240,6 +255,8 @@ class MerchantSkillService {
             kiss: '未填写'
         };
     }
+
+
 
     // 同步技能数据到传统表结构 (向后兼容)
     syncSkillsToLegacyTable(merchantId) {

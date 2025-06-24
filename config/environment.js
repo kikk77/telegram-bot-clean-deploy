@@ -182,6 +182,26 @@ async function startApp() {
         // 初始化基础数据（仅地区配置）
         initBasicData();
         
+        // 运行自动数据迁移检查（确保EAV兼容性）
+        try {
+            console.log('🔄 执行自动数据迁移检查...');
+            const { runAutoMigrationOnStartup } = require('../utils/autoMigration');
+            const migrationSuccess = await runAutoMigrationOnStartup();
+            
+            if (migrationSuccess) {
+                console.log('✅ 自动数据迁移检查完成');
+            } else {
+                console.warn('⚠️ 自动数据迁移检查失败，但服务将继续运行');
+            }
+        } catch (migrationError) {
+            console.error('❌ 自动数据迁移检查出错:', migrationError);
+            if (isProduction()) {
+                console.warn('⚠️ 生产环境迁移检查失败，服务将继续运行');
+            } else {
+                console.warn('⚠️ 迁移检查失败，但开发环境将继续运行');
+            }
+        }
+        
         // HTTP服务器已在app.js中启动，这里不需要重复创建
         console.log('🌐 HTTP服务器使用app.js中的实例');
         

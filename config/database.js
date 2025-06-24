@@ -411,6 +411,19 @@ class DatabaseManager {
             );
         `);
 
+        // 订单状态日志表 - EAV系统需要
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS order_status_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                from_status TEXT NOT NULL,
+                to_status TEXT NOT NULL,
+                updated_by TEXT DEFAULT 'system',
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (order_id) REFERENCES orders(id)
+            );
+        `);
+
         console.log('所有数据表创建完成');
     }
 
@@ -425,6 +438,9 @@ class DatabaseManager {
         
         // 检查是否需要创建channel_clicks表
         this.migrateChannelClicksTable();
+        
+        // 检查是否需要创建order_status_logs表（EAV系统需要）
+        this.migrateOrderStatusLogsTable();
         
         // 新增：强制修复数据一致性问题（针对显示都是2的问题）
         this.repairDataConsistency();
@@ -607,6 +623,31 @@ class DatabaseManager {
             }
         } catch (error) {
             console.error('迁移channel_clicks表失败:', error);
+        }
+    }
+
+    migrateOrderStatusLogsTable() {
+        try {
+            // 检查order_status_logs表是否存在
+            const tablesResult = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='order_status_logs'").get();
+            
+            if (!tablesResult) {
+                console.log('创建order_status_logs表...');
+                this.db.exec(`
+                    CREATE TABLE order_status_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        order_id INTEGER NOT NULL,
+                        from_status TEXT NOT NULL,
+                        to_status TEXT NOT NULL,
+                        updated_by TEXT DEFAULT 'system',
+                        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                        FOREIGN KEY (order_id) REFERENCES orders(id)
+                    );
+                `);
+                console.log('order_status_logs表创建完成');
+            }
+        } catch (error) {
+            console.error('迁移order_status_logs表失败:', error);
         }
     }
 

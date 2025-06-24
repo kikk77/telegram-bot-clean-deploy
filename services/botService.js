@@ -610,10 +610,7 @@ function initBotHandlers() {
                                        `缺点：${merchant.disadvantages || '未填写'}\n` +
                                        `价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp\n\n` +
                                        `老师💃自填基本功：\n` +
-                                       `💦洗:${merchant.skill_wash || '未填写'}\n` +
-                                       `👄吹:${merchant.skill_blow || '未填写'}\n` +
-                                       `❤️做:${merchant.skill_do || '未填写'}\n` +
-                                       `🐍吻:${merchant.skill_kiss || '未填写'}`;
+                                                   dbOperations.formatMerchantSkillsDisplay(merchant.id);
                     
                     // 构建按钮 - 三个标准按钮
                     const buttons = [

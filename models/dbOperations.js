@@ -1,5 +1,25 @@
 const { db, cache } = require('../config/database');
 
+// 初始化EAV服务 (延迟加载避免循环依赖)
+let merchantSkillService = null;
+let orderStatusService = null;
+
+function getMerchantSkillService() {
+    if (!merchantSkillService) {
+        const MerchantSkillService = require('../services/merchantSkillService');
+        merchantSkillService = new MerchantSkillService(db);
+    }
+    return merchantSkillService;
+}
+
+function getOrderStatusService() {
+    if (!orderStatusService) {
+        const OrderStatusService = require('../services/orderStatusService');
+        orderStatusService = new OrderStatusService(db);
+    }
+    return orderStatusService;
+}
+
 // 数据库操作函数
 const dbOperations = {
     // 绑定码操作 - 统一的绑定码管理逻辑
@@ -496,39 +516,62 @@ const dbOperations = {
     },
 
     updateMerchantTemplate(id, data) {
-        const stmt = db.prepare(`
-            UPDATE merchants SET 
-                teacher_name = ?, 
-                region_id = ?, 
-                contact = ?, 
-                channel_link = ?,
-                advantages = ?, 
-                disadvantages = ?, 
-                price1 = ?, 
-                price2 = ?, 
-                skill_wash = ?, 
-                skill_blow = ?, 
-                skill_do = ?, 
-                skill_kiss = ?,
-                image_url = ?
-            WHERE id = ?
-        `);
-        return stmt.run(
-            data.teacherName, 
-            data.regionId, 
-            data.contact, 
-            data.channelLink,
-            data.advantages, 
-            data.disadvantages, 
-            data.price1, 
-            data.price2, 
-            data.skillWash, 
-            data.skillBlow, 
-            data.skillDo, 
-            data.skillKiss, 
-            data.imageData,
-            id
-        );
+        const transaction = db.transaction(() => {
+            // 更新基础商家信息
+            const stmt = db.prepare(`
+                UPDATE merchants SET 
+                    teacher_name = ?, 
+                    region_id = ?, 
+                    contact = ?, 
+                    channel_link = ?,
+                    advantages = ?, 
+                    disadvantages = ?, 
+                    price1 = ?, 
+                    price2 = ?, 
+                    skill_wash = ?, 
+                    skill_blow = ?, 
+                    skill_do = ?, 
+                    skill_kiss = ?,
+                    image_url = ?
+                WHERE id = ?
+            `);
+            
+            const result = stmt.run(
+                data.teacherName, 
+                data.regionId, 
+                data.contact, 
+                data.channelLink,
+                data.advantages, 
+                data.disadvantages, 
+                data.price1, 
+                data.price2, 
+                data.skillWash, 
+                data.skillBlow, 
+                data.skillDo, 
+                data.skillKiss, 
+                data.imageData,
+                id
+            );
+            
+            // 同时更新EAV中的技能数据
+            try {
+                const skillService = getMerchantSkillService();
+                const skillData = {
+                    wash: data.skillWash || '未填写',
+                    blow: data.skillBlow || '未填写',
+                    do: data.skillDo || '未填写',
+                    kiss: data.skillKiss || '未填写'
+                };
+                skillService.updateMerchantSkills(id, skillData);
+            } catch (error) {
+                console.error(`更新商家 ${id} 的EAV技能数据失败:`, error);
+                // 不阻断主流程，仅记录错误
+            }
+            
+            return result;
+        });
+        
+        return transaction();
     },
 
     toggleMerchantStatus(id) {
@@ -1348,9 +1391,27 @@ const dbOperations = {
         return stmt.run(reportContent, new Date().toISOString(), id);
     },
 
-    updateOrderStatus(id, status) {
-        const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?');
-        return stmt.run(status, Math.floor(Date.now() / 1000), id);
+    updateOrderStatus(id, status, updatedBy = 'system') {
+        const transaction = db.transaction(() => {
+            // 使用EAV状态服务进行状态流转
+            try {
+                const statusService = getOrderStatusService();
+                const result = statusService.transitionStatus(id, status, updatedBy);
+                if (!result) {
+                    // 如果EAV服务失败，回退到直接更新
+                    const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?');
+                    return stmt.run(status, Math.floor(Date.now() / 1000), id);
+                }
+                return { changes: 1 }; // 模拟successful result
+            } catch (error) {
+                console.error(`使用EAV状态服务更新失败，回退到直接更新: ${error.message}`);
+                // 回退到直接数据库更新
+                const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?');
+                return stmt.run(status, Math.floor(Date.now() / 1000), id);
+            }
+        });
+        
+        return transaction();
     },
 
     // 更新订单多个字段
@@ -1565,6 +1626,82 @@ const dbOperations = {
         cache.set('active_merchants', null);
         
         return result;
+    }
+};
+
+// 添加EAV相关方法到导出对象
+dbOperations.getMerchantSkills = function(merchantId) {
+    try {
+        const skillService = getMerchantSkillService();
+        return skillService.getMerchantSkills(merchantId);
+    } catch (error) {
+        console.error(`获取商家技能失败 (merchantId: ${merchantId}):`, error);
+        return { wash: '未填写', blow: '未填写', do: '未填写', kiss: '未填写' };
+    }
+};
+
+dbOperations.getBatchMerchantSkills = function(merchantIds) {
+    try {
+        const skillService = getMerchantSkillService();
+        return skillService.getBatchMerchantSkills(merchantIds);
+    } catch (error) {
+        console.error('批量获取商家技能失败:', error);
+        const result = {};
+        for (const merchantId of merchantIds) {
+            result[merchantId] = { wash: '未填写', blow: '未填写', do: '未填写', kiss: '未填写' };
+        }
+        return result;
+    }
+};
+
+dbOperations.formatMerchantSkillsDisplay = function(merchantId) {
+    try {
+        const skillService = getMerchantSkillService();
+        return skillService.formatSkillsDisplay(merchantId);
+    } catch (error) {
+        console.error(`格式化商家技能显示失败 (merchantId: ${merchantId}):`, error);
+        return '💦洗:未填写\n👄吹:未填写\n❤️做:未填写\n🐍吻:未填写';
+    }
+};
+
+dbOperations.getOrderStatusConfig = function(status) {
+    try {
+        const statusService = getOrderStatusService();
+        return statusService.getStatusDisplayInfo(status);
+    } catch (error) {
+        console.error(`获取订单状态配置失败 (status: ${status}):`, error);
+        return { status, name: status, description: '未知状态', color: '#808080' };
+    }
+};
+
+dbOperations.canTransitionOrderStatus = function(currentStatus, targetStatus) {
+    try {
+        const statusService = getOrderStatusService();
+        return statusService.canTransitionTo(currentStatus, targetStatus);
+    } catch (error) {
+        console.error(`检查状态流转失败 (${currentStatus} -> ${targetStatus}):`, error);
+        return true; // 默认允许，兼容原逻辑
+    }
+};
+
+dbOperations.handleTimeoutOrders = function() {
+    try {
+        const statusService = getOrderStatusService();
+        return statusService.handleTimeoutOrders();
+    } catch (error) {
+        console.error('处理超时订单失败:', error);
+        return 0;
+    }
+};
+
+// 数据迁移相关方法
+dbOperations.migrateAllMerchantSkillsToEAV = function() {
+    try {
+        const skillService = getMerchantSkillService();
+        return skillService.migrateAllMerchantSkills();
+    } catch (error) {
+        console.error('迁移商家技能到EAV失败:', error);
+        return 0;
     }
 };
 

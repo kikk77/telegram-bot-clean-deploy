@@ -13,7 +13,8 @@
     "status": "ps aux | grep 'node app.js' | grep -v grep",
     "db:backup": "node utils/backupDatabase.js backup",
     "db:restore": "node utils/backupDatabase.js restore",
-    "db:backup-scheduled": "node utils/backupDatabase.js scheduled"
+    "db:backup-scheduled": "node utils/backupDatabase.js scheduled",
+    "migrate:eav": "node scripts/migrateToEAV.js"
   },
   "engines": {
     "node": ">=18.0.0",

@@ -995,10 +995,7 @@ async function processApiRequest(pathname, method, data) {
 价格：${merchant.price1 || '未填写'}p              ${merchant.price2 || '未填写'}pp
 
 老师💃自填基本功：
-💦洗:${merchant.skill_wash || '未填写'}
-👄吹:${merchant.skill_blow || '未填写'}
-❤️做:${merchant.skill_do || '未填写'}
-🐍吻:${merchant.skill_kiss || '未填写'}`;
+${dbOperations.formatMerchantSkillsDisplay(merchant.id)}`;
 
                 // 添加跳转到私聊的按钮
                 let botUsername;

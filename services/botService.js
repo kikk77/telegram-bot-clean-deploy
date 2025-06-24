@@ -984,10 +984,27 @@ function initBotHandlers() {
                 console.error('记录频道点击失败:', error);
             }
             
-            // 使用answerCallbackQuery直接打开链接
+            // 回应callback并发送包含频道链接的消息
             await bot.answerCallbackQuery(query.id, {
-                text: `正在打开 ${merchant.teacher_name} 老师的频道...`,
-                url: merchant.channel_link
+                text: `正在打开 ${merchant.teacher_name} 老师的频道...`
+            });
+            
+            // 发送包含频道链接的消息，用户点击链接直接跳转
+            const channelMessage = `🔗 ${merchant.teacher_name} 老师的频道：\n${merchant.channel_link}`;
+            
+            const channelOptions = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🔗 打开频道', url: merchant.channel_link }]
+                    ]
+                },
+                disable_web_page_preview: false
+            };
+            
+            // 使用不删除消息的方式发送
+            await sendMessageWithoutDelete(chatId, channelMessage, channelOptions, 'channel_link', {
+                merchantId: merchantId,
+                channelLink: merchant.channel_link
             });
             return;
         }

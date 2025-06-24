@@ -984,19 +984,11 @@ function initBotHandlers() {
                 console.error('记录频道点击失败:', error);
             }
             
-            // 发送频道链接给用户
-            const channelMessage = `🔗 ${merchant.teacher_name} 老师的频道链接：\n\n${merchant.channel_link}\n\n点击链接即可访问老师的频道！`;
-            
-            const channelOptions = {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '打开频道', url: merchant.channel_link }],
-                        [{ text: '返回', callback_data: `attack_${merchantId}` }]
-                    ]
-                }
-            };
-            
-            await bot.sendMessage(chatId, channelMessage, channelOptions);
+            // 使用answerCallbackQuery直接打开链接
+            await bot.answerCallbackQuery(query.id, {
+                text: `正在打开 ${merchant.teacher_name} 老师的频道...`,
+                url: merchant.channel_link
+            });
             return;
         }
 
